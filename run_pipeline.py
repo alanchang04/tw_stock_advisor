@@ -49,7 +49,7 @@ def mode_init(lookback_days: int = 365):
     # Step 2: 只取前 100 支主要股票做初始化（避免太久）
     # 正式使用時可移除這個限制
     all_stocks = df_stocks["stock_id"].tolist()
-    target_stocks = all_stocks[:100]
+    target_stocks = all_stocks
     logger.info(f"Step 2/3 — 抓取 {len(target_stocks)} 支股票的歷史股價")
 
     start = (date.today() - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
