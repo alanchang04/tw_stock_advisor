@@ -26,6 +26,7 @@ class DBConfig:
 class APIConfig:
     FINMIND_TOKEN    = os.getenv("FINMIND_TOKEN", "")
     ANTHROPIC_KEY    = os.getenv("ANTHROPIC_API_KEY", "")
+    GEMINI_KEY       = os.getenv("GEMINI_API_KEY", "")
     TELEGRAM_TOKEN   = os.getenv("TELEGRAM_BOT_TOKEN", "")
     TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 

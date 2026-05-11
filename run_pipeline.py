@@ -23,6 +23,7 @@ from data_pipeline.fetchers.finmind_fetcher import (
 from data_pipeline.scrapers.moneydj_scraper import run_industry_scraper
 from data_pipeline.analysis.technical import run_technical_analysis
 from data_pipeline.analysis.sector_momentum import run_sector_momentum
+from agent.daily_runner import run_daily_recommendation
 from config.settings import ScheduleConfig
 
 # 設定 log 輸出到檔案
@@ -49,7 +50,7 @@ def mode_init(lookback_days: int = 365):
     # Step 2: 只取前 100 支主要股票做初始化（避免太久）
     # 正式使用時可移除這個限制
     all_stocks = df_stocks["stock_id"].tolist()
-    target_stocks = all_stocks
+    target_stocks = all_stocks[:100]
     logger.info(f"Step 2/3 — 抓取 {len(target_stocks)} 支股票的歷史股價")
 
     start = (date.today() - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
@@ -143,7 +144,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="台股資料 Pipeline")
     parser.add_argument(
         "--mode",
-        choices=["init", "daily", "industry", "technical", "sector", "schedule"],
+        choices=["init", "daily", "industry", "technical", "sector", "recommend", "schedule"],
         default="daily",
         help="執行模式",
     )
@@ -165,5 +166,7 @@ if __name__ == "__main__":
         run_technical_analysis()
     elif args.mode == "sector":
         run_sector_momentum()
+    elif args.mode == "recommend":
+        run_daily_recommendation()
     elif args.mode == "schedule":
         mode_schedule()

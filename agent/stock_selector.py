@@ -1,0 +1,180 @@
+"""
+agent/stock_selector.py
+
+從資料庫篩選出今日候選股票：
+  1. 取族群輪動熱度前 N 產業
+  2. 從這些產業撈出技術訊號正面的股票
+  3. 加入籌碼面過濾
+  4. 回傳候選股票清單供 LLM 分析
+"""
+import pandas as pd
+from datetime import date, timedelta
+from loguru import logger
+from sqlalchemy import text
+
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+from database.connection import get_session
+
+
+# 排除非個股的產業類別（ETF、指數等）
+EXCLUDE_INDUSTRIES = {
+    "ETF", "ETN", "上櫃ETF", "指數投資證券(ETN)",
+    "上櫃指數股票型基金(ETF)", "受益憑證", "存託憑證",
+}
+
+# 技術面篩選條件
+MIN_RSI    = 40    # RSI 下限（避免超賣反彈不穩）
+MAX_RSI    = 75    # RSI 上限（避免超買）
+MIN_CLOSE  = 10    # 最低股價（過濾仙股）
+MIN_VOLUME = 500   # 最低成交量（張）
+
+
+def get_hot_sectors(top_n: int = 5, min_stocks: int = 10) -> list[str]:
+    """
+    取今日熱度前 N 個產業（排除 ETF 類、且族群股票數要夠）
+    """
+    today = date.today()
+    # 往前找最近一筆有資料的日期
+    with get_session() as session:
+        result = session.execute(text("""
+            SELECT sm.industry_code, i.name_zh,
+                   sm.avg_change_pct, sm.momentum_score, sm.total_count
+            FROM sector_momentum sm
+            JOIN industries i ON i.code = sm.industry_code
+            WHERE sm.calc_date = (
+                SELECT MAX(calc_date) FROM sector_momentum
+            )
+            AND sm.total_count >= :min_stocks
+            ORDER BY sm.momentum_score DESC
+            LIMIT 20
+        """), {"min_stocks": min_stocks})
+        rows = result.fetchall()
+        cols = list(result.keys())
+
+    df = pd.DataFrame(rows, columns=cols)
+    if df.empty:
+        logger.warning("sector_momentum 沒有資料，請先跑 --mode sector")
+        return []
+
+    # 過濾 ETF 類
+    df = df[~df["name_zh"].isin(EXCLUDE_INDUSTRIES)]
+    df = df[~df["industry_code"].isin(EXCLUDE_INDUSTRIES)]
+
+    hot = df.head(top_n)
+    logger.info(f"熱門產業 Top {top_n}：")
+    for _, row in hot.iterrows():
+        logger.info(
+            f"  {row['name_zh']} | 漲幅 {row['avg_change_pct']:.2f}% "
+            f"| 熱度 {row['momentum_score']:.3f} | {row['total_count']} 支"
+        )
+
+    return hot["industry_code"].tolist()
+
+
+def get_candidate_stocks(
+    industry_codes: list[str],
+    top_n: int = 20,
+) -> pd.DataFrame:
+    """
+    從熱門產業中篩選技術面 + 籌碼面正面的候選股票
+    """
+    if not industry_codes:
+        return pd.DataFrame()
+
+    # 最近交易日
+    recent_date = date.today() - timedelta(days=5)
+
+    placeholders = ",".join([f"'{c}'" for c in industry_codes])
+
+    with get_session() as session:
+        result = session.execute(text(f"""
+            SELECT
+                s.stock_id,
+                s.stock_name,
+                i.name_zh        AS industry,
+                p.close,
+                p.change_pct,
+                p.volume,
+                t.ma5,
+                t.ma20,
+                t.ma60,
+                t.rsi14,
+                t.macd_hist,
+                t.signal_ma_cross,
+                t.signal_breakout,
+                COALESCE(inst.total_net, 0)   AS inst_net,
+                COALESCE(inst.foreign_net, 0) AS foreign_net
+            FROM stock_industry_map m
+            JOIN stocks s         ON s.stock_id = m.stock_id
+            JOIN industries i     ON i.code = m.industry_code
+            JOIN daily_prices p   ON p.stock_id = m.stock_id
+                AND p.trade_date = (
+                    SELECT MAX(trade_date) FROM daily_prices
+                    WHERE stock_id = m.stock_id
+                )
+            JOIN technical_indicators t ON t.stock_id = m.stock_id
+                AND t.trade_date = p.trade_date
+            LEFT JOIN institutional_trading inst ON inst.stock_id = m.stock_id
+                AND inst.trade_date = p.trade_date
+            WHERE m.industry_code IN ({placeholders})
+            AND p.close >= :min_close
+            AND p.volume >= :min_volume
+            AND t.rsi14 BETWEEN :min_rsi AND :max_rsi
+            AND t.ma5 IS NOT NULL
+            AND t.ma20 IS NOT NULL
+        """), {
+            "min_close":  MIN_CLOSE,
+            "min_volume": MIN_VOLUME,
+            "min_rsi":    MIN_RSI,
+            "max_rsi":    MAX_RSI,
+        })
+        rows = result.fetchall()
+        cols = list(result.keys())
+
+    if not rows:
+        logger.warning("沒有符合條件的候選股票")
+        return pd.DataFrame()
+
+    df = pd.DataFrame(rows, columns=cols)
+
+    # 綜合評分：技術訊號 + 籌碼
+    df["score"] = 0.0
+    df["score"] += df["signal_ma_cross"].clip(0, 1) * 2.0   # 黃金交叉加分
+    df["score"] += df["signal_breakout"].clip(0, 1) * 2.0   # 突破加分
+    df["score"] += (df["macd_hist"] > 0).astype(float) * 1.0  # MACD 正值
+    df["score"] += (df["inst_net"] > 0).astype(float) * 1.5   # 法人買超
+    df["score"] += (df["foreign_net"] > 0).astype(float) * 1.0 # 外資買超
+    # RSI 50~65 最理想
+    df["score"] += ((df["rsi14"] >= 50) & (df["rsi14"] <= 65)).astype(float) * 1.0
+
+    df = df.sort_values("score", ascending=False)
+    candidates = df.head(top_n).reset_index(drop=True)
+
+    logger.info(f"篩選出 {len(candidates)} 支候選股票")
+    return candidates
+
+
+def format_candidates_for_llm(df: pd.DataFrame) -> str:
+    """
+    把候選股票資料格式化成給 LLM 分析的文字
+    """
+    if df.empty:
+        return ""
+
+    lines = ["以下是今日候選股票資料，請根據這些資料推薦最值得關注的 5 支股票：\n"]
+
+    for _, row in df.iterrows():
+        ma_cross = {1: "黃金交叉", -1: "死亡交叉", 0: "無"}.get(int(row.get("signal_ma_cross", 0)), "無")
+        breakout = {1: "突破壓力", -1: "跌破支撐", 0: "無"}.get(int(row.get("signal_breakout", 0)), "無")
+
+        lines.append(
+            f"【{row['stock_id']} {row['stock_name']}】產業：{row['industry']}\n"
+            f"  股價：{row['close']:.1f} | 漲跌：{row.get('change_pct', 0):.2f}%\n"
+            f"  MA5：{row.get('ma5', 'N/A')} | MA20：{row.get('ma20', 'N/A')} | MA60：{row.get('ma60', 'N/A')}\n"
+            f"  RSI：{row.get('rsi14', 0):.1f} | MACD柱：{'正' if row.get('macd_hist', 0) > 0 else '負'}\n"
+            f"  均線訊號：{ma_cross} | 突破訊號：{breakout}\n"
+            f"  三大法人淨買超：{int(row.get('inst_net', 0))}張 | 外資：{int(row.get('foreign_net', 0))}張\n"
+        )
+
+    return "\n".join(lines)
