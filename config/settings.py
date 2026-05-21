@@ -48,9 +48,6 @@ class ScheduleConfig:
     DAILY_ANALYSIS_HOUR = int(os.getenv("DAILY_ANALYSIS_HOUR", 19))
 
 
-# 目標爬蟲的 MoneyDJ 產業分類 URL
-MONEYDJ_INDUSTRY_URL = "https://www.moneydj.com/KLINE/INDSUBJECT.DJHTM"
-
 # 預設追蹤的 YouTube 頻道（頻道 ID）
 YOUTUBE_CHANNELS = [
     # 範例，之後再補你想追蹤的頻道

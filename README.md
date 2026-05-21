@@ -1,121 +1,267 @@
-# 台股投資顧問系統 — Phase 1 資料 Pipeline
+# 台股個人投資顧問系統
 
-## 快速啟動（5 分鐘）
+個人使用的台股投資顧問，每日自動抓取股價與籌碼資料、計算技術指標、偵測族群輪動，並透過 LLM 產生每日 Top 5 選股推薦。
 
-### 1. 安裝依賴
-```bash
-cd taiwan-stock-advisor
+---
+
+## 技術堆疊
+
+| 項目 | 技術 |
+|------|------|
+| 語言 | Python 3.12.9 |
+| 資料庫 | PostgreSQL 16（Docker） |
+| LLM | Gemini 2.5 Flash（via LiteLLM） |
+| 資料來源 | FinMind API |
+| 技術指標 | ta 0.5.25 |
+| 排程 | Windows 工作排程器 |
+
+---
+
+## 快速開始（從零建立）
+
+### 前置準備
+
+1. 安裝 [Python 3.12.9](https://www.python.org/downloads/release/python-3129/)
+2. 安裝 [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+3. 申請 [FinMind](https://finmindtrade.com/) 免費帳號，取得 API Token
+4. 申請 [Google AI Studio](https://aistudio.google.com) 免費帳號，取得 Gemini API Key
+
+### Step 1 — 安裝套件
+
+```powershell
 pip install -r requirements.txt
+pip install litellm google-generativeai
 ```
 
-### 2. 設定環境變數
-```bash
-cp .env.example .env
-# 編輯 .env，填入你的 FinMind Token
-# FinMind 免費帳號申請：https://finmindtrade.com/
+### Step 2 — 設定環境變數
+
+```powershell
+copy .env.example .env
 ```
 
-### 3. 啟動 PostgreSQL（Docker）
-```bash
+打開 `.env`，填入以下兩個必填欄位：
+
+```
+FINMIND_TOKEN=你的FinMind Token
+GEMINI_API_KEY=你的Gemini API Key
+```
+
+### Step 3 — 啟動資料庫
+
+```powershell
 docker compose up -d
-# 等待約 10 秒讓 DB 初始化完成
-# pgAdmin 管理介面：http://localhost:5050
-#   帳號：admin@stock.local
-#   密碼：admin123
 ```
 
-### 4. 確認資料庫已就緒
-```bash
-docker compose logs postgres | tail -5
+等約 15 秒。`database/init.sql` 會自動建立 13 張資料表。
+
+確認正常：
+```powershell
+docker compose logs postgres | Select-Object -Last 3
 # 看到 "database system is ready to accept connections" 表示成功
 ```
 
-### 5. 初始化歷史資料（首次執行）
-```bash
-# 拉取最近 365 天歷史資料（前 100 支股票）
-python run_pipeline.py --mode init
+### Step 4 — 確認 DB 連線
 
-# 如果只想拉近 90 天（較快）
-python run_pipeline.py --mode init --days 90
+```powershell
+python -c "from database.connection import test_connection; test_connection()"
+# 應顯示：✅ PostgreSQL 連線成功
 ```
 
-### 6. 建立產業分類
-```bash
+### Step 5 — 初始化歷史資料
+
+> 注意：先確認 `run_pipeline.py` 裡的 `target_stocks = all_stocks`（不是 `[:100]`）
+
+```powershell
+python run_pipeline.py --mode init --days 240
+```
+
+約需 10+ 小時（FinMind 免費版 600次/hr 限制）。程式有自動等待重置機制，可以讓它跑一整天。中斷後重跑會自動從上次斷點繼續。
+
+### Step 6 — 建立產業分類
+
+```powershell
 python run_pipeline.py --mode industry
 ```
 
-### 7. 啟動每日排程
-```bash
+### Step 7 — 計算技術指標與族群熱度
+
+```powershell
+python run_pipeline.py --mode technical
+python run_pipeline.py --mode sector
+```
+
+### Step 8 — 產生第一份推薦報告
+
+```powershell
+python run_pipeline.py --mode recommend
+```
+
+### Step 9 — 設定每日自動排程
+
+用**系統管理員身份**開啟 PowerShell：
+
+```powershell
+schtasks /create /tn "TaiwanStockAdvisor" /tr "C:\Users\alanchang\Desktop\taiwan-stock-advisor\daily_update.bat" /sc daily /st 18:30 /ru SYSTEM /f
+```
+
+確認排程建立成功：
+```powershell
+schtasks /query /tn "TaiwanStockAdvisor"
+```
+
+之後每天 18:30 會自動執行：抓取收盤資料 → 計算技術指標 → 產生推薦。
+
+---
+
+## 每日操作
+
+### 啟動系統（每次開機後）
+
+```powershell
+cd C:\Users\alanchang\Desktop\taiwan-stock-advisor
+docker compose up -d
+```
+
+### 停止系統
+
+```powershell
+docker compose down
+# 注意：不要加 -v，加了會刪除所有資料
+```
+
+---
+
+## 所有指令
+
+```powershell
+# 首次建立歷史資料（只需執行一次）
+python run_pipeline.py --mode init --days 240
+
+# 每日收盤後抓取新資料
+python run_pipeline.py --mode daily
+
+# 更新產業分類（建議每週一次）
+python run_pipeline.py --mode industry
+
+# 重新計算所有技術指標
+python run_pipeline.py --mode technical
+
+# 計算族群輪動熱度
+python run_pipeline.py --mode sector
+
+# 產生今日推薦報告
+python run_pipeline.py --mode recommend
+
+# 啟動背景排程（需電腦持續開著）
 python run_pipeline.py --mode schedule
-# 每天 18:00 自動抓收盤資料
-# Ctrl+C 停止
 ```
 
 ---
 
-## 目錄結構
+## 查詢資料庫
 
+### 視覺化介面
+
+打開瀏覽器：`http://localhost:5050`
+- 帳號：`admin@stock.local`
+- 密碼：`admin123`
+
+### 常用查詢指令
+
+**各表資料筆數：**
+```powershell
+docker exec -it stock_advisor_db psql -U stock_user -d taiwan_stock -c "SELECT relname AS table_name, n_live_tup AS row_count FROM pg_stat_user_tables ORDER BY n_live_tup DESC;"
 ```
-taiwan-stock-advisor/
-├── docker-compose.yml          # PostgreSQL + pgAdmin
-├── requirements.txt
-├── .env.example                # 環境變數範本
-├── run_pipeline.py             # 主入口
-│
-├── config/
-│   └── settings.py             # 集中設定管理
-│
-├── database/
-│   ├── init.sql                # DB schema（Docker 啟動時自動執行）
-│   └── connection.py           # SQLAlchemy 連線管理
-│
-├── data_pipeline/
-│   ├── fetchers/
-│   │   └── finmind_fetcher.py  # FinMind API 抓取
-│   └── scrapers/
-│       └── moneydj_scraper.py  # MoneyDJ 產業分類爬蟲
-│
-└── logs/                       # 自動建立的 log 目錄
+
+**某支股票股價（以 2330 為例）：**
+```powershell
+docker exec -it stock_advisor_db psql -U stock_user -d taiwan_stock -c "SELECT trade_date, close, change_pct, volume FROM daily_prices WHERE stock_id='2330' ORDER BY trade_date DESC LIMIT 10;"
+```
+
+**某支股票技術指標：**
+```powershell
+docker exec -it stock_advisor_db psql -U stock_user -d taiwan_stock -c "SELECT trade_date, ma5, ma20, ma60, rsi14, signal_ma_cross, signal_breakout FROM technical_indicators WHERE stock_id='2330' ORDER BY trade_date DESC LIMIT 5;"
+```
+
+**某支股票籌碼：**
+```powershell
+docker exec -it stock_advisor_db psql -U stock_user -d taiwan_stock -c "SELECT trade_date, foreign_net, invest_net, dealer_net, total_net FROM institutional_trading WHERE stock_id='2330' ORDER BY trade_date DESC LIMIT 10;"
+```
+
+**今日族群熱度排名：**
+```powershell
+docker exec -it stock_advisor_db psql -U stock_user -d taiwan_stock -c "SELECT industry_code, avg_change_pct, rising_count, total_count, momentum_score FROM sector_momentum WHERE calc_date=(SELECT MAX(calc_date) FROM sector_momentum) ORDER BY momentum_score DESC LIMIT 10;"
+```
+
+**歷史推薦紀錄：**
+```powershell
+docker exec -it stock_advisor_db psql -U stock_user -d taiwan_stock -c "SELECT rec_date, rank, stock_id, reason FROM daily_recommendations ORDER BY rec_date DESC, rank ASC;"
+```
+
+**查詢 FinMind API 剩餘額度：**
+```powershell
+python -c "
+import requests, os
+from dotenv import load_dotenv
+load_dotenv()
+resp = requests.get('https://api.web.finmindtrade.com/v2/user_info', params={'token': os.getenv('FINMIND_TOKEN')})
+d = resp.json()
+print(f'已用：{d[\"user_count\"]} / 上限：{d[\"api_request_limit\"]}')
+"
 ```
 
 ---
 
-## 資料庫 Schema 說明
+## 資料庫 Schema
 
 | 資料表 | 說明 | 資料來源 |
 |--------|------|----------|
-| `stocks` | 股票基本資料 | FinMind |
-| `industries` | 產業/族群分類 | MoneyDJ |
-| `stock_industry_map` | 股票↔產業對應 | MoneyDJ |
-| `daily_prices` | 每日 OHLCV | FinMind / TWSE |
-| `institutional_trading` | 三大法人籌碼 | FinMind |
-| `margin_trading` | 融資融券 | FinMind |
-| `financials` | 季報財務資料 | FinMind |
-| `technical_indicators` | 技術指標快取 | 本地計算 |
-| `sector_momentum` | 族群輪動熱度 | 本地計算 |
-| `announcements` | MOPS 重大訊息 | 爬蟲 |
-| `yt_insights` | YouTube 情報 | 爬蟲 + LLM |
-| `daily_recommendations` | 每日選股推薦 | LLM Agent |
-| `pipeline_logs` | 執行紀錄 | 系統 |
+| stocks | 股票基本資料 | FinMind |
+| industries | 產業分類（54個） | FinMind |
+| stock_industry_map | 股票產業對應 | FinMind |
+| daily_prices | 每日 OHLCV | FinMind |
+| institutional_trading | 三大法人籌碼 | FinMind |
+| margin_trading | 融資融券 | FinMind |
+| financials | 季報財務資料 | FinMind |
+| technical_indicators | 技術指標快取 | 本地計算 |
+| sector_momentum | 族群輪動熱度 | 本地計算 |
+| announcements | MOPS 重大訊息 | 待開發 |
+| yt_insights | YouTube 情報 | 待開發 |
+| daily_recommendations | 每日推薦結果 | LLM |
+| pipeline_logs | 執行紀錄 | 系統 |
 
 ---
 
-## 常見問題
+## 系統架構
 
-**Q: FinMind 免費版有什麼限制？**
-A: 未登入每天約 300 次請求，登入後每天約 600 次。初始化時建議分批執行。
-
-**Q: Docker 啟動後 DB 連不上？**
-A: 等 10~15 秒讓 PostgreSQL 初始化完成，或執行 `docker compose logs postgres` 確認。
-
-**Q: MoneyDJ 爬蟲爬不到資料？**
-A: MoneyDJ 網站結構偶爾會改版，爬蟲的 CSS selector 可能需要更新。
+```
+資料層      FinMind API → 股價 / 籌碼 / 股票清單 / 產業分類
+    ↓
+儲存層      PostgreSQL（結構化資料）
+    ↓
+分析層      技術指標（ta）/ 族群輪動熱度評分
+    ↓
+Agent 層    候選股篩選 → Gemini 2.5 Flash → 推薦報告
+    ↓
+輸出層      Terminal 報告 / daily_recommendations 表
+```
 
 ---
 
-## 下一步（Phase 2）
+## 重要注意事項
 
-- [ ] `technical_indicators` 計算模組（pandas_ta）
-- [ ] 族群輪動偵測邏輯
-- [ ] LLM 財報解讀整合
-- [ ] Telegram Bot 推播
+- `.env` 含有 API Key，絕對不可上傳 GitHub
+- `logs/` 目錄記錄已抓過的股票，不可刪除（會導致重複抓取浪費額度）
+- `docker compose down -v` 會刪除所有資料，正常停止只用 `docker compose down`
+- FinMind 免費版限制：股價 240 天、籌碼 90 天、600 次/hr
+- 排程需要電腦在 18:30 開著且 Docker 正在執行
+
+---
+
+## 開發進度
+
+詳見 [docs/progress.md](docs/progress.md)
+
+## 完整架構規劃
+
+詳見 [docs/roadmap.md](docs/roadmap.md)
