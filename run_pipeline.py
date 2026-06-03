@@ -109,13 +109,34 @@ def mode_daily(source: str = "openapi"):
     logger.info("=== 每日更新完成 ===")
 
 
-def mode_pipeline(source: str = "openapi"):
-    """
-    每日完整流程（這是每天要自動跑的）：
-        補齊缺漏交易日 → 算技術指標 → 產生推薦（推薦會自動先算族群熱度）
+def _weekly_review_text() -> str:
+    """週末策略回顧：跑回測，回傳精簡摘要文字（供 Telegram）。"""
+    import io, contextlib
+    try:
+        from agent.backtest import run_backtest
+        with contextlib.redirect_stdout(io.StringIO()):
+            tdf = run_backtest()
+        if tdf is None or len(tdf) == 0:
+            return "📈 週末策略回顧：回測資料不足"
+        win = (tdf["ret"] > 0).mean() * 100
+        avg = tdf["ret"].mean() * 100
+        hold = tdf["hold"].mean()
+        return ("📈 週末策略回顧（回測 {} 筆完整交易）\n"
+                "  勝率 {:.0f}%、平均報酬 {:+.2f}%/筆、平均持有 {:.1f} 日\n"
+                "  ※ 策略維持固定；要調買賣邏輯請改 agent/strategy.py 後重跑 --mode backtest 驗證，"
+                "不要每天自動改（否則無法回測）。").format(len(tdf), win, avg, hold)
+    except Exception as e:
+        return f"📈 週末策略回顧失敗：{e}"
 
-    第 1 步用 backfill 而非單抓今天，因此即使某天漏跑，下次一跑就會自動補回，
-    具自我修復能力。source=finmind 時改走 FinMind 逐檔後備路徑。
+
+def mode_pipeline(source: str = "openapi", with_entries: bool = True, review: bool = False):
+    """
+    每日完整流程：補齊缺漏交易日 → 算技術指標 → 出場檢查（+選股推薦）→ Telegram。
+
+    - with_entries=True：產生隔日進場推薦並開部位（交易日前夜）
+    - with_entries=False：只更新資料 + 檢查持倉出場（週末）
+    - review=True：附上回測策略回顧（週末）
+    第 1 步用 backfill，故某天漏跑下次會自動補回。source=finmind 走後備路徑。
     """
     from agent.notifier import notify_success, notify_failure
 
@@ -128,17 +149,33 @@ def mode_pipeline(source: str = "openapi"):
     try:
         if source == "openapi":
             from data_pipeline.fetchers.twse_fetcher import backfill
-            backfill()                   # 1. 自動補齊 DB 最後一天 ~ 今天（含今天）
+            backfill()                   # 1. 自動補齊 DB 最後一天 ~ 今天
         else:
-            mode_daily(source="finmind")  # 後備：FinMind 抓近 3 天
-        run_technical_analysis()         # 2. 重算技術指標
-        result = run_daily_recommendation()  # 3. 出場檢查 + 族群熱度 + 候選篩選 + LLM 推薦 + 開部位
-        notify_success(result.get("report_text") if result else None)
+            mode_daily(source="finmind")
+        run_technical_analysis(recent_days=20)   # 2. 技術指標（增量：只寫最近 20 天，快又省）
+        result = run_daily_recommendation(with_entries=with_entries)  # 3. 出場檢查(+進場推薦)
+        msg = result.get("report_text") if result else None
+        if review:
+            msg = (msg or "") + "\n\n" + _weekly_review_text()
+        notify_success(msg)
         logger.info("########## 每日完整流程結束 ##########")
     except Exception as e:
         logger.exception("每日完整流程失敗")
         notify_failure("每日流程", str(e))
         raise
+
+
+def mode_auto(source: str = "openapi"):
+    """
+    依星期自動切換（給每日排程用）：
+      週日~週四(隔天是交易日) → 產生隔日進場推薦
+      週五、週六            → 不進場，只追蹤持倉 + 週末策略回顧
+    """
+    wd = date.today().weekday()          # Mon=0 ... Sun=6
+    is_weekend_review = wd in (4, 5)     # 週五、週六
+    mode_pipeline(source=source,
+                  with_entries=not is_weekend_review,
+                  review=is_weekend_review)
 
 
 def mode_backfill(days: int = None):
@@ -168,13 +205,13 @@ def mode_schedule():
     """
     scheduler = BlockingScheduler(timezone="Asia/Taipei")
 
-    # 每天 18:00 跑完整流程（抓資料 → 技術指標 → 推薦）
+    # 每天 21:00 依星期自動切換（交易日前夜推薦 / 週末回顧）
     scheduler.add_job(
-        mode_pipeline,
+        mode_auto,
         "cron",
         hour=ScheduleConfig.DAILY_FETCH_HOUR,
         minute=0,
-        id="daily_pipeline",
+        id="daily_auto",
     )
 
     # 每週一 08:00 更新產業分類
@@ -200,9 +237,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="台股資料 Pipeline")
     parser.add_argument(
         "--mode",
-        choices=["init", "daily", "pipeline", "backfill", "industry", "technical", "sector", "recommend", "backtest", "schedule"],
+        choices=["init", "daily", "pipeline", "auto", "backfill", "industry", "technical", "sector", "recommend", "backtest", "schedule"],
         default="daily",
-        help="執行模式（pipeline=每日完整流程；backfill=補齊缺漏交易日；backtest=回測選股績效）",
+        help="執行模式（auto=排程用，依星期自動切換；pipeline=完整流程；backfill=補洞；backtest=回測）",
     )
     parser.add_argument(
         "--days",
@@ -230,6 +267,8 @@ if __name__ == "__main__":
         mode_daily(source=args.source)
     elif args.mode == "pipeline":
         mode_pipeline(source=args.source)
+    elif args.mode == "auto":
+        mode_auto(source=args.source)
     elif args.mode == "backfill":
         mode_backfill(days=args.days)
     elif args.mode == "industry":

@@ -81,10 +81,15 @@ def calc_indicators(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def upsert_indicators(stock_id: str, df: pd.DataFrame):
+def upsert_indicators(stock_id: str, df: pd.DataFrame, recent_days: int = None):
     df_valid = df.dropna(subset=["ma20"]).copy()
     if df_valid.empty:
         return
+
+    # 增量模式：指標用完整歷史算（MA 才正確），但只寫回最近 recent_days 筆，
+    # 避免每天重寫整段歷史（~40 萬筆 upsert）造成耗時與高 DB 負載
+    if recent_days:
+        df_valid = df_valid.tail(recent_days)
 
     df_valid = df_valid.where(pd.notnull(df_valid), None)
 
@@ -131,8 +136,13 @@ def upsert_indicators(stock_id: str, df: pd.DataFrame):
             })
 
 
-def run_technical_analysis(stock_ids: list = None):
-    logger.info("=== 開始計算技術指標 ===")
+def run_technical_analysis(stock_ids: list = None, recent_days: int = None):
+    """
+    recent_days=None：重算並寫回完整歷史（首次建置 / --mode technical 用）
+    recent_days=N   ：只寫回最近 N 筆（每日增量，快很多、DB 負載低）
+    """
+    mode = "完整" if not recent_days else f"增量(最近{recent_days}日)"
+    logger.info(f"=== 開始計算技術指標（{mode}）===")
 
     if stock_ids is None:
         with get_session() as session:
@@ -145,15 +155,15 @@ def run_technical_analysis(stock_ids: list = None):
     success, skipped = 0, 0
 
     for i, sid in enumerate(stock_ids, 1):
-        logger.info(f"[{i}/{total}] 計算技術指標: {sid}")
+        if i % 200 == 0:
+            logger.info(f"  技術指標進度 {i}/{total}")
         df = load_prices(sid)
         if df.empty:
-            logger.warning(f"  ⚠️  {sid} 資料不足，跳過")
             skipped += 1
             continue
         try:
             df = calc_indicators(df)
-            upsert_indicators(sid, df)
+            upsert_indicators(sid, df, recent_days=recent_days)
             success += 1
         except Exception as e:
             logger.error(f"  ❌ {sid} 失敗: {e}")

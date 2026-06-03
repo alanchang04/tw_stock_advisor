@@ -6,8 +6,10 @@ agent/llm_advisor.py
 """
 import json
 import re
+import time
 from datetime import date
 from loguru import logger
+import litellm
 from litellm import completion
 from sqlalchemy import text
 
@@ -15,6 +17,9 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from config.settings import APIConfig
 from database.connection import get_session
+
+# 不支援的參數（如某些模型不吃 response_format）自動忽略，不丟例外
+litellm.drop_params = True
 
 # ── 模型設定（改這裡就能切換模型）────────────────────────────────
 MODEL = "gemini/gemini-2.5-flash"
@@ -71,9 +76,11 @@ def generate_recommendations(candidates_text: str, hot_sectors: list[str]) -> di
 
     logger.info(f"呼叫 LLM 產生推薦（模型：{MODEL}）")
 
-    # Gemini 免費版常見 503（流量過高）/ 429（限流），加退避重試
-    import time
+    # 重試涵蓋兩類問題：
+    #   1. 503/429 等暫時性錯誤（Gemini 免費版常見）
+    #   2. 回傳的 JSON 解析不出有效推薦（非決定性，重生一次常就好）
     max_retries = 4
+    last_err = None
     for attempt in range(1, max_retries + 1):
         try:
             response = completion(
@@ -82,45 +89,70 @@ def generate_recommendations(candidates_text: str, hot_sectors: list[str]) -> di
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user",   "content": user_prompt},
                 ],
-                temperature=0.3,    # 低溫度讓輸出更穩定
-                max_tokens=8192,    # Gemini Flash 最高可用 8192 tokens
+                temperature=0.3,
+                max_tokens=8192,
+                response_format={"type": "json_object"},  # 強制輸出純 JSON，免 markdown 包裹
             )
             content = response.choices[0].message.content
-            logger.info("LLM 回覆成功")
-            return _parse_json(content)
+            result = _parse_json(content)
+            if result.get("recommendations"):
+                logger.info(f"LLM 回覆成功（解析到 {len(result['recommendations'])} 檔）")
+                return result
+            last_err = "回傳內容解析不到有效 recommendations"
+            logger.warning(f"LLM 輸出無法解析（第 {attempt}/{max_retries} 次）")
 
         except Exception as e:
-            msg = str(e)
-            transient = any(k in msg for k in ("503", "UNAVAILABLE", "429",
-                                               "RateLimit", "overloaded", "high demand"))
-            if transient and attempt < max_retries:
-                wait = 15 * attempt   # 15s, 30s, 45s
-                logger.warning(f"LLM 暫時性錯誤（第 {attempt}/{max_retries} 次），{wait}s 後重試：{msg[:120]}")
-                time.sleep(wait)
-                continue
-            logger.error(f"LLM 呼叫失敗: {e}")
-            return {}
+            last_err = str(e)
+            transient = any(k in last_err for k in ("503", "UNAVAILABLE", "429",
+                                                    "RateLimit", "overloaded", "high demand"))
+            if not (transient and attempt < max_retries):
+                logger.error(f"LLM 呼叫失敗: {e}")
+                return {}
+            logger.warning(f"LLM 暫時性錯誤（第 {attempt}/{max_retries} 次）：{last_err[:120]}")
+
+        if attempt < max_retries:
+            time.sleep(min(15 * attempt, 45))   # 退避：15s, 30s, 45s
+
+    logger.error(f"LLM 多次嘗試仍失敗：{last_err}")
+    return {}
 
 
 def _parse_json(text: str) -> dict:
-    """從 LLM 回覆中提取並解析 JSON"""
-    # 去除 markdown code block
-    text = re.sub(r"```json\s*", "", text)
-    text = re.sub(r"```\s*", "", text)
-    text = text.strip()
+    """
+    從 LLM 回覆中穩健地擷取 JSON：
+      1. 直接解析
+      2. 取第一個 { 到最後一個 } 再解析
+      3. 截斷救援：逐一抽出完整的推薦物件（即使整段被切斷也能救回前幾檔）
+    """
+    if not text:
+        return {}
+    text = re.sub(r"```(?:json)?", "", text).strip().strip("`").strip()
 
     try:
         return json.loads(text)
-    except json.JSONDecodeError:
-        # 嘗試找到 JSON 區塊
-        match = re.search(r"\{[\s\S]*\}", text)
-        if match:
-            try:
-                return json.loads(match.group())
-            except Exception:
-                pass
-        logger.error(f"JSON 解析失敗，原始內容：\n{text[:500]}")
-        return {}
+    except Exception:
+        pass
+
+    i, j = text.find("{"), text.rfind("}")
+    if i != -1 and j > i:
+        try:
+            return json.loads(text[i:j + 1])
+        except Exception:
+            pass
+
+    # 截斷救援：推薦物件內無巢狀大括號（key_signals 是陣列），可逐一抽出
+    recs = []
+    for m in re.finditer(r"\{[^{}]*?\"stock_id\"[^{}]*?\}", text, re.DOTALL):
+        try:
+            recs.append(json.loads(m.group()))
+        except Exception:
+            pass
+    if recs:
+        logger.warning(f"JSON 不完整，救回 {len(recs)} 檔推薦")
+        return {"recommendations": recs}
+
+    logger.error(f"JSON 解析失敗，原始內容：\n{text[:500]}")
+    return {}
 
 
 def save_recommendations(result: dict):
