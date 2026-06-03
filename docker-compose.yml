@@ -23,7 +23,7 @@ services:
     container_name: stock_advisor_pgadmin
     restart: unless-stopped
     environment:
-      PGADMIN_DEFAULT_EMAIL: admin@stock.local
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
       PGADMIN_DEFAULT_PASSWORD: admin123
     ports:
       - "5050:80"
@@ -32,3 +32,6 @@ services:
 
 volumes:
   pgdata:
+    # 釘死成固定名稱，指回原本的資料 volume（2026-05-08 建立、含完整歷史）。
+    # 這樣即使專案資料夾改名，也不會再產生新的空 volume。
+    name: taiwan-stock-advisor_pgdata

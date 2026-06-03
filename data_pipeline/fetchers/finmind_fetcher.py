@@ -23,14 +23,19 @@ from config.settings import APIConfig
 from database.connection import get_session
 
 
-# ── 初始化 FinMind DataLoader ──────────────────────────────────
+# ── 初始化 FinMind DataLoader（單例，避免每次抓取都重新登入）──────
+_loader: Optional[DataLoader] = None
+
+
 def _get_loader() -> DataLoader:
-    dl = DataLoader()
-    if APIConfig.FINMIND_TOKEN:
-        dl.login_by_token(api_token=APIConfig.FINMIND_TOKEN)
-    else:
-        logger.warning("未設定 FINMIND_TOKEN，使用未登入模式（有流量限制）")
-    return dl
+    global _loader
+    if _loader is None:
+        _loader = DataLoader()
+        if APIConfig.FINMIND_TOKEN:
+            _loader.login_by_token(api_token=APIConfig.FINMIND_TOKEN)
+        else:
+            logger.warning("未設定 FINMIND_TOKEN，使用未登入模式（有流量限制）")
+    return _loader
 
 
 # ── 1. 抓上市上櫃股票清單 ────────────────────────────────────────
@@ -337,12 +342,11 @@ def batch_fetch_prices(
                     fetched.add(sid)
                     _save_fetched(FETCHED_PRICES_LOG, fetched)
                 except Exception as e2:
-                    logger.error(f"  ❌ {sid} 重試失敗: {e2}")
+                    logger.error(f"  ❌ {sid} 重試失敗: {e2}（不標記完成，下次會重抓）")
             else:
-                logger.error(f"  ❌ {sid} 失敗: {e}")
-                # 非 API 限制的錯誤也記錄，避免一直重試
-                fetched.add(sid)
-                _save_fetched(FETCHED_PRICES_LOG, fetched)
+                # 暫時性錯誤（網路、單檔異常）不標記完成，下次自動重試，
+                # 避免把「抓失敗」誤當成「已抓到」而造成靜默缺資料
+                logger.error(f"  ❌ {sid} 失敗: {e}（不標記完成，下次會重抓）")
         time.sleep(delay)
     logger.info("✅ 批次股價抓取完成")
 
@@ -382,10 +386,9 @@ def batch_fetch_institutional(
                     fetched.add(sid)
                     _save_fetched(FETCHED_INSTITUTIONAL_LOG, fetched)
                 except Exception as e2:
-                    logger.error(f"  ❌ {sid} 重試失敗: {e2}")
+                    logger.error(f"  ❌ {sid} 重試失敗: {e2}（不標記完成，下次會重抓）")
             else:
-                logger.error(f"  ❌ {sid} 失敗: {e}")
-                fetched.add(sid)
-                _save_fetched(FETCHED_INSTITUTIONAL_LOG, fetched)
+                # 暫時性錯誤不標記完成，下次自動重試，避免靜默缺資料
+                logger.error(f"  ❌ {sid} 失敗: {e}（不標記完成，下次會重抓）")
         time.sleep(delay)
     logger.info("✅ 批次籌碼抓取完成")

@@ -15,6 +15,7 @@ from sqlalchemy import text
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from database.connection import get_session
+from agent.strategy import STRATEGY, score_candidates
 
 
 # 排除非個股的產業類別（ETF、指數等）
@@ -23,11 +24,11 @@ EXCLUDE_INDUSTRIES = {
     "上櫃指數股票型基金(ETF)", "受益憑證", "存託憑證",
 }
 
-# 技術面篩選條件
-MIN_RSI    = 40    # RSI 下限（避免超賣反彈不穩）
-MAX_RSI    = 75    # RSI 上限（避免超買）
-MIN_CLOSE  = 10    # 最低股價（過濾仙股）
-MIN_VOLUME = 500   # 最低成交量（張）
+# 技術面篩選條件（集中在 strategy.py，方便調整）
+MIN_RSI    = STRATEGY["min_rsi"]
+MAX_RSI    = STRATEGY["max_rsi"]
+MIN_CLOSE  = STRATEGY["min_close"]
+MIN_VOLUME = STRATEGY["min_volume"]
 
 
 def get_hot_sectors(top_n: int = 5, min_stocks: int = 10) -> list[str]:
@@ -138,15 +139,8 @@ def get_candidate_stocks(
 
     df = pd.DataFrame(rows, columns=cols)
 
-    # 綜合評分：技術訊號 + 籌碼
-    df["score"] = 0.0
-    df["score"] += df["signal_ma_cross"].clip(0, 1) * 2.0   # 黃金交叉加分
-    df["score"] += df["signal_breakout"].clip(0, 1) * 2.0   # 突破加分
-    df["score"] += (df["macd_hist"] > 0).astype(float) * 1.0  # MACD 正值
-    df["score"] += (df["inst_net"] > 0).astype(float) * 1.5   # 法人買超
-    df["score"] += (df["foreign_net"] > 0).astype(float) * 1.0 # 外資買超
-    # RSI 50~65 最理想
-    df["score"] += ((df["rsi14"] >= 50) & (df["rsi14"] <= 65)).astype(float) * 1.0
+    # 綜合評分：統一使用 strategy.score_candidates（與回測共用同一份邏輯）
+    df["score"] = score_candidates(df)
 
     df = df.sort_values("score", ascending=False)
     candidates = df.head(top_n).reset_index(drop=True)

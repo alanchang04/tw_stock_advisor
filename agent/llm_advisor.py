@@ -71,27 +71,35 @@ def generate_recommendations(candidates_text: str, hot_sectors: list[str]) -> di
 
     logger.info(f"呼叫 LLM 產生推薦（模型：{MODEL}）")
 
-    try:
-        response = completion(
-            model=MODEL,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user",   "content": user_prompt},
-            ],
-            temperature=0.3,    # 低溫度讓輸出更穩定
-            max_tokens=8192,    # Gemini Flash 最高可用 8192 tokens
-        )
+    # Gemini 免費版常見 503（流量過高）/ 429（限流），加退避重試
+    import time
+    max_retries = 4
+    for attempt in range(1, max_retries + 1):
+        try:
+            response = completion(
+                model=MODEL,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user",   "content": user_prompt},
+                ],
+                temperature=0.3,    # 低溫度讓輸出更穩定
+                max_tokens=8192,    # Gemini Flash 最高可用 8192 tokens
+            )
+            content = response.choices[0].message.content
+            logger.info("LLM 回覆成功")
+            return _parse_json(content)
 
-        content = response.choices[0].message.content
-        logger.info("LLM 回覆成功")
-
-        # 解析 JSON
-        result = _parse_json(content)
-        return result
-
-    except Exception as e:
-        logger.error(f"LLM 呼叫失敗: {e}")
-        return {}
+        except Exception as e:
+            msg = str(e)
+            transient = any(k in msg for k in ("503", "UNAVAILABLE", "429",
+                                               "RateLimit", "overloaded", "high demand"))
+            if transient and attempt < max_retries:
+                wait = 15 * attempt   # 15s, 30s, 45s
+                logger.warning(f"LLM 暫時性錯誤（第 {attempt}/{max_retries} 次），{wait}s 後重試：{msg[:120]}")
+                time.sleep(wait)
+                continue
+            logger.error(f"LLM 呼叫失敗: {e}")
+            return {}
 
 
 def _parse_json(text: str) -> dict:

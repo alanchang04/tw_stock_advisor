@@ -69,7 +69,7 @@ python -c "from database.connection import test_connection; test_connection()"
 
 ### Step 5 — 初始化歷史資料
 
-> 注意：先確認 `run_pipeline.py` 裡的 `target_stocks = all_stocks`（不是 `[:100]`）
+> 預設抓全部股票。若只想先測試少量，可加 `--limit 100`（只抓前 100 支）。
 
 ```powershell
 python run_pipeline.py --mode init --days 240
@@ -111,6 +111,8 @@ schtasks /query /tn "TaiwanStockAdvisor"
 
 之後每天 18:30 會自動執行：抓取收盤資料 → 計算技術指標 → 產生推薦。
 
+> 每日更新預設使用證交所(TWSE)/櫃買(TPEX)官方 OpenAPI，一次抓回全市場最近交易日的股價與三大法人，約 4 次請求、數秒完成，**不受 FinMind 600 次/hr 限制，電腦不需長時間運作**。FinMind 僅在首次歷史回補（`--mode init`）時使用。
+
 ---
 
 ## 每日操作
@@ -137,8 +139,10 @@ docker compose down
 # 首次建立歷史資料（只需執行一次）
 python run_pipeline.py --mode init --days 240
 
-# 每日收盤後抓取新資料
+# 每日收盤後抓取新資料（預設用證交所/櫃買官方 API，全市場一次抓完、數秒）
 python run_pipeline.py --mode daily
+# 後備：改用 FinMind 逐檔抓（受 600 次/hr 限制，較慢）
+python run_pipeline.py --mode daily --source finmind
 
 # 更新產業分類（建議每週一次）
 python run_pipeline.py --mode industry

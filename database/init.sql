@@ -211,6 +211,27 @@ CREATE TABLE IF NOT EXISTS daily_recommendations (
 );
 
 -- ============================================================
+-- 11b. 部位追蹤（agent 記住推薦過的股票，持續追蹤到出場）
+-- ============================================================
+CREATE TABLE IF NOT EXISTS positions (
+    id              BIGSERIAL    PRIMARY KEY,
+    stock_id        VARCHAR(10)  NOT NULL REFERENCES stocks(stock_id),
+    entry_date      DATE         NOT NULL,
+    entry_price     NUMERIC(12,2) NOT NULL,
+    entry_reason    TEXT,
+    peak_price      NUMERIC(12,2),                      -- 持有期間最高收盤（移動停利用）
+    status          VARCHAR(10)  NOT NULL DEFAULT 'open'
+                        CHECK (status IN ('open','closed')),
+    exit_date       DATE,
+    exit_price      NUMERIC(12,2),
+    exit_reason     TEXT,
+    return_pct      NUMERIC(8,4),                       -- 已實現報酬 %
+    created_at      TIMESTAMPTZ  DEFAULT NOW(),
+    UNIQUE (stock_id, entry_date)
+);
+CREATE INDEX IF NOT EXISTS idx_positions_status ON positions (status);
+
+-- ============================================================
 -- 12. 系統日誌（pipeline 執行紀錄）
 -- ============================================================
 CREATE TABLE IF NOT EXISTS pipeline_logs (
