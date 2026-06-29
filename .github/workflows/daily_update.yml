@@ -27,8 +27,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install --no-cache-dir -r requirements.txt
           python -m pip install --no-cache-dir litellm google-generativeai
-          python -m pip show litellm
-          python -c "import litellm; print('✅ litellm OK:', litellm.__version__)"
+          python -c "import importlib.metadata; print('✅ litellm OK:', importlib.metadata.version('litellm'))"
 
       - name: 執行每日 Pipeline
         env:
