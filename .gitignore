@@ -217,3 +217,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# 台股顧問系統專用
+.telegram_state.json
+db_export.sql

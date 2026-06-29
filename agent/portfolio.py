@@ -17,7 +17,7 @@ from sqlalchemy import text
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from database.connection import get_session
-from agent.strategy import decide_exit
+from agent.strategy import decide_exit, STRATEGY
 
 
 def ensure_positions_table():
@@ -56,16 +56,34 @@ def open_positions() -> list[dict]:
             for r in rows]
 
 
-def _latest_row(session, stock_id, on_date: date):
-    """取某股票在 on_date(含)以前最近一筆 收盤 + MA5/MA20。"""
-    return session.execute(text("""
-        SELECT p.trade_date, p.close, t.ma5, t.ma20
+def _recent_rows(session, stock_id: str, on_date: date, n: int = 35) -> list[dict]:
+    """取某股票 on_date(含)以前最近 n 筆完整 OHLCV + 技術指標，oldest→newest。"""
+    rows = session.execute(text("""
+        SELECT p.trade_date, p.open, p.high, p.low, p.close, p.volume,
+               t.ma5, t.ma20, t.macd_hist, t.k_value, t.d_value
         FROM daily_prices p
         LEFT JOIN technical_indicators t
             ON t.stock_id = p.stock_id AND t.trade_date = p.trade_date
-        WHERE p.stock_id = :sid AND p.trade_date <= :d
-        ORDER BY p.trade_date DESC LIMIT 1
-    """), {"sid": stock_id, "d": on_date}).fetchone()
+        WHERE p.stock_id = :sid AND p.trade_date <= :d AND p.close > 0
+        ORDER BY p.trade_date DESC LIMIT :n
+    """), {"sid": stock_id, "d": on_date, "n": n}).fetchall()
+
+    return [
+        dict(
+            trade_date=r[0],
+            open=float(r[1] or 0),
+            high=float(r[2] or 0),
+            low=float(r[3] or 0),
+            close=float(r[4] or 0),
+            volume=float(r[5] or 0),
+            ma5=float(r[6]) if r[6] is not None else None,
+            ma20=float(r[7]) if r[7] is not None else None,
+            macd_hist=float(r[8]) if r[8] is not None else None,
+            k_value=float(r[9]) if r[9] is not None else None,
+            d_value=float(r[10]) if r[10] is not None else None,
+        )
+        for r in reversed(rows)  # oldest first
+    ]
 
 
 def _holding_days(session, stock_id, entry_date, on_date) -> int:
@@ -89,10 +107,10 @@ def record_entries(picks: list[dict], on_date: date) -> list[dict]:
             sid = pk["stock_id"]
             if sid in held:
                 continue
-            row = _latest_row(s, sid, on_date)
-            if not row or row[1] is None:
+            rows = _recent_rows(s, sid, on_date, n=1)
+            if not rows or rows[-1]["close"] <= 0:
                 continue
-            price = float(row[1])
+            price = rows[-1]["close"]
             s.execute(text("""
                 INSERT INTO positions (stock_id, entry_date, entry_price, entry_reason, peak_price)
                 VALUES (:sid, :d, :price, :reason, :price)
@@ -110,24 +128,56 @@ def evaluate_exits(on_date: date) -> list[dict]:
     回傳今日「該出場」的清單（含原因與報酬）。
     """
     ensure_positions_table()
+    cfg = STRATEGY
+    avg_days = cfg.get("volume_avg_days", 20)
     exits = []
+
     with get_session() as s:
         for pos in open_positions():
             sid = pos["stock_id"]
-            row = _latest_row(s, sid, on_date)
-            if not row or row[1] is None or float(row[1]) <= 0:
-                continue   # 無資料或 close<=0（停牌/瑕疵）→ 當日不判斷，續抱
-            _, close, ma5, ma20 = row
-            close = float(close)
-            ma5 = float(ma5) if ma5 is not None else None
-            ma20 = float(ma20) if ma20 is not None else None
+            history = _recent_rows(s, sid, on_date, n=max(40, avg_days + 5))
+            if not history:
+                continue
+            today = history[-1]
+            close = today["close"]
+            if close <= 0:
+                continue
+
+            ma5  = today["ma5"]
+            ma20 = today["ma20"]
+
+            # 計算當日均量（avg_days 根，不含今天）
+            past = history[-(avg_days + 1):-1]
+            avg_vol = (sum(r["volume"] for r in past) / len(past)) if past else None
+
+            # 準備 extra（當日技術細節）
+            prev = history[-2] if len(history) >= 2 else {}
+            extra = dict(
+                k=today["k_value"],
+                d=today["d_value"],
+                k_prev=prev.get("k_value"),
+                d_prev=prev.get("d_value"),
+                macd_hist=today["macd_hist"],
+                macd_hist_prev=prev.get("macd_hist"),
+                open=today["open"],
+                high=today["high"],
+                low=today["low"],
+                volume=today["volume"],
+                avg_volume=avg_vol,
+            )
 
             peak = max(pos["peak_price"], close)
             s.execute(text("UPDATE positions SET peak_price=:pk WHERE stock_id=:sid AND status='open'"),
                       {"pk": peak, "sid": sid})
 
             hold = _holding_days(s, sid, pos["entry_date"], on_date)
-            should_exit, reason = decide_exit(pos["entry_price"], peak, close, ma5, ma20, hold)
+            should_exit, reason = decide_exit(
+                pos["entry_price"], peak, close,
+                ma5, ma20, hold,
+                cfg=cfg,
+                extra=extra,
+                history=history,
+            )
             if should_exit:
                 ret = (close / pos["entry_price"] - 1) * 100
                 s.execute(text("""

@@ -36,6 +36,21 @@ def load_prices(stock_id: str, min_rows: int = 30) -> pd.DataFrame:
     return df.reset_index(drop=True) if len(df) >= min_rows else pd.DataFrame()
 
 
+def _calc_kd(high: pd.Series, low: pd.Series, close: pd.Series, n: int = 9) -> tuple[pd.Series, pd.Series]:
+    """
+    台灣標準 KD（隨機指標）
+      RSV = (Close - N日最低) / (N日最高 - N日最低) × 100
+      K   = K_prev × 2/3 + RSV × 1/3   (EWM alpha=1/3 → com=2)
+      D   = D_prev × 2/3 + K   × 1/3
+    """
+    lowest  = low.rolling(n).min()
+    highest = high.rolling(n).max()
+    rsv = 100.0 * (close - lowest) / (highest - lowest + 1e-9)
+    k = rsv.ewm(com=2, adjust=False).mean()
+    d = k.ewm(com=2, adjust=False).mean()
+    return k, d
+
+
 def calc_indicators(df: pd.DataFrame) -> pd.DataFrame:
     close  = df["close"]
     high   = df["high"]
@@ -61,6 +76,9 @@ def calc_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df["bb_upper"]  = ta.volatility.bollinger_hband(close, n=20, ndev=2)
     df["bb_middle"] = ta.volatility.bollinger_mavg(close, n=20)
     df["bb_lower"]  = ta.volatility.bollinger_lband(close, n=20, ndev=2)
+
+    # ── KD 隨機指標 ─────────────────────────────────────────────
+    df["k_value"], df["d_value"] = _calc_kd(high, low, close)
 
     # ── 訊號偵測 ────────────────────────────────────────────────
     # MA5/MA20 黃金交叉(1) / 死亡交叉(-1)
@@ -98,6 +116,7 @@ def upsert_indicators(stock_id: str, df: pd.DataFrame, recent_days: int = None):
         "rsi14","macd","macd_signal","macd_hist",
         "bb_upper","bb_middle","bb_lower",
         "signal_ma_cross","signal_breakout",
+        "k_value","d_value",
     ]
 
     with get_session() as session:
@@ -108,13 +127,15 @@ def upsert_indicators(stock_id: str, df: pd.DataFrame, recent_days: int = None):
                      ma5, ma10, ma20, ma60, ma120, ma240,
                      rsi14, macd, macd_signal, macd_hist,
                      bb_upper, bb_middle, bb_lower,
-                     signal_ma_cross, signal_breakout)
+                     signal_ma_cross, signal_breakout,
+                     k_value, d_value)
                 VALUES
                     (:stock_id, :trade_date,
                      :ma5, :ma10, :ma20, :ma60, :ma120, :ma240,
                      :rsi14, :macd, :macd_signal, :macd_hist,
                      :bb_upper, :bb_middle, :bb_lower,
-                     :signal_ma_cross, :signal_breakout)
+                     :signal_ma_cross, :signal_breakout,
+                     :k_value, :d_value)
                 ON CONFLICT (stock_id, trade_date) DO UPDATE SET
                     ma5             = EXCLUDED.ma5,
                     ma10            = EXCLUDED.ma10,
@@ -128,7 +149,9 @@ def upsert_indicators(stock_id: str, df: pd.DataFrame, recent_days: int = None):
                     bb_middle       = EXCLUDED.bb_middle,
                     bb_lower        = EXCLUDED.bb_lower,
                     signal_ma_cross = EXCLUDED.signal_ma_cross,
-                    signal_breakout = EXCLUDED.signal_breakout
+                    signal_breakout = EXCLUDED.signal_breakout,
+                    k_value         = EXCLUDED.k_value,
+                    d_value         = EXCLUDED.d_value
             """), {
                 "stock_id":   stock_id,
                 "trade_date": row["trade_date"].date(),

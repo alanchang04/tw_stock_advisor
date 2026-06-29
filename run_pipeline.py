@@ -138,7 +138,8 @@ def mode_pipeline(source: str = "openapi", with_entries: bool = True, review: bo
     - review=True：附上回測策略回顧（週末）
     第 1 步用 backfill，故某天漏跑下次會自動補回。source=finmind 走後備路徑。
     """
-    from agent.notifier import notify_success, notify_failure
+    from agent.notifier import notify_success, notify_failure, check_and_respond
+    check_and_respond()   # 處理排隊中的 Bot 互動指令
 
     if not test_connection():
         logger.error("無法連接資料庫，流程中止")
@@ -176,6 +177,49 @@ def mode_auto(source: str = "openapi"):
     mode_pipeline(source=source,
                   with_entries=not is_weekend_review,
                   review=is_weekend_review)
+
+
+def mode_quick_update(top_n: int = 200):
+    """
+    快速盤中更新（目標 <1 分鐘）：
+      1. TWSE/TPEX OpenAPI 一次拉全市場最新價格（~10 秒）
+      2. 只針對「持倉中 + 成交量前 top_n 熱門股」重算最近 5 日技術指標（~40 秒）
+    不做 LLM 推薦，不發 Telegram，純資料更新。
+    """
+    if not test_connection():
+        logger.error("quick_update: DB 連線失敗")
+        return
+
+    logger.info(f"=== 快速更新開始（持倉 + 成交量前 {top_n} 支）===")
+
+    # 1. 更新全市場今日價格（4 次請求，約 10 秒）
+    from data_pipeline.fetchers.twse_fetcher import update_daily_via_openapi
+    update_daily_via_openapi()
+
+    # 2. 決定要重算指標的股票：持倉 + 近30日成交量最大的前 top_n 支
+    from database.connection import get_session
+    from sqlalchemy import text
+    with get_session() as s:
+        open_ids = [r[0] for r in s.execute(text(
+            "SELECT stock_id FROM positions WHERE status='open'"
+        )).fetchall()]
+        hot_ids = [r[0] for r in s.execute(text(f"""
+            SELECT stock_id FROM (
+                SELECT stock_id, AVG(volume) AS avg_vol
+                FROM daily_prices
+                WHERE trade_date >= CURRENT_DATE - INTERVAL '30 days'
+                GROUP BY stock_id
+                ORDER BY avg_vol DESC
+                LIMIT {top_n}
+            ) t
+        """)).fetchall()]
+
+    target = list(set(open_ids) | set(hot_ids))
+    logger.info(f"  重算指標：{len(target)} 支（持倉 {len(open_ids)} + 熱門 {len(hot_ids)}）")
+
+    # 3. 只重算這些股票最近 5 天的指標
+    run_technical_analysis(stock_ids=target, recent_days=5)
+    logger.info("=== 快速更新完成 ===")
 
 
 def mode_backfill(days: int = None):
@@ -237,7 +281,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="台股資料 Pipeline")
     parser.add_argument(
         "--mode",
-        choices=["init", "daily", "pipeline", "auto", "backfill", "industry", "technical", "sector", "recommend", "backtest", "schedule"],
+        choices=["init", "daily", "pipeline", "auto", "backfill", "industry", "technical", "sector", "recommend", "backtest", "schedule", "bot", "quick"],
         default="daily",
         help="執行模式（auto=排程用，依星期自動切換；pipeline=完整流程；backfill=補洞；backtest=回測）",
     )
@@ -261,7 +305,12 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    if args.mode == "init":
+    if args.mode == "bot":
+        from agent.notifier import check_and_respond
+        check_and_respond()
+    elif args.mode == "quick":
+        mode_quick_update()
+    elif args.mode == "init":
         mode_init(lookback_days=args.days or 365, limit=args.limit)
     elif args.mode == "daily":
         mode_daily(source=args.source)
