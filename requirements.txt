@@ -30,6 +30,10 @@ python-dotenv==1.0.1
 # YouTube 字幕（Phase 2 以後才會用到）
 youtube-transcript-api==1.2.4
 
+# LLM
+litellm>=1.40.0
+google-generativeai>=0.8.0
+
 # 網頁介面
 streamlit>=1.35.0
 plotly>=5.20.0
