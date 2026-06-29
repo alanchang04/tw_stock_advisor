@@ -17,6 +17,16 @@ class DBConfig:
 
     @classmethod
     def url(cls) -> str:
+        # 優先使用完整 DATABASE_URL（Streamlit Cloud Secrets / Neon 格式）
+        raw = os.getenv("DATABASE_URL", "")
+        if raw:
+            # 確保使用 psycopg3 dialect
+            if raw.startswith("postgres://"):
+                raw = raw.replace("postgres://", "postgresql+psycopg://", 1)
+            elif raw.startswith("postgresql://"):
+                raw = raw.replace("postgresql://", "postgresql+psycopg://", 1)
+            return raw
+        # 本機 Docker 個別變數 fallback
         return (
             f"postgresql+psycopg://{cls.USER}:{cls.PASSWORD}"
             f"@{cls.HOST}:{cls.PORT}/{cls.NAME}"
