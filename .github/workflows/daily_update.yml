@@ -24,7 +24,10 @@ jobs:
           cache: 'pip'
 
       - name: 安裝依賴套件
-        run: pip install -r requirements.txt
+        run: |
+          pip install --no-cache-dir -r requirements.txt
+          pip install --no-cache-dir litellm google-generativeai
+          python -c "import litellm; print('litellm OK:', litellm.__version__)"
 
       - name: 執行每日 Pipeline
         env:
