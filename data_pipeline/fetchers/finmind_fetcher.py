@@ -13,7 +13,6 @@ from datetime import date, timedelta
 from typing import Optional
 
 import pandas as pd
-from FinMind.data import DataLoader
 from loguru import logger
 from sqlalchemy import text
 
@@ -24,12 +23,13 @@ from database.connection import get_session
 
 
 # ── 初始化 FinMind DataLoader（單例，避免每次抓取都重新登入）──────
-_loader: Optional[DataLoader] = None
+_loader = None
 
 
-def _get_loader() -> DataLoader:
+def _get_loader():
     global _loader
     if _loader is None:
+        from FinMind.data import DataLoader  # lazy import：只有真正呼叫時才需要 FinMind
         _loader = DataLoader()
         if APIConfig.FINMIND_TOKEN:
             _loader.login_by_token(api_token=APIConfig.FINMIND_TOKEN)
