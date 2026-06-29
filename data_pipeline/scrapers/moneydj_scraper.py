@@ -8,7 +8,6 @@ data_pipeline/scrapers/industry_fetcher.py
 """
 from loguru import logger
 from sqlalchemy import text
-from FinMind.data import DataLoader
 
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
@@ -19,6 +18,7 @@ from database.connection import get_session
 def run_industry_scraper():
     logger.info("=== 開始從 FinMind 建立產業分類 ===")
 
+    from FinMind.data import DataLoader  # lazy import：只有 --mode industry 才需要 FinMind
     # 1. 拉取股票總覽（含 industry_category 欄位）
     dl = DataLoader()
     if APIConfig.FINMIND_TOKEN:
