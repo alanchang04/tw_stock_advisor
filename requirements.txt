@@ -29,6 +29,10 @@ python-dotenv==1.0.1
 # YouTube 字幕（Phase 2 以後才會用到）
 youtube-transcript-api==1.2.4
 
+# 網頁介面
+streamlit>=1.35.0
+plotly>=5.20.0
+
 # 工具
 tqdm==4.67.1
 loguru==0.7.2
