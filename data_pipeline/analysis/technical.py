@@ -162,35 +162,122 @@ def upsert_indicators(stock_id: str, df: pd.DataFrame, recent_days: int = None):
 def run_technical_analysis(stock_ids: list = None, recent_days: int = None):
     """
     recent_days=None：重算並寫回完整歷史（首次建置 / --mode technical 用）
-    recent_days=N   ：只寫回最近 N 筆（每日增量，快很多、DB 負載低）
+    recent_days=N   ：只寫回最近 N 筆（每日增量）
+
+    效能優化：一次讀入所有股票的歷史價格（1 次 SELECT 取代 ~2000 次），
+    純記憶體計算後再用 executemany 批次寫入（1 次取代 ~10000 次 INSERT）。
     """
     mode = "完整" if not recent_days else f"增量(最近{recent_days}日)"
     logger.info(f"=== 開始計算技術指標（{mode}）===")
 
-    if stock_ids is None:
-        with get_session() as session:
-            result = session.execute(text(
-                "SELECT DISTINCT stock_id FROM daily_prices"
-            ))
-            stock_ids = [r[0] for r in result.fetchall()]
+    # ── Step 1：一次讀入全部需要的價格（1 次 DB 請求）────────────
+    with get_session() as session:
+        if stock_ids is not None:
+            result = session.execute(text("""
+                SELECT stock_id, trade_date, open, high, low, close, volume
+                FROM daily_prices
+                WHERE stock_id = ANY(:ids)
+                ORDER BY stock_id, trade_date ASC
+            """), {"ids": list(stock_ids)})
+        else:
+            result = session.execute(text("""
+                SELECT stock_id, trade_date, open, high, low, close, volume
+                FROM daily_prices
+                ORDER BY stock_id, trade_date ASC
+            """))
+        all_rows = result.fetchall()
+        col_names = list(result.keys())
 
-    total = len(stock_ids)
+    if not all_rows:
+        logger.warning("daily_prices 無資料")
+        return
+
+    all_prices = pd.DataFrame(all_rows, columns=col_names)
+    all_prices["trade_date"] = pd.to_datetime(all_prices["trade_date"])
+    for col in ["open", "high", "low", "close", "volume"]:
+        all_prices[col] = pd.to_numeric(all_prices[col], errors="coerce")
+
+    # ── Step 2：按股票分組計算指標（純記憶體，無 DB 請求）────────
+    indicator_cols = [
+        "ma5","ma10","ma20","ma60","ma120","ma240",
+        "rsi14","macd","macd_signal","macd_hist",
+        "bb_upper","bb_middle","bb_lower",
+        "signal_ma_cross","signal_breakout",
+        "k_value","d_value",
+    ]
+    indicator_rows = []
     success, skipped = 0, 0
+    groups = list(all_prices.groupby("stock_id"))
+    total = len(groups)
 
-    for i, sid in enumerate(stock_ids, 1):
+    for i, (sid, df) in enumerate(groups, 1):
         if i % 200 == 0:
             logger.info(f"  技術指標進度 {i}/{total}")
-        df = load_prices(sid)
-        if df.empty:
+        df = df.reset_index(drop=True)
+        if len(df) < 30:
             skipped += 1
             continue
         try:
             df = calc_indicators(df)
-            upsert_indicators(sid, df, recent_days=recent_days)
+            df_valid = df.dropna(subset=["ma20"]).copy()
+            if df_valid.empty:
+                skipped += 1
+                continue
+            if recent_days:
+                df_valid = df_valid.tail(recent_days)
+            df_valid = df_valid.where(pd.notnull(df_valid), None)
+            for _, row in df_valid.iterrows():
+                indicator_rows.append({
+                    "stock_id":   sid,
+                    "trade_date": row["trade_date"].date(),
+                    **{c: row.get(c) for c in indicator_cols},
+                })
             success += 1
         except Exception as e:
             logger.error(f"  ❌ {sid} 失敗: {e}")
             skipped += 1
+
+    logger.info(f"  計算完成：{success} 支成功，{skipped} 支跳過，共 {len(indicator_rows)} 筆待寫入")
+
+    # ── Step 3：批次寫入（1 次 executemany 取代 ~10000 次 INSERT）─
+    if indicator_rows:
+        upsert_sql = text("""
+            INSERT INTO technical_indicators
+                (stock_id, trade_date,
+                 ma5, ma10, ma20, ma60, ma120, ma240,
+                 rsi14, macd, macd_signal, macd_hist,
+                 bb_upper, bb_middle, bb_lower,
+                 signal_ma_cross, signal_breakout,
+                 k_value, d_value)
+            VALUES
+                (:stock_id, :trade_date,
+                 :ma5, :ma10, :ma20, :ma60, :ma120, :ma240,
+                 :rsi14, :macd, :macd_signal, :macd_hist,
+                 :bb_upper, :bb_middle, :bb_lower,
+                 :signal_ma_cross, :signal_breakout,
+                 :k_value, :d_value)
+            ON CONFLICT (stock_id, trade_date) DO UPDATE SET
+                ma5             = EXCLUDED.ma5,
+                ma10            = EXCLUDED.ma10,
+                ma20            = EXCLUDED.ma20,
+                ma60            = EXCLUDED.ma60,
+                ma120           = EXCLUDED.ma120,
+                ma240           = EXCLUDED.ma240,
+                rsi14           = EXCLUDED.rsi14,
+                macd            = EXCLUDED.macd,
+                macd_signal     = EXCLUDED.macd_signal,
+                macd_hist       = EXCLUDED.macd_hist,
+                bb_upper        = EXCLUDED.bb_upper,
+                bb_middle       = EXCLUDED.bb_middle,
+                bb_lower        = EXCLUDED.bb_lower,
+                signal_ma_cross = EXCLUDED.signal_ma_cross,
+                signal_breakout = EXCLUDED.signal_breakout,
+                k_value         = EXCLUDED.k_value,
+                d_value         = EXCLUDED.d_value
+        """)
+        with get_session() as session:
+            session.execute(upsert_sql, indicator_rows)
+        logger.info(f"  批次寫入 {len(indicator_rows)} 筆指標完成")
 
     logger.info(f"=== 技術指標計算完成：成功 {success}，跳過 {skipped} ===")
 
