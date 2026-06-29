@@ -1,0 +1,44 @@
+name: 每日股票資料更新
+
+on:
+  schedule:
+    # 每天 13:30 UTC = 台灣時間 21:30（週一至週五）
+    - cron: '30 13 * * 1-5'
+  workflow_dispatch:
+    # 允許從網頁或 API 手動觸發（「立即更新」按鈕使用）
+
+jobs:
+  update:
+    name: 更新資料 + 技術指標 + Telegram 通知
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: 取得程式碼
+        uses: actions/checkout@v4
+
+      - name: 設定 Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: 安裝依賴套件
+        run: pip install -r requirements.txt
+
+      - name: 執行每日 Pipeline
+        env:
+          DATABASE_URL:        ${{ secrets.DATABASE_URL }}
+          GEMINI_API_KEY:      ${{ secrets.GEMINI_API_KEY }}
+          TELEGRAM_BOT_TOKEN:  ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:    ${{ secrets.TELEGRAM_CHAT_ID }}
+          FINMIND_TOKEN:       ${{ secrets.FINMIND_TOKEN }}
+        run: python run_pipeline.py --mode auto
+
+      - name: 上傳 Log（失敗時保留 7 天）
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-logs
+          path: logs/
+          retention-days: 7

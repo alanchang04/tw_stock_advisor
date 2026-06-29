@@ -35,23 +35,27 @@ page = st.sidebar.radio(
 )
 st.sidebar.markdown("---")
 
-# 立即更新按鈕
-if st.sidebar.button("🔄 立即更新資料", help="更新全市場價格 + 熱門200支指標，目標 <1 分鐘"):
-    import subprocess
-    with st.sidebar.status("更新中（約 30-60 秒）...", expanded=True) as status:
-        r = subprocess.run(
-            [sys.executable, "run_pipeline.py", "--mode", "quick"],
-            capture_output=True, text=True,
-            cwd=os.path.dirname(os.path.abspath(__file__)),
-            timeout=120,
+# 立即更新按鈕（觸發 GitHub Actions，雲端本機都能用）
+if st.sidebar.button("🔄 立即更新資料", help="觸發 GitHub Actions 跑完整 pipeline，約 3-5 分鐘後資料生效"):
+    import requests as _req
+    _gh_pat = st.secrets.get("GITHUB_PAT", "")
+    if not _gh_pat:
+        st.sidebar.error("未設定 GITHUB_PAT，請在 Streamlit Secrets 加入後重試")
+    else:
+        _resp = _req.post(
+            "https://api.github.com/repos/alanchang04/tw_stock_advisor/actions/workflows/daily_update.yml/dispatches",
+            headers={
+                "Authorization": f"Bearer {_gh_pat}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+            json={"ref": "main"},
+            timeout=10,
         )
-        if r.returncode == 0:
-            st.write("✅ 價格 + 技術指標更新完成")
+        if _resp.status_code == 204:
+            st.sidebar.success("✅ 已送出更新請求！約 3-5 分鐘後資料生效，請屆時重新整理頁面")
         else:
-            st.write(f"❌ 更新失敗：{r.stderr[-300:]}")
-        status.update(label="✅ 完成" if r.returncode == 0 else "❌ 失敗", state="complete")
-    st.cache_data.clear()
-    st.rerun()
+            st.sidebar.error(f"❌ 觸發失敗（{_resp.status_code}）：{_resp.text[:200]}")
 
 st.sidebar.caption(f"今日：{date.today()}")
 
