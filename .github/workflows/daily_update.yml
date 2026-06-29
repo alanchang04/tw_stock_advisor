@@ -21,13 +21,14 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-          cache: 'pip'
 
       - name: 安裝依賴套件
         run: |
-          pip install --no-cache-dir -r requirements.txt
-          pip install --no-cache-dir litellm google-generativeai
-          python -c "import litellm; print('litellm OK:', litellm.__version__)"
+          python -m pip install --upgrade pip
+          python -m pip install --no-cache-dir -r requirements.txt
+          python -m pip install --no-cache-dir litellm google-generativeai
+          python -m pip show litellm
+          python -c "import litellm; print('✅ litellm OK:', litellm.__version__)"
 
       - name: 執行每日 Pipeline
         env:
