@@ -153,7 +153,7 @@ def mode_pipeline(source: str = "openapi", with_entries: bool = True, review: bo
             backfill()                   # 1. 自動補齊 DB 最後一天 ~ 今天
         else:
             mode_daily(source="finmind")
-        run_technical_analysis(recent_days=20)   # 2. 技術指標（增量：只寫最近 20 天，快又省）
+        run_technical_analysis(recent_days=5)    # 2. 技術指標（增量：只寫最近 5 天，日常更新夠用）
         result = run_daily_recommendation(with_entries=with_entries)  # 3. 出場檢查(+進場推薦)
         msg = result.get("report_text") if result else None
         if review:
