@@ -26,6 +26,33 @@ from data_pipeline.analysis.sector_momentum import run_sector_momentum
 from agent.daily_runner import run_daily_recommendation
 from config.settings import ScheduleConfig
 
+
+def mode_market_signals():
+    """
+    ETF 換股偵測 + 財經新聞 + YouTube 財經摘要
+    每日 pipeline 結尾呼叫，結果寫入 market_signals
+    """
+    logger.info("=== 市場情報模組開始 ===")
+    try:
+        from data_pipeline.fetchers.etf_fetcher import run_etf_tracking
+        run_etf_tracking()
+    except Exception as e:
+        logger.error(f"ETF 換股偵測失敗: {e}")
+
+    try:
+        from data_pipeline.scrapers.news_scraper import run_news_scraper
+        run_news_scraper()
+    except Exception as e:
+        logger.error(f"財經新聞爬取失敗: {e}")
+
+    try:
+        from data_pipeline.scrapers.youtube_scraper import run_youtube_scraper
+        run_youtube_scraper()
+    except Exception as e:
+        logger.error(f"YouTube 分析失敗: {e}")
+
+    logger.info("=== 市場情報模組完成 ===")
+
 # 設定 log 輸出到檔案
 logger.add("logs/pipeline_{time:YYYY-MM-DD}.log",
            rotation="1 day", retention="30 days", level="INFO")
@@ -154,7 +181,8 @@ def mode_pipeline(source: str = "openapi", with_entries: bool = True, review: bo
         else:
             mode_daily(source="finmind")
         run_technical_analysis(recent_days=5)    # 2. 技術指標（增量：只寫最近 5 天，日常更新夠用）
-        result = run_daily_recommendation(with_entries=with_entries)  # 3. 出場檢查(+進場推薦)
+        mode_market_signals()                    # 3. ETF換股 + 新聞 + YouTube
+        result = run_daily_recommendation(with_entries=with_entries)  # 4. 出場檢查(+進場推薦)
         msg = result.get("report_text") if result else None
         if review:
             msg = (msg or "") + "\n\n" + _weekly_review_text()
@@ -281,7 +309,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="台股資料 Pipeline")
     parser.add_argument(
         "--mode",
-        choices=["init", "daily", "pipeline", "auto", "backfill", "industry", "technical", "sector", "recommend", "backtest", "schedule", "bot", "quick"],
+        choices=["init", "daily", "pipeline", "auto", "backfill", "industry", "technical", "sector", "recommend", "backtest", "schedule", "bot", "quick", "market"],
         default="daily",
         help="執行模式（auto=排程用，依星期自動切換；pipeline=完整流程；backfill=補洞；backtest=回測）",
     )
@@ -331,5 +359,7 @@ if __name__ == "__main__":
     elif args.mode == "backtest":
         from agent.backtest import run_backtest
         run_backtest()
+    elif args.mode == "market":
+        mode_market_signals()
     elif args.mode == "schedule":
         mode_schedule()

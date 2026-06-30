@@ -31,7 +31,7 @@ st.set_page_config(
 st.sidebar.title("📈 台股顧問")
 page = st.sidebar.radio(
     "導覽",
-    ["📊 首頁", "📦 持倉追蹤", "🏦 法人動向", "📉 個股走勢", "🔄 歷史績效"],
+    ["📊 首頁", "📦 持倉追蹤", "🏦 法人動向", "📉 個股走勢", "🔄 歷史績效", "📰 市場情報"],
 )
 st.sidebar.markdown("---")
 
@@ -229,6 +229,58 @@ def load_active_stock_ids() -> list[str]:
             "SELECT stock_id FROM stocks WHERE is_active=true ORDER BY stock_id"
         )).fetchall()
     return [r[0] for r in rows]
+
+
+@st.cache_data(ttl=300)
+def load_market_signals(days: int = 7, signal_type: str = None) -> pd.DataFrame:
+    try:
+        cutoff = (date.today() - timedelta(days=days)).strftime("%Y-%m-%d")
+        with get_session() as s:
+            if signal_type:
+                rows = s.execute(text("""
+                    SELECT signal_type, source, title, summary, url,
+                           related_stocks, sentiment, signal_date
+                    FROM market_signals
+                    WHERE signal_date >= :c AND signal_type = :t
+                    ORDER BY signal_date DESC, id DESC
+                    LIMIT 100
+                """), {"c": cutoff, "t": signal_type}).fetchall()
+            else:
+                rows = s.execute(text("""
+                    SELECT signal_type, source, title, summary, url,
+                           related_stocks, sentiment, signal_date
+                    FROM market_signals
+                    WHERE signal_date >= :c
+                    ORDER BY signal_date DESC, id DESC
+                    LIMIT 200
+                """), {"c": cutoff}).fetchall()
+        df = pd.DataFrame(rows, columns=[
+            "類型", "來源", "標題", "摘要", "網址", "相關股票", "情緒", "日期"
+        ])
+        return df
+    except Exception:
+        return pd.DataFrame()
+
+
+@st.cache_data(ttl=300)
+def load_etf_changes(days: int = 30) -> pd.DataFrame:
+    try:
+        cutoff = (date.today() - timedelta(days=days)).strftime("%Y-%m-%d")
+        with get_session() as s:
+            rows = s.execute(text("""
+                SELECT etf_name, stock_id, stock_name, change_type,
+                       old_weight, new_weight, detected_date
+                FROM etf_changes
+                WHERE detected_date >= :c
+                ORDER BY detected_date DESC, id DESC
+                LIMIT 200
+            """), {"c": cutoff}).fetchall()
+        df = pd.DataFrame(rows, columns=[
+            "ETF", "股號", "股名", "異動", "舊比重%", "新比重%", "偵測日"
+        ])
+        return df
+    except Exception:
+        return pd.DataFrame()
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -499,3 +551,134 @@ elif page == "🔄 歷史績效":
               .format({"進場價": "{:.2f}", "出場價": "{:.2f}", "報酬%": "{:+.2f}%"}),
             use_container_width=True, hide_index=True,
         )
+
+
+# ══════════════════════════════════════════════════════════════════
+#  Page 6：市場情報
+# ══════════════════════════════════════════════════════════════════
+elif page == "📰 市場情報":
+    st.title("📰 市場情報")
+    st.caption("ETF 換股公告、財經新聞、YouTube 節目摘要（每日自動更新）")
+
+    days_filter = st.sidebar.selectbox("顯示天數", [3, 7, 14, 30], index=1)
+
+    if st.button("🔄 重新整理"):
+        load_market_signals.clear()
+        load_etf_changes.clear()
+
+    tab1, tab2, tab3 = st.tabs(["🔀 ETF 換股", "📰 財經新聞", "▶️ YouTube"])
+
+    # ── Tab 1：ETF 換股 ──────────────────────────────────────────
+    with tab1:
+        st.subheader("ETF 換股偵測")
+        st.caption("追蹤主動型 ETF（如 00981A）及高股息 ETF 的持股異動")
+
+        df_chg = load_etf_changes(days=days_filter)
+        if df_chg.empty:
+            st.info(f"近 {days_filter} 天無換股記錄（資料每日 21:00 更新，首次執行需先跑 Pipeline）")
+        else:
+            TYPE_EMOJI = {
+                "added":     "🟢 新增",
+                "removed":   "🔴 移除",
+                "increased": "⬆️ 加碼",
+                "decreased": "⬇️ 減碼",
+            }
+            df_chg["異動"] = df_chg["異動"].map(lambda x: TYPE_EMOJI.get(x, x))
+
+            etf_list = ["全部"] + sorted(df_chg["ETF"].unique().tolist())
+            selected_etf = st.selectbox("篩選 ETF", etf_list)
+            if selected_etf != "全部":
+                df_chg = df_chg[df_chg["ETF"] == selected_etf]
+
+            def _etf_row_style(row):
+                t = row["異動"]
+                if "新增" in str(t) or "加碼" in str(t):
+                    return ["background-color: #eafaf1"] * len(row)
+                if "移除" in str(t) or "減碼" in str(t):
+                    return ["background-color: #fdedec"] * len(row)
+                return [""] * len(row)
+
+            st.dataframe(
+                df_chg.style.apply(_etf_row_style, axis=1)
+                      .format({"舊比重%": "{:.2f}", "新比重%": "{:.2f}"}),
+                use_container_width=True, hide_index=True,
+            )
+
+            added   = df_chg[df_chg["異動"].str.contains("新增|加碼", na=False)]
+            removed = df_chg[df_chg["異動"].str.contains("移除|減碼", na=False)]
+            c1, c2 = st.columns(2)
+            c1.metric("買進訊號（新增/加碼）", len(added))
+            c2.metric("賣出訊號（移除/減碼）", len(removed))
+
+    # ── Tab 2：財經新聞 ──────────────────────────────────────────
+    with tab2:
+        st.subheader("財經新聞")
+
+        sentiment_filter = st.radio(
+            "情緒篩選", ["全部", "正面", "負面"], horizontal=True
+        )
+        df_news = load_market_signals(days=days_filter, signal_type=None)
+        df_news = df_news[df_news["類型"].isin(["news", "mops"])] if not df_news.empty else df_news
+
+        if not df_news.empty:
+            if sentiment_filter == "正面":
+                df_news = df_news[df_news["情緒"] == "positive"]
+            elif sentiment_filter == "負面":
+                df_news = df_news[df_news["情緒"] == "negative"]
+
+        if df_news.empty:
+            st.info(f"近 {days_filter} 天無新聞記錄（資料每日自動更新）")
+        else:
+            SENT_BADGE = {"positive": "🟢 利多", "negative": "🔴 利空", "neutral": "⚪ 中性"}
+            for _, row in df_news.iterrows():
+                badge = SENT_BADGE.get(row["情緒"], "")
+                stocks_str = ""
+                if row["相關股票"] and row["相關股票"] != "None":
+                    try:
+                        import ast
+                        stocks = ast.literal_eval(str(row["相關股票"])) if isinstance(row["相關股票"], str) else row["相關股票"]
+                        if stocks:
+                            stocks_str = f"  `{'、'.join(stocks[:5])}`"
+                    except Exception:
+                        pass
+
+                title_display = row["標題"]
+                if row["網址"] and str(row["網址"]) != "None":
+                    st.markdown(f"{badge} [{title_display}]({row['網址']}){stocks_str}  \n"
+                                f"<small>📅 {row['日期']}　{row['來源']}</small>",
+                                unsafe_allow_html=True)
+                else:
+                    st.markdown(f"{badge} **{title_display}**{stocks_str}  \n"
+                                f"<small>📅 {row['日期']}　{row['來源']}</small>",
+                                unsafe_allow_html=True)
+                st.markdown("---")
+
+    # ── Tab 3：YouTube ───────────────────────────────────────────
+    with tab3:
+        st.subheader("YouTube 財經節目")
+        st.caption("AI 自動摘要每日最新影片，擷取提及的股票代號與市場觀點")
+
+        df_yt = load_market_signals(days=days_filter, signal_type="youtube")
+        if df_yt.empty:
+            st.info(f"近 {days_filter} 天無 YouTube 記錄")
+        else:
+            SENT_BADGE = {"positive": "🟢", "negative": "🔴", "neutral": "⚪"}
+            for _, row in df_yt.iterrows():
+                badge = SENT_BADGE.get(row["情緒"], "⚪")
+                stocks_str = ""
+                if row["相關股票"] and str(row["相關股票"]) not in ("None", "[]"):
+                    try:
+                        import ast
+                        stocks = ast.literal_eval(str(row["相關股票"])) if isinstance(row["相關股票"], str) else row["相關股票"]
+                        if stocks:
+                            stocks_str = f"  提及：`{'、'.join(stocks[:8])}`"
+                    except Exception:
+                        pass
+
+                with st.expander(f"{badge} {row['標題']} — {row['日期']}"):
+                    if row["摘要"] and str(row["摘要"]) != "None":
+                        st.markdown(row["摘要"])
+                    if stocks_str:
+                        st.markdown(stocks_str)
+                    if row["網址"] and str(row["網址"]) != "None":
+                        st.markdown(f"[▶️ 觀看影片]({row['網址']})")
