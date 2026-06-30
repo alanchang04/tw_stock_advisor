@@ -2,17 +2,21 @@
 data_pipeline/scrapers/youtube_scraper.py
 
 YouTube 財經頻道摘要
-  - 透過 YouTube RSS 取得最新影片（無需 API key）
+  - 透過 YouTube RSS 取得頻道所有最新影片（無需 API key）
+  - 每次執行只處理「上次執行後」新發布的影片，同一天 3 集也全部處理
   - youtube-transcript-api 抓字幕（繁中 / 自動字幕）
   - Gemini 分析：摘要 + 提及股票 + 情緒
   - 結果寫入 market_signals 表
+
+要新增追蹤頻道：在 YOUTUBE_CHANNELS 列表加一個 dict 即可。
+channel_id 取得方式：開頻道頁面 → 右鍵「檢視原始碼」→ 搜尋 "channelId"
 """
 from __future__ import annotations
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
 import xml.etree.ElementTree as ET
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 import re
 import requests
 from loguru import logger
@@ -23,20 +27,30 @@ from config.settings import APIConfig
 
 
 # ── 追蹤的 YouTube 頻道 ──────────────────────────────────────────
+# 要新增頻道：直接在這裡加 dict，不需要修改其他任何地方
 YOUTUBE_CHANNELS = [
     {
         "name":       "錢線百分百",
         "channel_id": "UCdtpDTFXDvpblTt0TRMfuKQ",
-        "max_videos": 3,
     },
     {
         "name":       "股市大富翁",
         "channel_id": "UCqFPD5HJFXkDDPJnfyiPWyA",
-        "max_videos": 2,
     },
+    # 要加新頻道，複製下面這段並填入 channel_id：
+    # {
+    #     "name":       "頻道顯示名稱",
+    #     "channel_id": "UCxxxxxxxxxxxxxxxxxx",
+    # },
 ]
 
-RSS_BASE = "https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
+# 只處理最近幾天內發布的影片（避免第一次執行時把整個頻道歷史都爬一遍）
+MAX_LOOKBACK_DAYS = 2
+
+# RSS 每個頻道最多抓幾部影片（設高一點以確保當天所有影片都能被拿到）
+RSS_MAX_ENTRIES = 15
+
+RSS_BASE   = "https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
 WATCH_BASE = "https://www.youtube.com/watch?v={video_id}"
 
 STOCK_CODE_RE = re.compile(r'(?<!\d)(\d{4,6})(?!\d)')
@@ -49,9 +63,9 @@ HEADERS = {
 }
 
 
-# ── 從 RSS 抓最新影片清單 ──────────────────────────────────────
-def _fetch_channel_videos(channel_id: str, max_videos: int = 3) -> list[dict]:
-    """回傳 [{video_id, title, published}]"""
+# ── 從 RSS 抓最新影片清單 ────────────────────────────────────────
+def _fetch_channel_videos(channel_id: str) -> list[dict]:
+    """回傳 [{video_id, title, published}]，最多 RSS_MAX_ENTRIES 筆"""
     url = RSS_BASE.format(channel_id=channel_id)
     try:
         resp = requests.get(url, headers=HEADERS, timeout=15)
@@ -66,9 +80,9 @@ def _fetch_channel_videos(channel_id: str, max_videos: int = 3) -> list[dict]:
         "yt":   "http://www.youtube.com/xml/schemas/2015",
     }
     videos = []
-    for entry in root.findall("atom:entry", ns)[:max_videos]:
+    for entry in root.findall("atom:entry", ns)[:RSS_MAX_ENTRIES]:
         vid_id = entry.findtext("yt:videoId", namespaces=ns)
-        title  = entry.findtext("atom:title", namespaces=ns) or ""
+        title  = entry.findtext("atom:title",  namespaces=ns) or ""
         pub    = entry.findtext("atom:published", namespaces=ns) or ""
         if vid_id:
             try:
@@ -80,7 +94,16 @@ def _fetch_channel_videos(channel_id: str, max_videos: int = 3) -> list[dict]:
     return videos
 
 
-# ── 抓字幕 ──────────────────────────────────────────────────────
+# ── 判斷影片是否已儲存 ────────────────────────────────────────────
+def _already_saved(session, video_id: str) -> bool:
+    r = session.execute(text("""
+        SELECT 1 FROM market_signals
+        WHERE url LIKE :pattern AND signal_type = 'youtube' LIMIT 1
+    """), {"pattern": f"%{video_id}%"}).fetchone()
+    return r is not None
+
+
+# ── 抓字幕 ───────────────────────────────────────────────────────
 def _get_transcript(video_id: str, max_chars: int = 4000) -> str | None:
     try:
         from youtube_transcript_api import YouTubeTranscriptApi, NoTranscriptFound
@@ -164,33 +187,39 @@ def _analyze_with_gemini(channel_name: str, title: str, transcript: str) -> dict
         return default
 
 
-# ── 寫入 market_signals ──────────────────────────────────────────
-def _already_saved(session, video_id: str) -> bool:
-    r = session.execute(text("""
-        SELECT 1 FROM market_signals
-        WHERE url LIKE :pattern AND signal_type = 'youtube' LIMIT 1
-    """), {"pattern": f"%{video_id}%"}).fetchone()
-    return r is not None
-
-
-# ── 主入口 ──────────────────────────────────────────────────────
-def run_youtube_scraper():
-    logger.info("=== YouTube 財經頻道分析開始 ===")
+# ── 主入口 ───────────────────────────────────────────────────────
+def run_youtube_scraper(lookback_days: int = MAX_LOOKBACK_DAYS):
+    """
+    掃描所有追蹤頻道，處理 lookback_days 天內發布的所有新影片。
+    同一天發布 3 集的情況也能全部處理（RSS_MAX_ENTRIES=15）。
+    已存入 DB 的影片（以 video_id 去重）自動跳過。
+    """
+    logger.info(f"=== YouTube 財經頻道分析開始（追蹤 {len(YOUTUBE_CHANNELS)} 個頻道，"
+                f"看回 {lookback_days} 天）===")
     saved = 0
+    cutoff = date.today() - timedelta(days=lookback_days)
 
     for ch in YOUTUBE_CHANNELS:
         channel_name = ch["name"]
         logger.info(f"  頻道：{channel_name}")
-        videos = _fetch_channel_videos(ch["channel_id"], max_videos=ch["max_videos"])
+        videos = _fetch_channel_videos(ch["channel_id"])
 
         if not videos:
             logger.warning(f"    {channel_name}：無法取得影片列表")
             continue
 
-        for v in videos:
-            vid_id   = v["video_id"]
-            title    = v["title"]
-            pub_date = v["published"]
+        # 過濾出 cutoff 之後的影片，全部處理（不限集數）
+        new_videos = [v for v in videos if v["published"] >= cutoff]
+        logger.info(f"    共 {len(videos)} 部影片，近 {lookback_days} 天新影片：{len(new_videos)} 部")
+
+        if not new_videos:
+            logger.info(f"    {channel_name}：近 {lookback_days} 天無新影片")
+            continue
+
+        for v in new_videos:
+            vid_id    = v["video_id"]
+            title     = v["title"]
+            pub_date  = v["published"]
             watch_url = WATCH_BASE.format(video_id=vid_id)
 
             with get_session() as session:
@@ -198,18 +227,12 @@ def run_youtube_scraper():
                     logger.debug(f"    已存在，跳過：{title[:40]}")
                     continue
 
-            # 只處理最近 3 天的影片（避免處理太舊的）
-            if (date.today() - pub_date).days > 3:
-                logger.debug(f"    超過 3 天，跳過：{title[:40]}")
-                continue
-
-            logger.info(f"    處理影片：{title[:50]}")
+            logger.info(f"    [{pub_date}] 處理：{title[:50]}")
             transcript = _get_transcript(vid_id)
 
             if transcript:
                 analysis = _analyze_with_gemini(channel_name, title, transcript)
             else:
-                # 沒有字幕：只存標題，不做 AI 分析
                 logger.info(f"    無字幕，僅存標題")
                 analysis = {
                     "summary":   title,

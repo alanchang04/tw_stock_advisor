@@ -20,18 +20,42 @@ from sqlalchemy import text
 from database.connection import get_session
 
 
-# ── RSS 來源設定 ────────────────────────────────────────────────
+# ── RSS 來源設定 ─────────────────────────────────────────────────
+# 要加新來源：直接在列表裡新增一個 dict 即可（region: "tw"=台股、"us"=美股）
 RSS_SOURCES = [
+    # ── 台灣 ──────────────────────────────────────────────────────
     {
-        "name":  "鉅亨網台股",
-        "url":   "https://news.cnyes.com/rss/news/cat/tw_stock",
-        "type":  "news",
+        "name":   "鉅亨網台股",
+        "url":    "https://news.cnyes.com/rss/news/cat/tw_stock",
+        "region": "tw",
     },
     {
-        "name":  "鉅亨網台灣總覽",
-        "url":   "https://news.cnyes.com/rss/news/cat/tw_index",
-        "type":  "news",
+        "name":   "鉅亨網台灣總覽",
+        "url":    "https://news.cnyes.com/rss/news/cat/tw_index",
+        "region": "tw",
     },
+    {
+        "name":   "鉅亨網科技",
+        "url":    "https://news.cnyes.com/rss/news/cat/technology",
+        "region": "tw",
+    },
+    # ── 美股（費半、科技股對台灣影響大）────────────────────────
+    {
+        "name":   "Reuters Asia Tech",
+        "url":    "https://feeds.reuters.com/reuters/technologyNews",
+        "region": "us",
+    },
+    {
+        "name":   "鉅亨網美股",
+        "url":    "https://news.cnyes.com/rss/news/cat/us_stock",
+        "region": "us",
+    },
+    # ── 可在此繼續新增其他 RSS 來源 ─────────────────────────────
+    # {
+    #     "name":   "自訂來源名稱",
+    #     "url":    "https://xxx/rss",
+    #     "region": "tw",   # 或 "us"
+    # },
 ]
 
 # 用來識別股票代號的正則（4-6位數字，前後有括號或特殊分隔）
@@ -39,14 +63,22 @@ STOCK_CODE_RE = re.compile(r'(?<!\d)(\d{4,6})(?!\d)')
 
 # 需包含的關鍵字（利多相關）
 POSITIVE_KEYWORDS = [
+    # 台股中文
     "利多", "大漲", "創高", "突破", "法說", "拿單", "訂單", "超預期",
     "獲利", "股利", "配息", "成長", "看好", "買進", "轉機", "升評",
     "入列", "成分股", "調升", "主力", "外資買超",
+    # 美股英文（費半/科技相關）
+    "surge", "rally", "beat", "record high", "upgrade", "buy rating",
+    "strong demand", "AI boom", "chip demand", "semiconductor",
 ]
 
 NEGATIVE_KEYWORDS = [
+    # 台股中文
     "利空", "大跌", "崩跌", "停牌", "下市", "虧損", "裁員", "減資",
     "警示", "全額交割",
+    # 美股英文
+    "plunge", "crash", "downgrade", "sell rating", "miss", "tariff",
+    "trade war", "recession", "layoff", "ban",
 ]
 
 HEADERS = {
@@ -84,13 +116,13 @@ def _already_saved(session, title: str, signal_date: date) -> bool:
 
 
 # ── RSS 抓取 ──────────────────────────────────────────────────────
-def fetch_rss_news(max_items: int = 20) -> int:
+def fetch_rss_news(max_items: int = 30) -> int:
     """抓取 RSS 新聞並寫入 market_signals，回傳新增筆數"""
     saved = 0
     today = date.today()
 
     for source in RSS_SOURCES:
-        logger.info(f"  爬取 RSS：{source['name']}")
+        logger.info(f"  爬取 RSS：{source['name']} [{source.get('region','tw').upper()}]")
         try:
             resp = requests.get(source["url"], headers=HEADERS, timeout=15)
             resp.raise_for_status()
@@ -114,12 +146,21 @@ def fetch_rss_news(max_items: int = 20) -> int:
                 desc    = (desc_el.text  or "").strip() if desc_el is not None else ""
                 url     = (link_el.text  or "").strip() if link_el is not None else None
 
-                # 解析發布日期
+                # 解析發布日期（相容 RFC 822 / ISO 8601 / 各種格式）
+                pub_date = today
                 try:
-                    pub_str = pub_el.text if pub_el is not None else ""
-                    pub_date = datetime.strptime(
-                        pub_str[:16].strip(), "%a, %d %b %Y"
-                    ).date() if pub_str else today
+                    pub_str = (pub_el.text or "").strip() if pub_el is not None else ""
+                    if pub_str:
+                        for fmt in ("%a, %d %b %Y %H:%M:%S %z",
+                                    "%a, %d %b %Y %H:%M:%S GMT",
+                                    "%a, %d %b %Y"):
+                            try:
+                                pub_date = datetime.strptime(pub_str[:31], fmt).date()
+                                break
+                            except ValueError:
+                                continue
+                        else:
+                            pub_date = datetime.fromisoformat(pub_str[:10]).date()
                 except Exception:
                     pub_date = today
 
