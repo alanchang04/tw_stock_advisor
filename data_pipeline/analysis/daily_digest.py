@@ -114,10 +114,11 @@ def generate_daily_digest(target_date: date = None) -> str | None:
     try:
         import litellm
         response = litellm.completion(
-            model="gemini/gemini-1.5-flash",
+            model=APIConfig.GEMINI_MODEL,
             messages=[{"role": "user", "content": prompt}],
             api_key=APIConfig.GEMINI_API_KEY,
-            max_tokens=600,
+            max_tokens=800,
+            reasoning_effort="disable",  # gemini-2.5 預設會思考，關閉以免吃光 max_tokens
         )
         digest_text = (response.choices[0].message.content or "").strip()
 

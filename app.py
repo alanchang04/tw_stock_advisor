@@ -61,6 +61,24 @@ st.sidebar.caption(f"今日：{date.today()}")
 
 
 # ══════════════════════════════════════════════════════════════════
+#  共用工具
+# ══════════════════════════════════════════════════════════════════
+def _clean_val(v):
+    """把 None / NaN / 'None' / 'nan' / 空字串 統一轉成 None，否則回傳去空白字串。"""
+    if v is None:
+        return None
+    try:
+        if pd.isna(v):          # 處理 NaN / NaT
+            return None
+    except (TypeError, ValueError):
+        pass
+    s = str(v).strip()
+    if s in ("", "None", "nan", "NaN", "NaT"):
+        return None
+    return s
+
+
+# ══════════════════════════════════════════════════════════════════
 #  共用資料查詢（快取 5 分鐘）
 # ══════════════════════════════════════════════════════════════════
 @st.cache_data(ttl=300)
@@ -562,8 +580,11 @@ elif page == "🔄 歷史績效":
             if isinstance(val, (int, float)):
                 return "color: #e74c3c" if val < 0 else "color: #27ae60"
             return ""
+        # pandas 2.1+ 將 Styler.applymap 改名為 Styler.map（3.0 移除 applymap）
+        styler = df.style
+        _elementwise = getattr(styler, "map", None) or styler.applymap
         st.dataframe(
-            df.style.applymap(color_ret, subset=["報酬%"])
+            _elementwise(color_ret, subset=["報酬%"])
               .format({"進場價": "{:.2f}", "出場價": "{:.2f}", "報酬%": "{:+.2f}%"}),
             use_container_width=True, hide_index=True,
         )
@@ -674,14 +695,14 @@ elif page == "📰 市場情報":
 
                 # 標題行
                 title = row["標題"]
-                url   = row["網址"] if str(row["網址"]) not in ("None", "") else None
+                url   = _clean_val(row["網址"])
                 st.markdown(
                     f"{badge} **{title}**{stocks_str}",
                 )
 
                 # AI 摘要（核心內容）
-                summary = row["摘要"]
-                if summary and str(summary) not in ("None", "", title):
+                summary = _clean_val(row["摘要"])
+                if summary and summary != title:
                     st.markdown(f"> {summary}")
 
                 # 來源 + 連結（輔助資訊）
@@ -713,13 +734,17 @@ elif page == "📰 市場情報":
                     except Exception:
                         pass
 
+                summary_txt = _clean_val(row["摘要"])
+                url_txt     = _clean_val(row["網址"])
                 with st.expander(f"{badge} {row['標題']} — {row['日期']}"):
-                    if row["摘要"] and str(row["摘要"]) != "None":
-                        st.markdown(row["摘要"])
+                    if summary_txt:
+                        st.markdown(summary_txt)
+                    else:
+                        st.caption("（此影片無字幕，AI 無法生成摘要）")
                     if stocks_str:
                         st.markdown(stocks_str)
-                    if row["網址"] and str(row["網址"]) != "None":
-                        st.markdown(f"[▶️ 觀看影片]({row['網址']})")
+                    if url_txt:
+                        st.markdown(f"[▶️ 觀看影片]({url_txt})")
 
 
 # ══════════════════════════════════════════════════════════════════

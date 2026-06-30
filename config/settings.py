@@ -37,6 +37,9 @@ class APIConfig:
     FINMIND_TOKEN    = os.getenv("FINMIND_TOKEN", "")
     ANTHROPIC_KEY    = os.getenv("ANTHROPIC_API_KEY", "")
     GEMINI_KEY       = os.getenv("GEMINI_API_KEY", "")
+    GEMINI_API_KEY   = GEMINI_KEY   # 別名：scrapers/analysis 模組以此名稱引用
+    # gemini-1.5-flash 已被 Google 下架；集中管理模型名稱，未來換版只改這一行
+    GEMINI_MODEL     = os.getenv("GEMINI_MODEL", "gemini/gemini-2.5-flash")
     TELEGRAM_TOKEN   = os.getenv("TELEGRAM_BOT_TOKEN", "")
     TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 

@@ -165,10 +165,11 @@ def _analyze_with_gemini(channel_name: str, title: str, transcript: str) -> dict
     try:
         import litellm
         response = litellm.completion(
-            model="gemini/gemini-1.5-flash",
+            model=APIConfig.GEMINI_MODEL,
             messages=[{"role": "user", "content": prompt}],
             api_key=APIConfig.GEMINI_API_KEY,
-            max_tokens=400,
+            max_tokens=500,
+            reasoning_effort="disable",  # gemini-2.5 預設會思考，關閉以免吃光 max_tokens
         )
         text_ = response.choices[0].message.content or ""
 
