@@ -23,38 +23,35 @@ from database.connection import get_session
 # ── RSS 來源設定 ─────────────────────────────────────────────────
 # 要加新來源：直接在列表裡新增一個 dict 即可（region: "tw"=台股、"us"=美股）
 RSS_SOURCES = [
-    # ── 台灣 ──────────────────────────────────────────────────────
+    # ── 台灣財經（Google News RSS，穩定不需 API key）────────────
     {
-        "name":   "鉅亨網台股",
-        "url":    "https://news.cnyes.com/rss/news/cat/tw_stock",
+        "name":   "台股新聞",
+        "url":    "https://news.google.com/rss/search?q=台股+利多+利空&hl=zh-TW&gl=TW&ceid=TW:zh-Hant",
         "region": "tw",
     },
     {
-        "name":   "鉅亨網台灣總覽",
-        "url":    "https://news.cnyes.com/rss/news/cat/tw_index",
+        "name":   "台股半導體",
+        "url":    "https://news.google.com/rss/search?q=台灣+半導體+電子股&hl=zh-TW&gl=TW&ceid=TW:zh-Hant",
         "region": "tw",
     },
     {
-        "name":   "鉅亨網科技",
-        "url":    "https://news.cnyes.com/rss/news/cat/technology",
+        "name":   "ETF新聞",
+        "url":    "https://news.google.com/rss/search?q=台灣+ETF+換股+成分股&hl=zh-TW&gl=TW&ceid=TW:zh-Hant",
         "region": "tw",
     },
-    # ── 美股（費半、科技股對台灣影響大）────────────────────────
+    # ── 美股（費半指數對台灣科技股影響大）──────────────────────
     {
-        "name":   "Reuters Asia Tech",
-        "url":    "https://feeds.reuters.com/reuters/technologyNews",
-        "region": "us",
-    },
-    {
-        "name":   "鉅亨網美股",
-        "url":    "https://news.cnyes.com/rss/news/cat/us_stock",
+        "name":   "費半/美股科技",
+        "url":    "https://news.google.com/rss/search?q=Philadelphia+semiconductor+TSMC+stock&hl=en-US&gl=US&ceid=US:en",
         "region": "us",
     },
     # ── 可在此繼續新增其他 RSS 來源 ─────────────────────────────
+    # Google News RSS 格式：
+    # https://news.google.com/rss/search?q=<搜尋詞>&hl=zh-TW&gl=TW&ceid=TW:zh-Hant
     # {
     #     "name":   "自訂來源名稱",
-    #     "url":    "https://xxx/rss",
-    #     "region": "tw",   # 或 "us"
+    #     "url":    "https://news.google.com/rss/search?q=搜尋詞&hl=zh-TW&gl=TW&ceid=TW:zh-Hant",
+    #     "region": "tw",
     # },
 ]
 

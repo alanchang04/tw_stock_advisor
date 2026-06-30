@@ -31,11 +31,7 @@ from config.settings import APIConfig
 YOUTUBE_CHANNELS = [
     {
         "name":       "錢線百分百",
-        "channel_id": "UCdtpDTFXDvpblTt0TRMfuKQ",
-    },
-    {
-        "name":       "股市大富翁",
-        "channel_id": "UCqFPD5HJFXkDDPJnfyiPWyA",
+        "channel_id": "UC_ObC9O0ZQ2FhW6u9_iFlZA",
     },
     # 要加新頻道，複製下面這段並填入 channel_id：
     # {

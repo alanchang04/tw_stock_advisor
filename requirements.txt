@@ -11,8 +11,8 @@ sqlalchemy==2.0.49
 # 本機需要時手動：pip install FinMind==1.9.10
 # FinMind==1.9.10
 
-# ta 技術指標（FinMind 原本會帶入，這裡單獨指定）
-ta~=0.5.25
+# ta 技術指標（0.9+ 新版 API，FinMind 安裝後會升級到此版本）
+ta>=0.9.0
 
 # 資料處理
 # pandas/numpy 不鎖死版本，讓 pip 為 Python 3.14 選 wheel

@@ -56,26 +56,26 @@ def calc_indicators(df: pd.DataFrame) -> pd.DataFrame:
     high   = df["high"]
     low    = df["low"]
 
-    # ── 均線（ta 0.5.25 用 n 不用 window）──────────────────────
-    df["ma5"]   = ta.trend.sma_indicator(close, n=5)
-    df["ma10"]  = ta.trend.sma_indicator(close, n=10)
-    df["ma20"]  = ta.trend.sma_indicator(close, n=20)
-    df["ma60"]  = ta.trend.sma_indicator(close, n=60)
-    df["ma120"] = ta.trend.sma_indicator(close, n=120)
-    df["ma240"] = ta.trend.sma_indicator(close, n=240)
+    # ── 均線（ta 0.9+ 用 window=）──────────────────────────────
+    df["ma5"]   = ta.trend.sma_indicator(close, window=5)
+    df["ma10"]  = ta.trend.sma_indicator(close, window=10)
+    df["ma20"]  = ta.trend.sma_indicator(close, window=20)
+    df["ma60"]  = ta.trend.sma_indicator(close, window=60)
+    df["ma120"] = ta.trend.sma_indicator(close, window=120)
+    df["ma240"] = ta.trend.sma_indicator(close, window=240)
 
     # ── RSI ────────────────────────────────────────────────────
-    df["rsi14"] = ta.momentum.rsi(close, n=14)
+    df["rsi14"] = ta.momentum.rsi(close, window=14)
 
     # ── MACD ───────────────────────────────────────────────────
-    df["macd"]        = ta.trend.macd(close, n_slow=26, n_fast=12)
-    df["macd_signal"] = ta.trend.macd_signal(close, n_slow=26, n_fast=12, n_sign=9)
-    df["macd_hist"]   = ta.trend.macd_diff(close, n_slow=26, n_fast=12, n_sign=9)
+    df["macd"]        = ta.trend.macd(close, window_slow=26, window_fast=12)
+    df["macd_signal"] = ta.trend.macd_signal(close, window_slow=26, window_fast=12, window_sign=9)
+    df["macd_hist"]   = ta.trend.macd_diff(close, window_slow=26, window_fast=12, window_sign=9)
 
     # ── 布林通道 ────────────────────────────────────────────────
-    df["bb_upper"]  = ta.volatility.bollinger_hband(close, n=20, ndev=2)
-    df["bb_middle"] = ta.volatility.bollinger_mavg(close, n=20)
-    df["bb_lower"]  = ta.volatility.bollinger_lband(close, n=20, ndev=2)
+    df["bb_upper"]  = ta.volatility.bollinger_hband(close, window=20, window_dev=2)
+    df["bb_middle"] = ta.volatility.bollinger_mavg(close, window=20)
+    df["bb_lower"]  = ta.volatility.bollinger_lband(close, window=20, window_dev=2)
 
     # ── KD 隨機指標 ─────────────────────────────────────────────
     df["k_value"], df["d_value"] = _calc_kd(high, low, close)
