@@ -18,11 +18,13 @@ from sqlalchemy import text
 from database.connection import get_session
 
 # ── 可調參數 ──────────────────────────────────────────────────────
+# 注意：institutional_trading.invest_net 單位為「股」，門檻以張(=1000股)表示，比較時 ×1000
 TRACK_ETF = "00981A"   # 追蹤的主動型 ETF（統一台股增長）
 MIN_BUY_DAYS   = 3     # 投信至少連買幾天（在 LOOKBACK_DAYS 內）
 MIN_SINGLE_BUY = 500   # 單日大量門檻（張）—— 達到此值即使只買 1 天也入選
 LOOKBACK_DAYS  = 15    # 投信買超回看自然日數
 ETF_LOOKBACK   = 45    # ETF 換股回看天數（主動型可能任意日換股）
+_SHARES_PER_LOT = 1000  # 1 張 = 1000 股
 
 
 # ── 查詢函式 ──────────────────────────────────────────────────────
@@ -46,20 +48,22 @@ def _invest_buying(session) -> list[dict]:
             MAX(stock_name)                                                  AS stock_name,
             COUNT(*)  FILTER (WHERE invest_net > 0)                          AS buy_days,
             COUNT(*)  FILTER (WHERE invest_net < 0)                          AS sell_days,
-            SUM(invest_net) FILTER (WHERE invest_net > 0)                    AS total_bought,
-            MAX(invest_net)                                                   AS peak_day,
+            -- invest_net 單位為股，÷1000 轉成張
+            ROUND(SUM(invest_net) FILTER (WHERE invest_net > 0) / 1000.0)    AS total_bought,
+            ROUND(MAX(invest_net) / 1000.0)                                  AS peak_day,
             MAX(trade_date) FILTER (WHERE invest_net > 0)                    AS last_buy_date
         FROM window_
         GROUP BY stock_id
         HAVING
             COUNT(*) FILTER (WHERE invest_net > 0) >= :min_days
-            OR MAX(invest_net) >= :min_single
+            OR MAX(invest_net) >= :min_single * :lot
         ORDER BY buy_days DESC, total_bought DESC NULLS LAST
         LIMIT 60
     """), {
         "days":       LOOKBACK_DAYS,
         "min_days":   MIN_BUY_DAYS,
         "min_single": MIN_SINGLE_BUY,
+        "lot":        _SHARES_PER_LOT,
     }).fetchall()
 
     return [dict(r._mapping) for r in rows]
@@ -136,7 +140,7 @@ def run_smart_money_analysis() -> int:
             "title":   (f"⭐【雙確認】{inv['stock_id']} {inv['stock_name']} "
                         f"— 投信連買{inv['buy_days']}日 + 統一ETF{action}"),
             "summary": (f"投信近{LOOKBACK_DAYS}日買超 {inv['buy_days']} 天，"
-                        f"累計 {(inv['total_bought'] or 0):,.0f} 張（峰值 {inv['peak_day']:,} 張）；"
+                        f"累計 {(inv['total_bought'] or 0):,.0f} 張（峰值 {(inv['peak_day'] or 0):,.0f} 張）；"
                         f"統一台股增長({TRACK_ETF}) {action} {etf['detected_date']}"
                         + (f"，權重 {weight_str}" if weight_str else "")),
             "stocks":  [inv["stock_id"]],
@@ -151,7 +155,7 @@ def run_smart_money_analysis() -> int:
             "title":   (f"【投信】{inv['stock_id']} {inv['stock_name']} "
                         f"— 近{LOOKBACK_DAYS}日買超 {inv['buy_days']} 天"),
             "summary": (f"累計買超 {(inv['total_bought'] or 0):,.0f} 張，"
-                        f"單日峰值 {inv['peak_day']:,} 張，"
+                        f"單日峰值 {(inv['peak_day'] or 0):,.0f} 張，"
                         f"最後買超日 {inv['last_buy_date']}"),
             "stocks":  [inv["stock_id"]],
         })

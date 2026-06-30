@@ -783,14 +783,15 @@ elif page == "🧠 聰明資金":
                         MAX(industry)                                       AS 產業,
                         COUNT(*) FILTER (WHERE invest_net > 0)              AS 買超天數,
                         COUNT(*) FILTER (WHERE invest_net < 0)              AS 賣超天數,
-                        COALESCE(SUM(invest_net) FILTER (WHERE invest_net > 0), 0) AS 累計買超張,
-                        MAX(invest_net)                                     AS 單日峰值張,
+                        -- invest_net 單位為股，÷1000 轉成張
+                        ROUND(COALESCE(SUM(invest_net) FILTER (WHERE invest_net > 0), 0) / 1000.0) AS 累計買超張,
+                        ROUND(MAX(invest_net) / 1000.0)                     AS 單日峰值張,
                         MAX(trade_date) FILTER (WHERE invest_net > 0)       AS 最後買超日
                     FROM w
                     GROUP BY stock_id
                     HAVING
                         COUNT(*) FILTER (WHERE invest_net > 0) >= :min_days
-                        OR MAX(invest_net) >= :min_s
+                        OR MAX(invest_net) >= :min_s * 1000
                     ORDER BY 買超天數 DESC, 累計買超張 DESC
                     LIMIT 50
                 """), {"days": days, "min_days": min_days, "min_s": min_single_v}).fetchall()
@@ -888,7 +889,7 @@ elif page == "🧠 聰明資金":
                             st.markdown(
                                 f"**🏦 投信：** 近{inv_days}日買超 **{inv_row['買超天數']}** 天 "
                                 f"｜ 累計 **{inv_row['累計買超張']:,.0f}** 張 "
-                                f"｜ 峰值 **{inv_row['單日峰值張']:,}** 張/日"
+                                f"｜ 峰值 **{inv_row['單日峰值張']:,.0f}** 張/日"
                             )
                     with col2:
                         if etf_row is not None:
@@ -942,6 +943,10 @@ elif page == "🧠 聰明資金":
             display_cols = ["stock_id", "股票名稱", "產業", "買超天數",
                             "賣超天數", "累計買超張", "單日峰值張", "最後買超日"]
             df_show = df_invest[[c for c in display_cols if c in df_invest.columns]].copy()
+            # ROUND 回傳 Decimal，轉成 int 以利顯示與格式化
+            for c in ("累計買超張", "單日峰值張", "買超天數", "賣超天數"):
+                if c in df_show.columns:
+                    df_show[c] = df_show[c].fillna(0).astype("int64")
             df_show.insert(0, "標記", df_show["stock_id"].apply(
                 lambda x: "⭐" if x in overlap_ids else ""
             ))
@@ -951,9 +956,9 @@ elif page == "🧠 聰明資金":
                 use_container_width=True,
                 hide_index=True,
                 column_config={
-                    "標記":       st.column_config.TextColumn("", width=40),
+                    "標記":       st.column_config.TextColumn("", width="small"),
                     "買超天數":   st.column_config.NumberColumn("買超天數", format="%d 天"),
-                    "累計買超張": st.column_config.NumberColumn("累計買超(張)", format="%,.0f"),
+                    "累計買超張": st.column_config.NumberColumn("累計買超(張)", format="%,d"),
                     "單日峰值張": st.column_config.NumberColumn("峰值(張)", format="%,d"),
                 },
             )
