@@ -82,11 +82,14 @@ def _parse_pub_date(pub_str: str) -> date:
 
 
 def _already_saved(session, title: str, signal_date: date) -> bool:
+    """已存在且有實質 AI 摘要（>20 字）才視為已完成；summary 空的讓它重新分析。"""
     r = session.execute(text("""
-        SELECT 1 FROM market_signals
+        SELECT summary FROM market_signals
         WHERE title = :title AND signal_date = :dt LIMIT 1
     """), {"title": title[:200], "dt": signal_date}).fetchone()
-    return r is not None
+    if r is None:
+        return False
+    return bool(r[0] and len(r[0].strip()) > 20)
 
 
 # ── Gemini 批次分析新聞 ───────────────────────────────────────────
@@ -227,37 +230,56 @@ def fetch_rss_news(max_items: int = 30) -> int:
         logger.info(f"  Gemini 分析第 {i//BATCH + 1} 批（{len(batch)} 篇）...")
         analyses.extend(_batch_analyze(batch))
 
-    # Step 3：全部存入 DB
+    # Step 3：全部存入 DB（有舊記錄但 summary 空 → UPDATE；全新 → INSERT）
     saved = 0
     with get_session() as session:
         for article, analysis in zip(pending, analyses):
-            # 過濾：摘要與標題相同（分析失敗）且無股票 → 情緒中立才跳過，避免漏掉重要新聞
+            # 過濾：分析完全失敗（中立 + 無股票 + 摘要 = desc）→ 跳過
             if (analysis["sentiment"] == "neutral"
                     and not analysis["stocks"]
                     and (not analysis["summary"] or analysis["summary"] == article["desc"])):
                 continue
 
-            session.execute(text("""
-                INSERT INTO market_signals
-                    (signal_type, source, title, summary, url,
-                     related_stocks, sentiment, signal_date)
-                VALUES
-                    (:signal_type, :source, :title, :summary, :url,
-                     :related_stocks, :sentiment, :signal_date)
-                ON CONFLICT DO NOTHING
+            summary_val = analysis["summary"][:500] if analysis["summary"] else None
+
+            # 先嘗試 UPDATE 現有無摘要的記錄
+            updated = session.execute(text("""
+                UPDATE market_signals
+                SET summary = :summary, related_stocks = :related_stocks,
+                    sentiment = :sentiment, url = COALESCE(url, :url)
+                WHERE title = :title AND signal_date = :dt
+                  AND (summary IS NULL OR length(summary) <= 20)
             """), {
-                "signal_type":    "news",
-                "source":         article["source"],
-                "title":          article["title"],
-                "summary":        analysis["summary"][:500] if analysis["summary"] else None,
-                "url":            article["url"],
+                "summary":        summary_val,
                 "related_stocks": analysis["stocks"] or None,
                 "sentiment":      analysis["sentiment"],
-                "signal_date":    article["pub_date"],
-            })
+                "url":            article["url"],
+                "title":          article["title"],
+                "dt":             article["pub_date"],
+            }).rowcount
+
+            if updated == 0:
+                # 全新文章 → INSERT
+                session.execute(text("""
+                    INSERT INTO market_signals
+                        (signal_type, source, title, summary, url,
+                         related_stocks, sentiment, signal_date)
+                    VALUES
+                        (:signal_type, :source, :title, :summary, :url,
+                         :related_stocks, :sentiment, :signal_date)
+                """), {
+                    "signal_type":    "news",
+                    "source":         article["source"],
+                    "title":          article["title"],
+                    "summary":        summary_val,
+                    "url":            article["url"],
+                    "related_stocks": analysis["stocks"] or None,
+                    "sentiment":      analysis["sentiment"],
+                    "signal_date":    article["pub_date"],
+                })
             saved += 1
 
-    logger.info(f"  RSS 新聞：新增 {saved} 筆（含 AI 摘要）")
+    logger.info(f"  RSS 新聞：新增/更新 {saved} 筆（含 AI 摘要）")
     return saved
 
 

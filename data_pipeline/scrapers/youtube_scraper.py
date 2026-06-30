@@ -104,11 +104,14 @@ def _fetch_channel_videos(channel_id: str) -> list[dict]:
 
 # ── 判斷影片是否已儲存 ────────────────────────────────────────────
 def _already_saved(session, video_id: str) -> bool:
+    """已存在且有實質 AI 摘要（>20 字）才視為已完成；summary 只是標題的讓它重新分析。"""
     r = session.execute(text("""
-        SELECT 1 FROM market_signals
+        SELECT summary FROM market_signals
         WHERE url LIKE :pattern AND signal_type = 'youtube' LIMIT 1
     """), {"pattern": f"%{video_id}%"}).fetchone()
-    return r is not None
+    if r is None:
+        return False
+    return bool(r[0] and len(r[0].strip()) > 20)
 
 
 # ── 抓字幕 ───────────────────────────────────────────────────────
@@ -249,24 +252,39 @@ def run_youtube_scraper(lookback_days: int = MAX_LOOKBACK_DAYS):
                 }
 
             with get_session() as session:
-                session.execute(text("""
-                    INSERT INTO market_signals
-                        (signal_type, source, title, summary, url,
-                         related_stocks, sentiment, signal_date)
-                    VALUES
-                        (:signal_type, :source, :title, :summary, :url,
-                         :related_stocks, :sentiment, :signal_date)
-                    ON CONFLICT DO NOTHING
+                # 先嘗試更新（舊記錄 summary 為空的情況）
+                updated = session.execute(text("""
+                    UPDATE market_signals
+                    SET summary = :summary, related_stocks = :related_stocks,
+                        sentiment = :sentiment
+                    WHERE url LIKE :url_pattern AND signal_type = 'youtube'
+                      AND (summary IS NULL OR length(summary) <= 20)
                 """), {
-                    "signal_type":    "youtube",
-                    "source":         channel_name,
-                    "title":          f"【{channel_name}】{title[:250]}",
                     "summary":        analysis["summary"][:500] if analysis["summary"] else None,
-                    "url":            watch_url,
                     "related_stocks": analysis["stocks"] or None,
                     "sentiment":      analysis["sentiment"],
-                    "signal_date":    pub_date,
-                })
+                    "url_pattern":    f"%{vid_id}%",
+                }).rowcount
+
+                if updated == 0:
+                    # 沒有舊記錄 → 全新 INSERT
+                    session.execute(text("""
+                        INSERT INTO market_signals
+                            (signal_type, source, title, summary, url,
+                             related_stocks, sentiment, signal_date)
+                        VALUES
+                            (:signal_type, :source, :title, :summary, :url,
+                             :related_stocks, :sentiment, :signal_date)
+                    """), {
+                        "signal_type":    "youtube",
+                        "source":         channel_name,
+                        "title":          f"【{channel_name}】{title[:250]}",
+                        "summary":        analysis["summary"][:500] if analysis["summary"] else None,
+                        "url":            watch_url,
+                        "related_stocks": analysis["stocks"] or None,
+                        "sentiment":      analysis["sentiment"],
+                        "signal_date":    pub_date,
+                    })
                 saved += 1
 
     logger.info(f"=== YouTube 分析完成：新增 {saved} 筆 ===")
