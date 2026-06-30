@@ -745,9 +745,11 @@ elif page == "🧠 聰明資金":
                 rows = s.execute(text("""
                     WITH w AS (
                         SELECT it.stock_id, it.trade_date, it.invest_net,
-                               s.stock_name, s.industry
+                               s.stock_name,
+                               ind.name_zh AS industry
                         FROM institutional_trading it
                         JOIN stocks s ON it.stock_id = s.stock_id
+                        LEFT JOIN industries ind ON s.industry_code = ind.code
                         WHERE it.trade_date >= CURRENT_DATE - :days * INTERVAL '1 day'
                     )
                     SELECT

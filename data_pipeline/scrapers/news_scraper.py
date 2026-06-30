@@ -201,7 +201,13 @@ def fetch_rss_news(max_items: int = 30) -> int:
                 raw_title = (title_el.text or "").strip()
                 # Google News title 格式常是 "新聞標題 - 來源媒體"，去掉媒體名稱
                 title = re.sub(r'\s*-\s*[^-]+$', '', raw_title).strip() or raw_title
-                desc  = re.sub(r'<[^>]+>', '', (desc_el.text or "")).strip()[:400] if desc_el is not None else ""
+                # description 可能含 CDATA HTML（Google News RSS 常見），用 BeautifulSoup 確保乾淨
+                raw_desc = (desc_el.text or "") if desc_el is not None else ""
+                try:
+                    from bs4 import BeautifulSoup as _BS
+                    desc = _BS(raw_desc, "html.parser").get_text(separator=" ").strip()[:400]
+                except Exception:
+                    desc = re.sub(r'<[^>]+>', '', raw_desc).strip()[:400]
                 url   = (link_el.text or "").strip() if link_el is not None else None
                 pub_date = _parse_pub_date((pub_el.text or "") if pub_el is not None else "")
 
