@@ -29,7 +29,7 @@ from config.settings import ScheduleConfig
 
 def mode_market_signals():
     """
-    ETF 換股偵測 + 財經新聞 + YouTube 財經摘要
+    ETF 換股偵測 + 財經新聞（含 AI 摘要）+ YouTube 摘要 + 每日彙整
     每日 pipeline 結尾呼叫，結果寫入 market_signals
     """
     logger.info("=== 市場情報模組開始 ===")
@@ -50,6 +50,12 @@ def mode_market_signals():
         run_youtube_scraper()
     except Exception as e:
         logger.error(f"YouTube 分析失敗: {e}")
+
+    try:
+        from data_pipeline.analysis.daily_digest import generate_daily_digest
+        generate_daily_digest()
+    except Exception as e:
+        logger.error(f"每日彙整失敗: {e}")
 
     logger.info("=== 市場情報模組完成 ===")
 

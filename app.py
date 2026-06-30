@@ -283,6 +283,22 @@ def load_etf_changes(days: int = 30) -> pd.DataFrame:
         return pd.DataFrame()
 
 
+@st.cache_data(ttl=300)
+def load_daily_digest(target_date: date = None) -> str | None:
+    if target_date is None:
+        target_date = date.today()
+    try:
+        with get_session() as s:
+            row = s.execute(text("""
+                SELECT summary FROM market_signals
+                WHERE signal_type = 'digest' AND signal_date = :dt
+                ORDER BY id DESC LIMIT 1
+            """), {"dt": target_date}).fetchone()
+        return row[0] if row else None
+    except Exception:
+        return None
+
+
 # ══════════════════════════════════════════════════════════════════
 #  Page 1：首頁 Dashboard
 # ══════════════════════════════════════════════════════════════════
@@ -558,14 +574,24 @@ elif page == "🔄 歷史績效":
 # ══════════════════════════════════════════════════════════════════
 elif page == "📰 市場情報":
     st.title("📰 市場情報")
-    st.caption("ETF 換股公告、財經新聞、YouTube 節目摘要（每日自動更新）")
+    st.caption("ETF 換股公告、財經新聞 AI 摘要、YouTube 節目摘要（每日 21:00 自動更新）")
 
     days_filter = st.sidebar.selectbox("顯示天數", [3, 7, 14, 30], index=1)
 
     if st.button("🔄 重新整理"):
         load_market_signals.clear()
         load_etf_changes.clear()
+        load_daily_digest.clear()
 
+    # ── 每日彙整（置頂顯示）────────────────────────────────────
+    digest = load_daily_digest()
+    if digest:
+        with st.expander("📋 今日市場情報彙整（AI 自動生成）", expanded=True):
+            st.markdown(digest)
+    else:
+        st.info("今日彙整尚未生成（每日 21:00 pipeline 跑完後自動產生）")
+
+    st.markdown("---")
     tab1, tab2, tab3 = st.tabs(["🔀 ETF 換股", "📰 財經新聞", "▶️ YouTube"])
 
     # ── Tab 1：ETF 換股 ──────────────────────────────────────────
@@ -629,28 +655,40 @@ elif page == "📰 市場情報":
         if df_news.empty:
             st.info(f"近 {days_filter} 天無新聞記錄（資料每日自動更新）")
         else:
-            SENT_BADGE = {"positive": "🟢 利多", "negative": "🔴 利空", "neutral": "⚪ 中性"}
-            for _, row in df_news.iterrows():
-                badge = SENT_BADGE.get(row["情緒"], "")
-                stocks_str = ""
-                if row["相關股票"] and row["相關股票"] != "None":
-                    try:
-                        import ast
-                        stocks = ast.literal_eval(str(row["相關股票"])) if isinstance(row["相關股票"], str) else row["相關股票"]
-                        if stocks:
-                            stocks_str = f"  `{'、'.join(stocks[:5])}`"
-                    except Exception:
-                        pass
+            import ast as _ast
+            SENT_BADGE = {"positive": "🟢 利多", "negative": "🔴 利空", "neutral": "⚪"}
 
-                title_display = row["標題"]
-                if row["網址"] and str(row["網址"]) != "None":
-                    st.markdown(f"{badge} [{title_display}]({row['網址']}){stocks_str}  \n"
-                                f"<small>📅 {row['日期']}　{row['來源']}</small>",
-                                unsafe_allow_html=True)
-                else:
-                    st.markdown(f"{badge} **{title_display}**{stocks_str}  \n"
-                                f"<small>📅 {row['日期']}　{row['來源']}</small>",
-                                unsafe_allow_html=True)
+            for _, row in df_news.iterrows():
+                badge = SENT_BADGE.get(row["情緒"], "⚪")
+
+                # 解析相關股票
+                stocks_str = ""
+                try:
+                    raw_stocks = row["相關股票"]
+                    if raw_stocks and str(raw_stocks) not in ("None", "[]", ""):
+                        stocks = _ast.literal_eval(str(raw_stocks)) if isinstance(raw_stocks, str) else raw_stocks
+                        if stocks:
+                            stocks_str = "　`" + "、".join(str(s) for s in stocks[:6]) + "`"
+                except Exception:
+                    pass
+
+                # 標題行
+                title = row["標題"]
+                url   = row["網址"] if str(row["網址"]) not in ("None", "") else None
+                st.markdown(
+                    f"{badge} **{title}**{stocks_str}",
+                )
+
+                # AI 摘要（核心內容）
+                summary = row["摘要"]
+                if summary and str(summary) not in ("None", "", title):
+                    st.markdown(f"> {summary}")
+
+                # 來源 + 連結（輔助資訊）
+                meta = f"📅 {row['日期']}　{row['來源']}"
+                if url:
+                    meta += f"　[→ 閱讀原文]({url})"
+                st.caption(meta)
                 st.markdown("---")
 
     # ── Tab 3：YouTube ───────────────────────────────────────────
