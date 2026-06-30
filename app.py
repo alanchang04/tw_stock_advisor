@@ -31,7 +31,7 @@ st.set_page_config(
 st.sidebar.title("📈 台股顧問")
 page = st.sidebar.radio(
     "導覽",
-    ["📊 首頁", "📦 持倉追蹤", "🏦 法人動向", "📉 個股走勢", "🔄 歷史績效", "📰 市場情報"],
+    ["📊 首頁", "📦 持倉追蹤", "🏦 法人動向", "📉 個股走勢", "🔄 歷史績效", "📰 市場情報", "🧠 聰明資金"],
 )
 st.sidebar.markdown("---")
 
@@ -720,3 +720,213 @@ elif page == "📰 市場情報":
                         st.markdown(stocks_str)
                     if row["網址"] and str(row["網址"]) != "None":
                         st.markdown(f"[▶️ 觀看影片]({row['網址']})")
+
+
+# ══════════════════════════════════════════════════════════════════
+#  Page 7：聰明資金追蹤
+# ══════════════════════════════════════════════════════════════════
+elif page == "🧠 聰明資金":
+    st.title("🧠 聰明資金追蹤")
+    st.caption("統一台股增長 (00981A) 換股動態 × 投信連續買超 — 尋找波段機會")
+
+    TRACK_ETF   = "00981A"
+    inv_days    = st.sidebar.slider("投信回看天數", 10, 30, 15)
+    etf_days    = st.sidebar.slider("ETF換股回看天數", 14, 90, 45)
+    min_buy_d   = st.sidebar.slider("投信最少買超天數", 2, 7, 3)
+    min_single  = st.sidebar.number_input("單日大量門檻（張）", 100, 5000, 500, step=100)
+
+    if st.button("🔄 重新整理"):
+        st.cache_data.clear()
+
+    # ── 即時查詢（不快取，確保最新）────────────────────────────
+    def _query_invest(days, min_days, min_single_v):
+        try:
+            with get_session() as s:
+                rows = s.execute(text("""
+                    WITH w AS (
+                        SELECT it.stock_id, it.trade_date, it.invest_net,
+                               s.stock_name, s.industry
+                        FROM institutional_trading it
+                        JOIN stocks s ON it.stock_id = s.stock_id
+                        WHERE it.trade_date >= CURRENT_DATE - :days * INTERVAL '1 day'
+                    )
+                    SELECT
+                        stock_id,
+                        MAX(stock_name)                                     AS 股票名稱,
+                        MAX(industry)                                       AS 產業,
+                        COUNT(*) FILTER (WHERE invest_net > 0)              AS 買超天數,
+                        COUNT(*) FILTER (WHERE invest_net < 0)              AS 賣超天數,
+                        COALESCE(SUM(invest_net) FILTER (WHERE invest_net > 0), 0) AS 累計買超張,
+                        MAX(invest_net)                                     AS 單日峰值張,
+                        MAX(trade_date) FILTER (WHERE invest_net > 0)       AS 最後買超日
+                    FROM w
+                    GROUP BY stock_id
+                    HAVING
+                        COUNT(*) FILTER (WHERE invest_net > 0) >= :min_days
+                        OR MAX(invest_net) >= :min_s
+                    ORDER BY 買超天數 DESC, 累計買超張 DESC
+                    LIMIT 50
+                """), {"days": days, "min_days": min_days, "min_s": min_single_v}).fetchall()
+            return pd.DataFrame(rows)
+        except Exception as e:
+            st.error(f"查詢失敗: {e}")
+            return pd.DataFrame()
+
+    def _query_etf(etf_id, days):
+        try:
+            with get_session() as s:
+                rows = s.execute(text("""
+                    SELECT
+                        ec.stock_id                                         AS 股票代號,
+                        ec.stock_name                                       AS 股票名稱,
+                        CASE ec.change_type
+                            WHEN 'added'     THEN '🆕 新納入'
+                            WHEN 'increased' THEN '⬆ 加碼'
+                            ELSE ec.change_type
+                        END                                                 AS 動作,
+                        COALESCE(ec.old_weight, 0)                          AS 舊權重,
+                        COALESCE(ec.new_weight, 0)                          AS 新權重,
+                        ROUND(COALESCE(ec.new_weight,0)
+                              - COALESCE(ec.old_weight,0), 4)               AS 權重變化,
+                        ec.detected_date                                    AS 偵測日期
+                    FROM etf_changes ec
+                    WHERE ec.etf_id = :etf_id
+                      AND ec.change_type IN ('added','increased')
+                      AND ec.detected_date >= CURRENT_DATE - :days * INTERVAL '1 day'
+                    ORDER BY ec.detected_date DESC, 權重變化 DESC
+                """), {"etf_id": etf_id, "days": days}).fetchall()
+            return pd.DataFrame(rows)
+        except Exception as e:
+            st.error(f"查詢失敗: {e}")
+            return pd.DataFrame()
+
+    def _query_etf_holdings(etf_id):
+        try:
+            with get_session() as s:
+                rows = s.execute(text("""
+                    SELECT stock_id AS 代號, stock_name AS 名稱,
+                           ROUND(weight_pct, 2) AS 權重百分比,
+                           snapshot_date AS 快照日期
+                    FROM etf_holdings
+                    WHERE etf_id = :eid
+                      AND snapshot_date = (
+                          SELECT MAX(snapshot_date) FROM etf_holdings WHERE etf_id = :eid
+                      )
+                    ORDER BY weight_pct DESC NULLS LAST
+                    LIMIT 20
+                """), {"eid": etf_id}).fetchall()
+            return pd.DataFrame(rows)
+        except Exception:
+            return pd.DataFrame()
+
+    df_invest = _query_invest(inv_days, min_buy_d, min_single)
+    df_etf    = _query_etf(TRACK_ETF, etf_days)
+
+    # 計算重疊
+    overlap_ids = set()
+    if not df_invest.empty and not df_etf.empty:
+        invest_ids = set(df_invest["stock_id"].tolist()) if "stock_id" in df_invest.columns else set()
+        etf_ids    = set(df_etf["股票代號"].tolist())
+        overlap_ids = invest_ids & etf_ids
+
+    # ── Tab 布局 ────────────────────────────────────────────────
+    tab_gold, tab_etf, tab_invest = st.tabs([
+        f"⭐ 黃金交叉（{len(overlap_ids)}）",
+        f"📊 統一ETF動態（{len(df_etf)}筆）",
+        f"🏦 投信連買排行（{len(df_invest)}支）",
+    ])
+
+    # ── Tab 1：黃金交叉 ─────────────────────────────────────────
+    with tab_gold:
+        st.subheader("⭐ 雙重確認訊號")
+        st.caption("同時出現在「投信連買」與「統一ETF加碼/新增」的股票——波段勝率最高")
+
+        if not overlap_ids:
+            if df_invest.empty or df_etf.empty:
+                st.info("資料尚未齊全（ETF換股需至少執行兩次 pipeline 後才有記錄）")
+            else:
+                st.info(f"目前回看期間內（投信{inv_days}日 / ETF{etf_days}日）無重疊訊號")
+        else:
+            for sid in sorted(overlap_ids):
+                inv_row = df_invest[df_invest["stock_id"] == sid].iloc[0] if not df_invest.empty else None
+                etf_row = df_etf[df_etf["股票代號"] == sid].iloc[0] if not df_etf.empty else None
+                name = (inv_row["股票名稱"] if inv_row is not None else
+                        etf_row["股票名稱"] if etf_row is not None else "")
+
+                with st.container(border=True):
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.markdown(f"### {sid} {name}")
+                        if inv_row is not None:
+                            st.markdown(
+                                f"**🏦 投信：** 近{inv_days}日買超 **{inv_row['買超天數']}** 天 "
+                                f"｜ 累計 **{inv_row['累計買超張']:,.0f}** 張 "
+                                f"｜ 峰值 **{inv_row['單日峰值張']:,}** 張/日"
+                            )
+                    with col2:
+                        if etf_row is not None:
+                            st.markdown(
+                                f"**📊 統一ETF：** {etf_row['動作']} "
+                                f"（{etf_row['偵測日期']}）  \n"
+                                f"權重 {etf_row['舊權重']:.2f}% → **{etf_row['新權重']:.2f}%** "
+                                f"（+{etf_row['權重變化']:.2f}%）"
+                            )
+
+    # ── Tab 2：統一ETF動態 ──────────────────────────────────────
+    with tab_etf:
+        st.subheader(f"📊 {TRACK_ETF} 統一台股增長 — 近{etf_days}日加碼/新增")
+        st.caption("主動型 ETF 操盤手看好的股票，任意日均可換股，值得密切追蹤")
+
+        if df_etf.empty:
+            st.info(f"近{etf_days}天無換股記錄（ETF 換股偵測需至少兩次 pipeline 後才有資料）")
+        else:
+            for _, r in df_etf.iterrows():
+                weight_delta = r["權重變化"]
+                delta_str = f"+{weight_delta:.2f}%" if weight_delta > 0 else f"{weight_delta:.2f}%"
+                st.markdown(
+                    f"{r['動作']} **{r['股票代號']} {r['股票名稱']}**"
+                    f"　權重 {r['舊權重']:.2f}% → **{r['新權重']:.2f}%**（{delta_str}）"
+                    f"　📅 {r['偵測日期']}"
+                    + ("　⭐" if r["股票代號"] in overlap_ids else "")
+                )
+
+        st.markdown("---")
+        st.subheader(f"最新持股明細（前 20）")
+        df_hold = _query_etf_holdings(TRACK_ETF)
+        if df_hold.empty:
+            st.info("尚無持股快照（pipeline 執行後自動更新）")
+        else:
+            snapshot = df_hold["快照日期"].iloc[0] if not df_hold.empty else "—"
+            st.caption(f"資料日期：{snapshot}")
+            st.dataframe(
+                df_hold.drop(columns=["快照日期"]),
+                use_container_width=True,
+                hide_index=True,
+            )
+
+    # ── Tab 3：投信連買排行 ─────────────────────────────────────
+    with tab_invest:
+        st.subheader(f"🏦 投信連買排行 — 近{inv_days}日買超≥{min_buy_d}天 或 單日≥{int(min_single)}張")
+        st.caption("投信（信託投資公司）持續淨買超代表主力資金建倉，配合技術面做波段")
+
+        if df_invest.empty:
+            st.info("近期無符合條件的投信買超記錄（資料每日自動更新）")
+        else:
+            display_cols = ["stock_id", "股票名稱", "產業", "買超天數",
+                            "賣超天數", "累計買超張", "單日峰值張", "最後買超日"]
+            df_show = df_invest[[c for c in display_cols if c in df_invest.columns]].copy()
+            df_show.insert(0, "標記", df_show["stock_id"].apply(
+                lambda x: "⭐" if x in overlap_ids else ""
+            ))
+            df_show = df_show.rename(columns={"stock_id": "代號"})
+            st.dataframe(
+                df_show,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "標記":       st.column_config.TextColumn("", width=40),
+                    "買超天數":   st.column_config.NumberColumn("買超天數", format="%d 天"),
+                    "累計買超張": st.column_config.NumberColumn("累計買超(張)", format="%,.0f"),
+                    "單日峰值張": st.column_config.NumberColumn("峰值(張)", format="%,d"),
+                },
+            )

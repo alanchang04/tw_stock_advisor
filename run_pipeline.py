@@ -52,6 +52,12 @@ def mode_market_signals():
         logger.error(f"YouTube 分析失敗: {e}")
 
     try:
+        from data_pipeline.analysis.smart_money import run_smart_money_analysis
+        run_smart_money_analysis()
+    except Exception as e:
+        logger.error(f"聰明資金分析失敗: {e}")
+
+    try:
         from data_pipeline.analysis.daily_digest import generate_daily_digest
         generate_daily_digest()
     except Exception as e:
