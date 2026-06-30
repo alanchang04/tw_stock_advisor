@@ -61,14 +61,26 @@ HEADERS = {
 
 # ── 從 RSS 抓最新影片清單 ────────────────────────────────────────
 def _fetch_channel_videos(channel_id: str) -> list[dict]:
-    """回傳 [{video_id, title, published}]，最多 RSS_MAX_ENTRIES 筆"""
+    """回傳 [{video_id, title, published}]，最多 RSS_MAX_ENTRIES 筆。
+    YouTube RSS 偶發 500，自動 retry 2 次。"""
+    import time
     url = RSS_BASE.format(channel_id=channel_id)
-    try:
-        resp = requests.get(url, headers=HEADERS, timeout=15)
-        resp.raise_for_status()
-        root = ET.fromstring(resp.content)
-    except Exception as e:
-        logger.warning(f"  YouTube RSS 失敗 {channel_id}: {e}")
+    for attempt in range(3):
+        try:
+            resp = requests.get(url, headers=HEADERS, timeout=15)
+            if resp.status_code == 500 and attempt < 2:
+                logger.debug(f"  YouTube RSS 500，{attempt+1}/3 次 retry...")
+                time.sleep(3)
+                continue
+            resp.raise_for_status()
+            root = ET.fromstring(resp.content)
+            break
+        except Exception as e:
+            if attempt == 2:
+                logger.warning(f"  YouTube RSS 失敗 {channel_id}: {e}")
+                return []
+            time.sleep(3)
+    else:
         return []
 
     ns = {

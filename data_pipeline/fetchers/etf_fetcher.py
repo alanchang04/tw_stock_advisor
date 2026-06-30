@@ -2,7 +2,7 @@
 data_pipeline/fetchers/etf_fetcher.py
 
 ETF 持股追蹤與換股偵測
-  - 使用 FinMind TaiwanETFHolding 抓各 ETF 最新持股
+  - 使用 FinMind REST API v4 抓各 ETF 最新持股（不依賴 SDK 方法名稱）
   - 比對前次快照，記錄 added / removed / increased / decreased
   - 結果寫入 etf_holdings + etf_changes + market_signals
 """
@@ -28,7 +28,6 @@ def _ensure_tables():
     if not os.path.exists(migration_sql):
         return
     with get_session() as session:
-        # 只建表，跳過 INSERT（已有資料時不重複插入）
         sql = open(migration_sql, encoding="utf-8").read()
         try:
             session.execute(text(sql))
@@ -37,13 +36,27 @@ def _ensure_tables():
                 logger.warning(f"migration warning: {e}")
 
 
-# ── FinMind DataLoader（lazy import）─────────────────────────────
-def _get_loader():
-    from FinMind.data import DataLoader
-    dl = DataLoader()
-    if APIConfig.FINMIND_TOKEN:
-        dl.login_by_token(api_token=APIConfig.FINMIND_TOKEN)
-    return dl
+# ── FinMind REST API v4（直接呼叫，不依賴 SDK 方法名稱）─────────
+_FINMIND_API = "https://api.finmindtrade.com/api/v4/data"
+
+def _finmind_get(dataset: str, data_id: str, start_date: str) -> list[dict]:
+    """
+    呼叫 FinMind v4 REST API，回傳 data list。
+    避免依賴 DataLoader 的動態方法名稱（各版本不同）。
+    """
+    import requests as _req
+    params = {
+        "dataset":    dataset,
+        "data_id":    data_id,
+        "start_date": start_date,
+        "token":      (APIConfig.FINMIND_TOKEN or "").strip(),
+    }
+    resp = _req.get(_FINMIND_API, params=params, timeout=30)
+    resp.raise_for_status()
+    body = resp.json()
+    if body.get("status") != 200:
+        raise ValueError(f"status={body.get('status')}: {body.get('msg', '')}")
+    return body.get("data", [])
 
 
 # ── 從 DB 取得某 ETF 最後一次快照的持股 ──────────────────────────
@@ -60,46 +73,48 @@ def _get_last_snapshot(session, etf_id: str) -> dict[str, float]:
     return {r[0]: float(r[1]) if r[1] is not None else 0.0 for r in result.fetchall()}
 
 
-# ── 抓取某 ETF 今日持股（FinMind）────────────────────────────────
+# ── 抓取某 ETF 今日持股 ───────────────────────────────────────────
 def fetch_etf_holdings(etf_id: str, lookback_days: int = 7) -> pd.DataFrame:
     """
     回傳最近 lookback_days 內最新一筆的持股 DataFrame。
     欄位：stock_id, stock_name, weight_pct, snapshot_date
+
+    FinMind TaiwanETFHolding 回傳欄位（v4 REST）：
+      date / stock_id (ETF本身) / hold_stock_id / hold_stock_name /
+      hold_stock_volume / hold_stock_weight
     """
     start = (date.today() - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
     try:
-        dl = _get_loader()
-        df = dl.taiwan_etf_holding(etfid=etf_id, start_date=start)
-        if df is None or df.empty:
+        records = _finmind_get("TaiwanETFHolding", etf_id, start)
+        if not records:
             logger.warning(f"  {etf_id}：FinMind 無資料（可能不支援此 ETF）")
             return pd.DataFrame()
 
-        # FinMind 欄位名稱可能因版本不同
-        col_map = {}
+        df = pd.DataFrame(records)
+
+        # TaiwanETFHolding 欄位 → 統一命名
+        rename = {}
         for c in df.columns:
             lc = c.lower()
-            if "stock_id" in lc or "stockid" in lc:
-                col_map[c] = "stock_id"
-            elif "stock_name" in lc or "name" in lc:
-                col_map[c] = "stock_name"
-            elif "weight" in lc or "holding" in lc or "pct" in lc or "percent" in lc:
-                col_map[c] = "weight_pct"
-            elif "date" in lc:
-                col_map[c] = "snapshot_date"
-        df = df.rename(columns=col_map)
+            if lc == "hold_stock_id":
+                rename[c] = "stock_id"
+            elif lc == "hold_stock_name":
+                rename[c] = "stock_name"
+            elif lc == "hold_stock_weight":
+                rename[c] = "weight_pct"
+            elif lc == "date":
+                rename[c] = "snapshot_date"
+        df = df.rename(columns=rename)
 
-        required = {"stock_id", "snapshot_date"}
-        if not required.issubset(df.columns):
-            logger.warning(f"  {etf_id}：欄位不符 {df.columns.tolist()}")
+        if "stock_id" not in df.columns:
+            logger.warning(f"  {etf_id}：找不到成分股欄位，現有欄位：{df.columns.tolist()}")
             return pd.DataFrame()
-
         if "weight_pct" not in df.columns:
             df["weight_pct"] = None
         if "stock_name" not in df.columns:
             df["stock_name"] = None
 
         df["snapshot_date"] = pd.to_datetime(df["snapshot_date"]).dt.date
-        # 取最新一天的資料
         latest = df["snapshot_date"].max()
         df = df[df["snapshot_date"] == latest].copy()
         return df[["stock_id", "stock_name", "weight_pct", "snapshot_date"]]
@@ -128,7 +143,6 @@ def detect_and_save_changes(etf_id: str, etf_name: str, df_new: pd.DataFrame) ->
     }
 
     with get_session() as session:
-        # 確認今天的快照還沒存過
         exists = session.execute(text("""
             SELECT 1 FROM etf_holdings
             WHERE etf_id = :etf_id AND snapshot_date = :dt LIMIT 1
@@ -138,10 +152,8 @@ def detect_and_save_changes(etf_id: str, etf_name: str, df_new: pd.DataFrame) ->
             logger.info(f"  {etf_id}：{snapshot_date} 快照已存在，跳過")
             return []
 
-        # 取上次快照
         last = _get_last_snapshot(session, etf_id)
 
-        # 存新快照
         rows = [
             {"etf_id": etf_id, "stock_id": sid,
              "stock_name": info["name"],
@@ -159,7 +171,6 @@ def detect_and_save_changes(etf_id: str, etf_name: str, df_new: pd.DataFrame) ->
             logger.info(f"  {etf_id}：首次快照，共 {len(new_holdings)} 支成分股")
             return []
 
-        # 找差異
         changes = []
         prev_set = set(last.keys())
         curr_set = set(new_holdings.keys())
@@ -182,7 +193,6 @@ def detect_and_save_changes(etf_id: str, etf_name: str, df_new: pd.DataFrame) ->
             logger.info(f"  {etf_id}：{snapshot_date} 無持股異動")
             return []
 
-        # 寫入 etf_changes
         change_rows = [{
             "etf_id":        etf_id,
             "etf_name":      etf_name,
@@ -203,21 +213,20 @@ def detect_and_save_changes(etf_id: str, etf_name: str, df_new: pd.DataFrame) ->
                  :change_type, :old_weight, :new_weight, :detected_date)
         """), change_rows)
 
-        # 寫入 market_signals（供統一查詢）
         type_labels = {
-            "added":     "🟢 新增",
-            "removed":   "🔴 移除",
-            "increased": "⬆️  加碼",
-            "decreased": "⬇️  減碼",
+            "added":     "新增",
+            "removed":   "移除",
+            "increased": "加碼",
+            "decreased": "減碼",
         }
         signal_rows = [{
             "signal_type":    "etf_change",
             "source":         etf_name,
             "title":          f"【{etf_name}】{type_labels.get(c['type'], c['type'])} {c['name']}（{c['stock_id']}）",
-            "summary":        f"持股從 {c['old']:.2f}% → {c['new']:.2f}%",
+            "summary":        f"持股從 {c['old']:.2f}% -> {c['new']:.2f}%",
             "url":            None,
             "related_stocks": [c["stock_id"]],
-            "sentiment":      "positive" if c["type"] in ("added","increased") else "negative",
+            "sentiment":      "positive" if c["type"] in ("added", "increased") else "negative",
             "signal_date":    snapshot_date,
         } for c in changes]
 
