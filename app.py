@@ -873,8 +873,8 @@ elif page == "🧠 聰明資金":
         if not overlap_ids:
             if df_etf.empty:
                 st.info(
-                    "「雙重確認」需要 ETF 成分股資料交叉比對，目前 ETF 來源尚未接通"
-                    "（待永豐證券 API）。現階段請先看 **🏦 投信連買排行**。"
+                    "目前無 ETF 換股記錄可交叉比對。ETF 持股來源為 MoneyDJ（約每月更新），"
+                    "換股需待下次月報更新才會偵測到。**每日**的主動買賣訊號請看 **🏦 投信連買排行**。"
                 )
             elif df_invest.empty:
                 st.info("目前無符合條件的投信買超記錄。")
@@ -909,14 +909,12 @@ elif page == "🧠 聰明資金":
     # ── Tab 2：統一ETF動態 ──────────────────────────────────────
     with tab_etf:
         st.subheader(f"📊 {TRACK_ETF} 統一台股增長 — 近{etf_days}日加碼/新增")
-        st.caption("主動型 ETF 操盤手看好的股票，任意日均可換股，值得密切追蹤")
+        st.caption("持股來源：MoneyDJ（約每月更新、前十大持股）。每日主動買賣訊號請看投信連買排行。")
 
         if df_etf.empty:
-            st.warning(
-                "⚠️ ETF 成分股資料尚未接通。\n\n"
-                "FinMind 免費版無法提供 ETF 持股明細（需付費方案）。"
-                "規劃改用**永豐證券 API** 取得統一 ETF 每日成分股後即會啟用此功能。\n\n"
-                "在此之前，請改看 **🏦 投信連買排行**——統一投信的 ETF 買股會反映在投信淨買超中。"
+            st.info(
+                "近期無換股記錄。ETF 持股來源 MoneyDJ 約每月更新，"
+                "換股（新增/加碼）需待下次月報更新才會偵測到；下方為最新一期持股明細。"
             )
         else:
             for _, r in df_etf.iterrows():
@@ -933,7 +931,7 @@ elif page == "🧠 聰明資金":
         st.subheader(f"最新持股明細（前 20）")
         df_hold = _query_etf_holdings(TRACK_ETF)
         if df_hold.empty:
-            st.caption("持股明細待永豐證券 API 接通後提供（FinMind 免費版不含此資料）。")
+            st.caption("尚無持股快照（pipeline 執行 ETF 追蹤後自動更新）。")
         else:
             snapshot = df_hold["快照日期"].iloc[0] if not df_hold.empty else "—"
             st.caption(f"資料日期：{snapshot}")

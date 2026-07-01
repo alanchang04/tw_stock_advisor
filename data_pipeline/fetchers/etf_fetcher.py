@@ -10,13 +10,26 @@ from __future__ import annotations
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
-from datetime import date, timedelta
+import re
+from datetime import date
+import requests
 import pandas as pd
+from bs4 import BeautifulSoup
 from loguru import logger
 from sqlalchemy import text
 
-from config.settings import APIConfig
 from database.connection import get_session
+
+# MoneyDJ ETF 持股頁（免費、含代號/權重/資料日期；免付費、免瀏覽器）
+# 注意：MoneyDJ 資料來自基金月報，約每月更新，僅前 10 大持股。
+#       每日即時的主動買賣訊號請看「投信買超」（institutional_trading）。
+_MONEYDJ_URL = "https://www.moneydj.com/ETF/X/Basic/Basic0007.xdjhtm?etfid={etf_id}.TW"
+_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    )
+}
 
 
 # ── 自動建立所需資料表（首次執行時）──────────────────────────────
@@ -36,29 +49,6 @@ def _ensure_tables():
                 logger.warning(f"migration warning: {e}")
 
 
-# ── FinMind REST API v4（直接呼叫，不依賴 SDK 方法名稱）─────────
-_FINMIND_API = "https://api.finmindtrade.com/api/v4/data"
-
-def _finmind_get(dataset: str, data_id: str, start_date: str) -> list[dict]:
-    """
-    呼叫 FinMind v4 REST API，回傳 data list。
-    避免依賴 DataLoader 的動態方法名稱（各版本不同）。
-    """
-    import requests as _req
-    params = {
-        "dataset":    dataset,
-        "data_id":    data_id,
-        "start_date": start_date,
-        "token":      (APIConfig.FINMIND_TOKEN or "").strip(),
-    }
-    resp = _req.get(_FINMIND_API, params=params, timeout=30)
-    resp.raise_for_status()
-    body = resp.json()
-    if body.get("status") != 200:
-        raise ValueError(f"status={body.get('status')}: {body.get('msg', '')}")
-    return body.get("data", [])
-
-
 # ── 從 DB 取得某 ETF 最後一次快照的持股 ──────────────────────────
 def _get_last_snapshot(session, etf_id: str) -> dict[str, float]:
     """回傳 {stock_id: weight_pct}"""
@@ -73,55 +63,69 @@ def _get_last_snapshot(session, etf_id: str) -> dict[str, float]:
     return {r[0]: float(r[1]) if r[1] is not None else 0.0 for r in result.fetchall()}
 
 
-# ── 抓取某 ETF 今日持股 ───────────────────────────────────────────
-def fetch_etf_holdings(etf_id: str, lookback_days: int = 7) -> pd.DataFrame:
+# ── 抓取某 ETF 持股（MoneyDJ）─────────────────────────────────────
+_HOLDING_ROW_RE = re.compile(r"(.+?)\((\d{4}[A-Z]?)\.(?:TW|TWO)\)")
+_DATE_RE = re.compile(r"資料日期[：:]\s*(\d{4})/(\d{1,2})/(\d{1,2})")
+
+
+def fetch_etf_holdings(etf_id: str) -> pd.DataFrame:
     """
-    回傳最近 lookback_days 內最新一筆的持股 DataFrame。
+    從 MoneyDJ 抓某 ETF 的前十大持股。
     欄位：stock_id, stock_name, weight_pct, snapshot_date
 
-    FinMind TaiwanETFHolding 回傳欄位（v4 REST）：
-      date / stock_id (ETF本身) / hold_stock_id / hold_stock_name /
-      hold_stock_volume / hold_stock_weight
+    snapshot_date 取 MoneyDJ 頁面標示的「資料日期」（基金月報基準日）——
+    如此 detect_and_save_changes 只在 MoneyDJ 實際更新時才偵測換股，不會每天重複。
     """
-    start = (date.today() - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
+    url = _MONEYDJ_URL.format(etf_id=etf_id)
     try:
-        records = _finmind_get("TaiwanETFHolding", etf_id, start)
-        if not records:
-            logger.warning(f"  {etf_id}：FinMind 無資料（可能不支援此 ETF）")
-            return pd.DataFrame()
-
-        df = pd.DataFrame(records)
-
-        # TaiwanETFHolding 欄位 → 統一命名
-        rename = {}
-        for c in df.columns:
-            lc = c.lower()
-            if lc == "hold_stock_id":
-                rename[c] = "stock_id"
-            elif lc == "hold_stock_name":
-                rename[c] = "stock_name"
-            elif lc == "hold_stock_weight":
-                rename[c] = "weight_pct"
-            elif lc == "date":
-                rename[c] = "snapshot_date"
-        df = df.rename(columns=rename)
-
-        if "stock_id" not in df.columns:
-            logger.warning(f"  {etf_id}：找不到成分股欄位，現有欄位：{df.columns.tolist()}")
-            return pd.DataFrame()
-        if "weight_pct" not in df.columns:
-            df["weight_pct"] = None
-        if "stock_name" not in df.columns:
-            df["stock_name"] = None
-
-        df["snapshot_date"] = pd.to_datetime(df["snapshot_date"]).dt.date
-        latest = df["snapshot_date"].max()
-        df = df[df["snapshot_date"] == latest].copy()
-        return df[["stock_id", "stock_name", "weight_pct", "snapshot_date"]]
-
+        resp = requests.get(url, headers=_HEADERS, timeout=20)
+        resp.raise_for_status()
+        resp.encoding = "utf-8"
+        html = resp.text
     except Exception as e:
-        logger.error(f"  {etf_id} FinMind 抓取失敗: {e}")
+        logger.error(f"  {etf_id} MoneyDJ 抓取失敗: {e}")
         return pd.DataFrame()
+
+    # 資料日期（找不到就用今天，避免整個流程中斷）
+    m = _DATE_RE.search(html)
+    if m:
+        snapshot_date = date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    else:
+        snapshot_date = date.today()
+        logger.warning(f"  {etf_id}：MoneyDJ 找不到資料日期，改用今日")
+
+    # 找出持股表（表頭含「個股名稱」「投資比例」）
+    soup = BeautifulSoup(html, "html.parser")
+    rows = []
+    for table in soup.find_all("table"):
+        head = table.get_text(" ", strip=True)
+        if "個股名稱" not in head or "投資比例" not in head:
+            continue
+        for tr in table.find_all("tr")[1:]:
+            cells = [c.get_text(strip=True) for c in tr.find_all("td")]
+            if len(cells) < 2:
+                continue
+            nm = _HOLDING_ROW_RE.match(cells[0])
+            if not nm:
+                continue
+            name, code = nm.group(1).strip(), nm.group(2)
+            try:
+                weight = float(cells[1])
+            except ValueError:
+                weight = None
+            rows.append({
+                "stock_id":      code,
+                "stock_name":    name,
+                "weight_pct":    weight,
+                "snapshot_date": snapshot_date,
+            })
+        break
+
+    if not rows:
+        logger.warning(f"  {etf_id}：MoneyDJ 未解析到持股（頁面結構可能改版）")
+        return pd.DataFrame()
+
+    return pd.DataFrame(rows)
 
 
 # ── 偵測換股並寫入 DB ─────────────────────────────────────────────
