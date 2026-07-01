@@ -92,6 +92,7 @@ def generate_recommendations(candidates_text: str, hot_sectors: list[str]) -> di
                 temperature=0.3,
                 max_tokens=8192,
                 response_format={"type": "json_object"},  # 強制輸出純 JSON，免 markdown 包裹
+                reasoning_effort="disable",  # gemini-2.5 關閉思考：省 token/加速，避免截斷
             )
             content = response.choices[0].message.content
             result = _parse_json(content)
