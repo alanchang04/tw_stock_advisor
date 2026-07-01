@@ -2,9 +2,13 @@
 
 個人使用的台股投資 agent：每日自動抓取全市場股價與籌碼、計算技術指標、偵測族群輪動，
 透過 LLM 產生 Top 5 選股推薦，**並記住推薦過的部位、持續追蹤、在符合出場規則時主動提醒離場**。
+另有兩個子系統：**市場情報**（財經新聞 / YouTube / ETF 換股，全部 AI 摘要 + 每日彙整）與
+**聰明資金**（投信連買 × 統一主動型 ETF 成分股，跟主力做波段）。
 結果可推播到 Telegram，並提供 Streamlit 網頁介面與回測工具驗證選股/買賣邏輯。
 
 **線上網頁**：[twstockadvisor-eawsr2oa5u82fpablxhrhk.streamlit.app](https://twstockadvisor-eawsr2oa5u82fpablxhrhk.streamlit.app)
+
+> 📋 完整功能盤點與未來展望見 **[docs/FEATURES.md](docs/FEATURES.md)**。
 
 ---
 
@@ -17,7 +21,8 @@
 | LLM | Gemini 2.5 Flash（強制 JSON 輸出 + 重試/容錯） |
 | 每日資料來源 | 證交所(TWSE)/櫃買(TPEX) 官方 OpenAPI（免 token、無限流） |
 | 歷史回補 | FinMind API（僅首次或長缺口） |
-| 技術指標 | ta 0.5.25（MA/RSI/MACD/布林通道/KD） |
+| 情報來源 | Google News RSS（新聞）/ YouTube 頻道 RSS+字幕 / MoneyDJ（產業、ETF 成分股） |
+| 技術指標 | ta ≥ 0.9（MA/RSI/MACD/布林通道/KD） |
 | 通知 | Telegram Bot |
 | 自動排程 | GitHub Actions（每日 21:00 台灣時間，不需開電腦） |
 | 網頁介面 | Streamlit Community Cloud（公開 URL，任何裝置可看） |
@@ -29,7 +34,8 @@
 ## 系統架構
 
 ```
-資料層    TWSE/TPEX OpenAPI（每日，全市場一次）/ FinMind（首次歷史）
+資料層    TWSE/TPEX OpenAPI（每日）/ FinMind（首次歷史）
+         Google News RSS / YouTube RSS+字幕 / MoneyDJ（產業、ETF成分股）
    ↓
 儲存層    PostgreSQL（Neon.tech 雲端，0.5GB 免費方案）
    ↓
@@ -39,7 +45,10 @@
    ↓
 Agent層   出場檢查(持倉) → 候選篩選 → Gemini 推薦 → 開新部位
    ↓
-輸出層    Telegram 推播 / Streamlit 網頁 / DB（positions、daily_recommendations）
+情報層    市場情報（新聞/YouTube/ETF換股，Gemini 摘要 + 每日彙整）
+         聰明資金（投信連買 × 統一ETF成分股 → 黃金交叉）
+   ↓
+輸出層    Telegram 推播 / Streamlit 網頁（7 頁）/ DB（market_signals 等）
    ↓
 排程      GitHub Actions（每日 21:00，weekdays）/ 手動觸發
    ↓
@@ -198,6 +207,7 @@ python run_pipeline.py --mode backfill    # 補齊 DB 缺漏的交易日
 python run_pipeline.py --mode technical   # 重算技術指標
 python run_pipeline.py --mode sector      # 計算族群輪動熱度
 python run_pipeline.py --mode recommend   # 出場檢查 + 選股 + LLM 推薦 + 開部位
+python run_pipeline.py --mode market      # 市場情報 + 聰明資金（ETF換股/新聞/YT/彙整）
 
 # ── 建置/維護 ──
 python run_pipeline.py --mode init --days 240    # FinMind 拉歷史（首次，慢）
@@ -247,7 +257,7 @@ python run_pipeline.py --mode backtest
 
 ---
 
-## 資料庫 Schema（14 張表）
+## 資料庫 Schema
 
 | 資料表 | 說明 | 資料來源 |
 |--------|------|----------|
@@ -255,16 +265,22 @@ python run_pipeline.py --mode backtest
 | industries | 產業分類 | MoneyDJ |
 | stock_industry_map | 股票產業對應 | MoneyDJ |
 | daily_prices | 每日 OHLCV | TWSE/TPEX OpenAPI（init 時 FinMind） |
-| institutional_trading | 三大法人籌碼 | TWSE/TPEX OpenAPI（init 時 FinMind） |
+| institutional_trading | 三大法人籌碼（單位：股） | TWSE/TPEX OpenAPI（init 時 FinMind） |
 | technical_indicators | 技術指標快取（MA/RSI/MACD/KD） | 本地計算 |
 | sector_momentum | 族群輪動熱度 | 本地計算 |
 | **positions** | **部位追蹤（進場/出場/報酬）** | **系統** |
 | daily_recommendations | 每日推薦結果 | LLM |
+| **market_signals** | **市場情報（新聞/YouTube/ETF換股/彙整/聰明資金）** | 多來源 + Gemini |
+| etf_watchlist | ETF 追蹤名單（15 檔） | 系統 |
+| etf_holdings | ETF 成分股快照 | MoneyDJ |
+| etf_changes | ETF 換股記錄（新增/加碼/減碼/移除） | 本地計算 |
+| pipeline_logs | 執行紀錄 | 系統 |
 | margin_trading | 融資融券 | 待開發 |
 | financials | 季報財務資料 | 待開發 |
 | announcements | MOPS 重大訊息 | 待開發 |
-| yt_insights | YouTube 情報 | 待開發 |
-| pipeline_logs | 執行紀錄 | 系統 |
+
+> `market_signals` 的 `signal_type` 支援：`news` / `youtube` / `etf_change` / `mops` / `digest` / `smart_money`。
+> 建置時依序執行 `database/migrations/` 內的 `03`~`05` migration。
 
 ---
 
@@ -277,6 +293,10 @@ python run_pipeline.py --mode backtest
 
 ---
 
-## 開發進度與規劃
+## 功能總覽與未來展望
 
-詳見 [docs/progress.md](docs/progress.md)。
+詳見 **[docs/FEATURES.md](docs/FEATURES.md)**（完整功能盤點、資料來源、短中長期規劃、已知限制）。
+
+其他文件：
+- [docs/neon_deployment_guide.md](docs/neon_deployment_guide.md) — Neon 雲端資料庫部署
+- [docs/shioaji_setup.md](docs/shioaji_setup.md) — 永豐金 Shioaji API 設定（未來擴充）
