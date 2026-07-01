@@ -302,17 +302,17 @@ def load_etf_changes(days: int = 30) -> pd.DataFrame:
 
 
 @st.cache_data(ttl=300)
-def load_daily_digest(target_date: date = None) -> str | None:
-    if target_date is None:
-        target_date = date.today()
+def load_daily_digest(days: int = 5) -> tuple[date, str] | None:
+    """取最近 days 天內最新一份每日彙整，回傳 (日期, 內文)；無則 None。"""
     try:
         with get_session() as s:
             row = s.execute(text("""
-                SELECT summary FROM market_signals
-                WHERE signal_type = 'digest' AND signal_date = :dt
-                ORDER BY id DESC LIMIT 1
-            """), {"dt": target_date}).fetchone()
-        return row[0] if row else None
+                SELECT signal_date, summary FROM market_signals
+                WHERE signal_type = 'digest'
+                  AND signal_date >= CURRENT_DATE - :days * INTERVAL '1 day'
+                ORDER BY signal_date DESC, id DESC LIMIT 1
+            """), {"days": days}).fetchone()
+        return (row[0], row[1]) if row else None
     except Exception:
         return None
 
@@ -604,13 +604,14 @@ elif page == "📰 市場情報":
         load_etf_changes.clear()
         load_daily_digest.clear()
 
-    # ── 每日彙整（置頂顯示）────────────────────────────────────
-    digest = load_daily_digest()
-    if digest:
-        with st.expander("📋 今日市場情報彙整（AI 自動生成）", expanded=True):
-            st.markdown(digest)
+    # ── 每日彙整（置頂顯示，取最近一份）─────────────────────────
+    digest_row = load_daily_digest()
+    if digest_row:
+        digest_date, digest_text = digest_row
+        with st.expander(f"📋 {digest_date} 市場情報彙整（AI 自動生成）", expanded=True):
+            st.markdown(digest_text)
     else:
-        st.info("今日彙整尚未生成（每日 21:00 pipeline 跑完後自動產生）")
+        st.info("彙整尚未生成（每日 21:00 pipeline 跑完後自動產生）")
 
     st.markdown("---")
     tab1, tab2, tab3 = st.tabs(["🔀 ETF 換股", "📰 財經新聞", "▶️ YouTube"])
