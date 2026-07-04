@@ -28,11 +28,44 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# ══════════════════════════════════════════════════════════════════
+#  登入（多使用者：每人只看得到自己的持倉與清單；市場資料共享）
+# ══════════════════════════════════════════════════════════════════
+from database.users import authenticate
+
+if "auth_user" not in st.session_state:
+    st.session_state.auth_user = None
+
+if st.session_state.auth_user is None:
+    st.title("🔐 台股顧問系統")
+    st.caption("請登入（帳號由管理員建立）")
+    with st.form("login_form"):
+        _u = st.text_input("帳號")
+        _p = st.text_input("密碼", type="password")
+        _go = st.form_submit_button("登入")
+    if _go:
+        _info = authenticate(_u, _p)
+        if _info:
+            st.session_state.auth_user = _info
+            st.rerun()
+        else:
+            st.error("帳號或密碼錯誤")
+    st.stop()
+
+USER = st.session_state.auth_user   # {user_id, username, display_name, role}
+
 st.sidebar.title("📈 台股顧問")
-page = st.sidebar.radio(
-    "導覽",
-    ["📊 首頁", "📦 持倉追蹤", "🔖 追蹤清單", "🔥 族群輪動", "🏦 法人動向", "📉 個股走勢", "🔄 歷史績效", "📰 市場情報", "🧠 聰明資金"],
-)
+_pages = ["📊 首頁", "📦 持倉追蹤", "🔖 追蹤清單", "🔥 族群輪動", "🏦 法人動向",
+          "📉 個股走勢", "🔄 歷史績效", "📰 市場情報", "🧠 聰明資金"]
+if USER["role"] == "admin":
+    _pages.append("👤 帳號管理")
+page = st.sidebar.radio("導覽", _pages)
+
+_c1, _c2 = st.sidebar.columns([3, 1])
+_c1.caption(f"👤 {USER['display_name']}（{USER['role']}）")
+if _c2.button("登出"):
+    st.session_state.auth_user = None
+    st.rerun()
 st.sidebar.markdown("---")
 
 # 立即更新按鈕（觸發 GitHub Actions，雲端本機都能用）
@@ -422,13 +455,14 @@ elif page == "📦 持倉追蹤":
     with tab_manual:
         st.caption("輸入實際持有的股票，每日 pipeline 自動判斷：⚠️建議賣出 / ➕可加碼 / ✅續抱")
 
-        # 新增持倉表單
+        # 新增持倉表單（帳本：幫自己/他人分開記，如「我的」「媽媽的」）
         with st.form("add_manual_position", clear_on_submit=True):
-            c1, c2, c3, c4 = st.columns([1, 1, 1, 1])
+            c1, c2, c3, c4, c5 = st.columns([1, 1, 1, 1, 1])
             f_sid    = c1.text_input("股票代號", placeholder="2330")
             f_date   = c2.date_input("買入日期", value=date.today())
             f_price  = c3.number_input("買入價格", min_value=0.01, step=0.01, format="%.2f")
             f_shares = c4.number_input("股數（1張=1000股）", min_value=1, step=1000, value=1000)
+            f_label  = c5.text_input("帳本", value="我的", help="幫別人記就填名字，如「媽媽的」")
             f_note   = st.text_input("備註（選填）", placeholder="例：AI 伺服器題材")
             submitted = st.form_submit_button("➕ 新增持倉")
 
@@ -445,41 +479,52 @@ elif page == "📦 持倉追蹤":
                     s.execute(text("""
                         INSERT INTO positions
                             (stock_id, entry_date, entry_price, shares,
-                             entry_reason, source, status)
-                        VALUES (:sid, :d, :p, :sh, :note, 'manual', 'open')
+                             entry_reason, source, status, user_id, account_label)
+                        VALUES (:sid, :d, :p, :sh, :note, 'manual', 'open', :uid, :lb)
                     """), {"sid": sid, "d": f_date, "p": f_price,
-                           "sh": int(f_shares), "note": f_note or "手動建倉"})
-                st.success(f"已新增 {sid} {exists[0]}：{f_date} @ {f_price:.2f} × {int(f_shares):,} 股")
+                           "sh": int(f_shares), "note": f_note or "手動建倉",
+                           "uid": USER["user_id"], "lb": (f_label or "我的").strip()})
+                st.success(f"已新增 {sid} {exists[0]}：{f_date} @ {f_price:.2f} × {int(f_shares):,} 股"
+                           f"（帳本：{(f_label or '我的').strip()}）")
 
-        # 持倉列表（含現價與 AI 建議）
+        # 持倉列表（只看自己的；含現價與 AI 建議）
         with get_session() as s:
             mrows = s.execute(text("""
                 SELECT p.id, p.stock_id, st.stock_name, p.entry_date,
                        p.entry_price, p.shares, p.last_advice, p.advice_date,
+                       COALESCE(p.account_label, '我的') AS label,
                        (SELECT d.close FROM daily_prices d
                         WHERE d.stock_id = p.stock_id AND d.close > 0
                         ORDER BY d.trade_date DESC LIMIT 1) AS cur_close
                 FROM positions p JOIN stocks st ON st.stock_id = p.stock_id
                 WHERE p.source = 'manual' AND p.status = 'open'
-                ORDER BY p.entry_date
-            """)).fetchall()
+                  AND p.user_id = :uid
+                ORDER BY label, p.entry_date
+            """), {"uid": USER["user_id"]}).fetchall()
 
         if not mrows:
             st.info("尚無手動持倉，用上方表單新增")
         else:
             recs = []
-            for pid, sid, name, ed, ep, sh, adv, adv_d, cur in mrows:
+            for pid, sid, name, ed, ep, sh, adv, adv_d, label, cur in mrows:
                 ep = float(ep); cur = float(cur) if cur else None
                 sh = int(sh) if sh else 0
                 pnl_pct = (cur / ep - 1) * 100 if cur else None
                 pnl_amt = (cur - ep) * sh if cur else None
                 recs.append({
-                    "編號": pid, "代號": sid, "名稱": name, "買入日": ed,
+                    "編號": pid, "帳本": label, "代號": sid, "名稱": name, "買入日": ed,
                     "買入價": ep, "股數": sh,
                     "現價": cur, "損益%": pnl_pct, "損益金額": pnl_amt,
                     "AI 建議": _clean_val(adv) or "（今晚 pipeline 後產生）",
                     "建議日": _clean_val(adv_d) or "—",
                 })
+
+            # 帳本過濾
+            labels = sorted({r["帳本"] for r in recs})
+            if len(labels) > 1:
+                pick_label = st.selectbox("帳本篩選", ["全部"] + labels)
+                if pick_label != "全部":
+                    recs = [r for r in recs if r["帳本"] == pick_label]
             dfm = pd.DataFrame(recs)
 
             def advice_style(v):
@@ -1149,15 +1194,50 @@ elif page == "🧠 聰明資金":
 # ══════════════════════════════════════════════════════════════════
 elif page == "🔖 追蹤清單":
     st.title("🔖 追蹤清單")
-    st.caption("加入有興趣的股票，每日 pipeline 自動判斷波段買點（🟢買點浮現 / 🟡接近買點 / ⚪觀望）")
+    st.caption("可建立多組命名清單（自己的觀察、幫別人記的都分開），"
+               "每日 pipeline 自動判斷波段買點（🟢買點浮現 / 🟡接近買點 / ⚪觀望）")
 
-    # 新增表單
+    # ── 清單選擇 / 管理 ─────────────────────────────────────────
+    with get_session() as s:
+        mylists = s.execute(text("""
+            SELECT list_id, list_name,
+                   (SELECT COUNT(*) FROM watchlist_items i WHERE i.list_id = w.list_id)
+            FROM watchlists w WHERE user_id = :uid ORDER BY list_id
+        """), {"uid": USER["user_id"]}).fetchall()
+
+    lc1, lc2, lc3 = st.columns([2, 2, 1])
+    list_options = {f"{name}（{cnt} 檔）": lid for lid, name, cnt in mylists}
+    pick = lc1.selectbox("目前清單", list(list_options.keys())) if mylists else None
+    cur_list_id = list_options[pick] if pick else None
+
+    with lc2.form("new_list", clear_on_submit=True):
+        nl_name = st.text_input("新清單名稱", placeholder="例：AI伺服器觀察 / 幫媽媽記的")
+        nl_go = st.form_submit_button("➕ 建立清單")
+    if nl_go and nl_name.strip():
+        with get_session() as s:
+            s.execute(text("""
+                INSERT INTO watchlists (user_id, list_name) VALUES (:uid, :n)
+                ON CONFLICT (user_id, list_name) DO NOTHING
+            """), {"uid": USER["user_id"], "n": nl_name.strip()[:50]})
+        st.rerun()
+
+    if cur_list_id and lc3.button("🗑 刪除此清單", help="連同清單內全部股票一起刪除"):
+        with get_session() as s:
+            s.execute(text("DELETE FROM watchlists WHERE list_id = :lid AND user_id = :uid"),
+                      {"lid": cur_list_id, "uid": USER["user_id"]})
+        st.rerun()
+
+    if cur_list_id is None:
+        st.info("先建立一組清單")
+        st.stop()
+
+    # ── 加入股票 ────────────────────────────────────────────────
     with st.form("add_watchlist", clear_on_submit=True):
         c1, c2, c3 = st.columns([1, 2, 1])
         w_sid    = c1.text_input("股票代號", placeholder="2330")
         w_note   = c2.text_input("備註（選填）", placeholder="例：等回檔到月線")
         w_target = c3.number_input("目標買入價（選填，0=不設）", min_value=0.0, step=0.5, value=0.0)
-        w_submit = st.form_submit_button("➕ 加入追蹤")
+        w_submit = st.form_submit_button("➕ 加入此清單")
 
     if w_submit:
         sid = w_sid.strip()
@@ -1169,11 +1249,11 @@ elif page == "🔖 追蹤清單":
         else:
             with get_session() as s:
                 s.execute(text("""
-                    INSERT INTO user_watchlist (stock_id, note, target_price)
-                    VALUES (:sid, :note, :tp)
-                    ON CONFLICT (stock_id) DO UPDATE
+                    INSERT INTO watchlist_items (list_id, stock_id, note, target_price)
+                    VALUES (:lid, :sid, :note, :tp)
+                    ON CONFLICT (list_id, stock_id) DO UPDATE
                         SET note = EXCLUDED.note, target_price = EXCLUDED.target_price
-                """), {"sid": sid, "note": w_note or None,
+                """), {"lid": cur_list_id, "sid": sid, "note": w_note or None,
                        "tp": w_target if w_target > 0 else None})
             st.success(f"已加入 {sid} {exists[0]}")
 
@@ -1186,24 +1266,25 @@ elif page == "🔖 追蹤清單":
         st.success("已更新")
         st.rerun()
 
-    # 清單表格
+    # 清單表格（目前選中的清單）
     with get_session() as s:
         wrows = s.execute(text("""
-            SELECT w.stock_id, st.stock_name, w.added_date, w.note,
-                   w.target_price, w.last_signal, w.signal_date,
+            SELECT i.stock_id, st.stock_name, i.added_date, i.note,
+                   i.target_price, i.last_signal, i.signal_date,
                    (SELECT d.close FROM daily_prices d
-                    WHERE d.stock_id = w.stock_id AND d.close > 0
+                    WHERE d.stock_id = i.stock_id AND d.close > 0
                     ORDER BY d.trade_date DESC LIMIT 1) AS cur_close,
                    (SELECT d.close FROM daily_prices d
-                    WHERE d.stock_id = w.stock_id AND d.close > 0
-                      AND d.trade_date >= w.added_date
+                    WHERE d.stock_id = i.stock_id AND d.close > 0
+                      AND d.trade_date >= i.added_date
                     ORDER BY d.trade_date ASC LIMIT 1) AS base_close
-            FROM user_watchlist w JOIN stocks st ON st.stock_id = w.stock_id
-            ORDER BY w.added_date DESC, w.stock_id
-        """)).fetchall()
+            FROM watchlist_items i JOIN stocks st ON st.stock_id = i.stock_id
+            WHERE i.list_id = :lid
+            ORDER BY i.added_date DESC, i.stock_id
+        """), {"lid": cur_list_id}).fetchall()
 
     if not wrows:
-        st.info("清單目前是空的，用上方表單加入想追蹤的股票")
+        st.info("此清單是空的，用上方表單加入想追蹤的股票")
     else:
         wrecs = []
         for sid, name, added, note, tp, sig, sig_d, cur, base in wrows:
@@ -1235,7 +1316,7 @@ elif page == "🔖 追蹤清單":
             use_container_width=True, hide_index=True,
         )
 
-        # 移除
+        # 移除（從目前清單）
         with st.form("remove_watchlist"):
             c1, c2 = st.columns([3, 1])
             rm_pick = c1.selectbox("移除追蹤",
@@ -1244,8 +1325,10 @@ elif page == "🔖 追蹤清單":
         if rm_go and rm_pick:
             rm_sid = rm_pick.split()[0]
             with get_session() as s:
-                s.execute(text("DELETE FROM user_watchlist WHERE stock_id = :sid"),
-                          {"sid": rm_sid})
+                s.execute(text("""
+                    DELETE FROM watchlist_items
+                    WHERE list_id = :lid AND stock_id = :sid
+                """), {"lid": cur_list_id, "sid": rm_sid})
             st.success(f"已移除 {rm_pick}")
             st.rerun()
 
@@ -1332,3 +1415,59 @@ elif page == "🔥 族群輪動":
                                   "成交量": "{:,d}"}, na_rep="—"),
                 use_container_width=True, hide_index=True,
             )
+
+
+# ══════════════════════════════════════════════════════════════════
+#  Page 10：帳號管理（僅管理員）
+# ══════════════════════════════════════════════════════════════════
+elif page == "👤 帳號管理":
+    st.title("👤 帳號管理")
+    if USER["role"] != "admin":
+        st.error("只有管理員能使用此頁")
+        st.stop()
+
+    from database.users import create_user, list_users, set_password, set_telegram_chat
+
+    # 使用者清單
+    users = list_users()
+    st.subheader(f"使用者（{len(users)} 位）")
+    st.dataframe(pd.DataFrame([{
+        "ID": u["user_id"], "帳號": u["username"], "顯示名稱": u["display_name"],
+        "角色": u["role"], "Telegram Chat ID": u["telegram_chat_id"] or "—",
+        "建立時間": str(u["created_at"])[:16],
+    } for u in users]), use_container_width=True, hide_index=True)
+
+    st.markdown("---")
+    c_new, c_manage = st.columns(2)
+
+    # 新增使用者
+    with c_new:
+        st.subheader("➕ 新增使用者")
+        with st.form("create_user", clear_on_submit=True):
+            nu = st.text_input("帳號（英數）")
+            np_ = st.text_input("密碼", type="password")
+            nd = st.text_input("顯示名稱（選填）")
+            nr = st.selectbox("角色", ["user", "admin"])
+            ntg = st.text_input("Telegram Chat ID（選填，綁定後 Bot 指令歸戶）")
+            ok_new = st.form_submit_button("建立")
+        if ok_new:
+            ok, msg = create_user(nu, np_, nd or None, nr, ntg or None)
+            (st.success if ok else st.error)(msg)
+
+    # 重設密碼 / 綁 Telegram
+    with c_manage:
+        st.subheader("🔧 管理既有使用者")
+        target = st.selectbox("選擇使用者", [u["username"] for u in users])
+        with st.form("reset_pw", clear_on_submit=True):
+            pw2 = st.text_input("新密碼", type="password")
+            ok_pw = st.form_submit_button("重設密碼")
+        if ok_pw and pw2:
+            st.success("密碼已更新") if set_password(target, pw2) else st.error("更新失敗")
+        with st.form("bind_tg", clear_on_submit=True):
+            tg2 = st.text_input("Telegram Chat ID（空白=解除綁定）")
+            ok_tg = st.form_submit_button("更新綁定")
+        if ok_tg:
+            st.success("已更新") if set_telegram_chat(target, tg2) else st.error("更新失敗")
+
+    st.caption("提醒：策略參數（strategy.py）與 AI 推薦是全系統共用的；"
+               "使用者間隔離的是「我的持倉」「追蹤清單」。")

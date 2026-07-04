@@ -33,8 +33,8 @@ def telegram_enabled() -> bool:
     return bool(APIConfig.TELEGRAM_TOKEN and APIConfig.TELEGRAM_CHAT_ID)
 
 
-def send_telegram(text: str) -> bool:
-    """送一則 Telegram 訊息；未設定或失敗時回 False（不丟例外）。"""
+def send_telegram(text: str, chat_id: str = None) -> bool:
+    """送一則 Telegram 訊息；chat_id 未指定時送到預設（管理員）。失敗回 False。"""
     if not telegram_enabled():
         logger.warning("未設定 Telegram（TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID），略過通知")
         return False
@@ -42,7 +42,7 @@ def send_telegram(text: str) -> bool:
         resp = requests.post(
             f"https://api.telegram.org/bot{APIConfig.TELEGRAM_TOKEN}/sendMessage",
             json={
-                "chat_id": APIConfig.TELEGRAM_CHAT_ID,
+                "chat_id": chat_id or APIConfig.TELEGRAM_CHAT_ID,
                 "text": text[:_TG_LIMIT],
                 "disable_web_page_preview": True,
             },
@@ -120,54 +120,67 @@ def _stock_name(sid: str) -> str | None:
     return r[0] if r else None
 
 
-def _add_watch(sid: str, target: float = None, note: str = None) -> str:
+def _add_watch(sid: str, target: float = None, note: str = None, user: dict = None) -> str:
     from database.connection import get_session
+    from database.users import default_list_id
     from sqlalchemy import text
     name = _stock_name(sid)
     if not name:
         return f"❌ 代號 {sid} 不存在，請確認"
+    lid = default_list_id(user["user_id"])
     with get_session() as s:
         s.execute(text("""
-            INSERT INTO user_watchlist (stock_id, note, target_price)
-            VALUES (:sid, :note, :tp)
-            ON CONFLICT (stock_id) DO UPDATE
-                SET note = COALESCE(EXCLUDED.note, user_watchlist.note),
-                    target_price = COALESCE(EXCLUDED.target_price, user_watchlist.target_price)
-        """), {"sid": sid, "note": note, "tp": target})
+            INSERT INTO watchlist_items (list_id, stock_id, note, target_price)
+            VALUES (:lid, :sid, :note, :tp)
+            ON CONFLICT (list_id, stock_id) DO UPDATE
+                SET note = COALESCE(EXCLUDED.note, watchlist_items.note),
+                    target_price = COALESCE(EXCLUDED.target_price, watchlist_items.target_price)
+        """), {"lid": lid, "sid": sid, "note": note, "tp": target})
     tp_txt = f"，目標價 {target:.2f}" if target else ""
-    return f"🔖 已加入追蹤：{sid} {name}{tp_txt}\n每日 21:00 會判斷買點並在出現 🟢 訊號時通知你"
+    return (f"🔖 已加入 {user['display_name']} 的預設清單：{sid} {name}{tp_txt}\n"
+            f"每日 21:00 會判斷買點並在出現 🟢 訊號時通知")
 
 
-def _remove_watch(sid: str) -> str:
+def _remove_watch(sid: str, user: dict = None) -> str:
     from database.connection import get_session
     from sqlalchemy import text
     with get_session() as s:
-        n = s.execute(text("DELETE FROM user_watchlist WHERE stock_id = :sid"),
-                      {"sid": sid}).rowcount
-    return f"🗑 已移除追蹤：{sid}" if n else f"❓ {sid} 不在追蹤清單中"
+        n = s.execute(text("""
+            DELETE FROM watchlist_items
+            WHERE stock_id = :sid
+              AND list_id IN (SELECT list_id FROM watchlists WHERE user_id = :uid)
+        """), {"sid": sid, "uid": user["user_id"]}).rowcount
+    return f"🗑 已從你的清單移除：{sid}" if n else f"❓ {sid} 不在你的任何清單中"
 
 
-def _list_watch() -> str:
+def _list_watch(user: dict = None) -> str:
     from database.connection import get_session
     from sqlalchemy import text
     with get_session() as s:
         rows = s.execute(text("""
-            SELECT w.stock_id, st.stock_name, w.target_price, w.last_signal
-            FROM user_watchlist w JOIN stocks st ON st.stock_id = w.stock_id
-            ORDER BY w.stock_id
-        """)).fetchall()
+            SELECT w.list_name, i.stock_id, st.stock_name, i.target_price, i.last_signal
+            FROM watchlist_items i
+            JOIN watchlists w ON w.list_id = i.list_id
+            JOIN stocks st    ON st.stock_id = i.stock_id
+            WHERE w.user_id = :uid
+            ORDER BY w.list_id, i.stock_id
+        """), {"uid": user["user_id"]}).fetchall()
     if not rows:
-        return "🔖 追蹤清單是空的\n用「/watch 2330」或直接說「幫我關注 2330」加入"
-    lines = [f"🔖 追蹤清單（{len(rows)} 檔）："]
-    for sid, name, tp, sig in rows:
+        return "🔖 你的追蹤清單是空的\n用「/watch 2330」或直接說「幫我關注 2330」加入"
+    lines = [f"🔖 {user['display_name']} 的追蹤清單（{len(rows)} 檔）："]
+    cur = None
+    for lname, sid, name, tp, sig in rows:
+        if lname != cur:
+            lines.append(f"📁 {lname}")
+            cur = lname
         tp_txt = f"｜目標 {float(tp):.2f}" if tp else ""
         sig_txt = f"\n    {sig}" if sig else ""
         lines.append(f"  {sid} {name}{tp_txt}{sig_txt}")
     return "\n".join(lines)
 
 
-def _add_manual(sid: str, price: float, lots: int, note: str = None) -> str:
-    """新增手動持倉。lots = 張數（1張=1000股）。"""
+def _add_manual(sid: str, price: float, lots: int, note: str = None, user: dict = None) -> str:
+    """新增手動持倉（歸戶到 user）。lots = 張數（1張=1000股）。"""
     from datetime import date
     from database.connection import get_session
     from sqlalchemy import text
@@ -179,16 +192,17 @@ def _add_manual(sid: str, price: float, lots: int, note: str = None) -> str:
     with get_session() as s:
         s.execute(text("""
             INSERT INTO positions (stock_id, entry_date, entry_price, shares,
-                                   entry_reason, source, status)
-            VALUES (:sid, :d, :p, :sh, :note, 'manual', 'open')
+                                   entry_reason, source, status, user_id, account_label)
+            VALUES (:sid, :d, :p, :sh, :note, 'manual', 'open', :uid, '我的')
         """), {"sid": sid, "d": date.today(), "p": price,
-               "sh": lots * 1000, "note": note or "Telegram 建倉"})
-    return (f"📦 已記錄進場：{sid} {name} @ {price:.2f} × {lots} 張\n"
+               "sh": lots * 1000, "note": note or "Telegram 建倉",
+               "uid": user["user_id"]})
+    return (f"📦 已記錄進場（{user['display_name']}）：{sid} {name} @ {price:.2f} × {lots} 張\n"
             f"每日 21:00 會給出建議（賣出/加碼/續抱）")
 
 
-def _close_manual(sid: str, price: float) -> str:
-    """平掉某代號最早一筆 open 手動倉。"""
+def _close_manual(sid: str, price: float, user: dict = None) -> str:
+    """平掉該使用者某代號最早一筆 open 手動倉。"""
     from datetime import date
     from database.connection import get_session
     from sqlalchemy import text
@@ -196,10 +210,11 @@ def _close_manual(sid: str, price: float) -> str:
         row = s.execute(text("""
             SELECT id, entry_price FROM positions
             WHERE stock_id = :sid AND source = 'manual' AND status = 'open'
+              AND user_id = :uid
             ORDER BY entry_date LIMIT 1
-        """), {"sid": sid}).fetchone()
+        """), {"sid": sid, "uid": user["user_id"]}).fetchone()
         if not row:
-            return f"❓ {sid} 沒有進行中的手動持倉"
+            return f"❓ 你沒有 {sid} 進行中的手動持倉"
         pid, ep = row[0], float(row[1])
         ret = (price / ep - 1) * 100
         s.execute(text("""
@@ -212,8 +227,8 @@ def _close_manual(sid: str, price: float) -> str:
     return f"{emoji} 已平倉：{sid} {name} @ {price:.2f}（成本 {ep:.2f}，報酬 {ret:+.2f}%）"
 
 
-def _my_positions() -> str:
-    """AI 部位 + 手動持倉（含最近 AI 建議）。"""
+def _my_positions(user: dict = None) -> str:
+    """AI 部位（全系統共享）+ 該使用者的手動持倉（含最近 AI 建議與帳本）。"""
     from database.connection import get_session
     from sqlalchemy import text
     lines = []
@@ -226,19 +241,26 @@ def _my_positions() -> str:
         with get_session() as s:
             rows = s.execute(text("""
                 SELECT p.stock_id, st.stock_name, p.entry_price, p.shares, p.last_advice,
+                       COALESCE(p.account_label, '我的'),
                        (SELECT d.close FROM daily_prices d
                         WHERE d.stock_id = p.stock_id AND d.close > 0
                         ORDER BY d.trade_date DESC LIMIT 1)
                 FROM positions p JOIN stocks st ON st.stock_id = p.stock_id
-                WHERE p.source = 'manual' AND p.status = 'open'
-                ORDER BY p.entry_date
-            """)).fetchall()
-        lines.append(f"\n👤 我的持倉（{len(rows)} 檔）：" if rows else "\n👤 我的持倉：無")
-        for sid, name, ep, sh, adv, cur in rows:
+                WHERE p.source = 'manual' AND p.status = 'open' AND p.user_id = :uid
+                ORDER BY p.account_label, p.entry_date
+            """), {"uid": user["user_id"]}).fetchall()
+        lines.append(f"\n👤 {user['display_name']} 的持倉（{len(rows)} 檔）：" if rows
+                     else f"\n👤 {user['display_name']} 的持倉：無")
+        for sid, name, ep, sh, adv, label, cur in rows:
             ep = float(ep); cur = float(cur) if cur else None
             pnl = f"{(cur/ep-1)*100:+.1f}%" if cur else "—"
-            lots = f"{int(sh)//1000}張" if sh else ""
-            lines.append(f"  {sid} {name} {lots} @ {ep:.2f}（{pnl}）")
+            if sh:
+                sh = int(sh)
+                lots = f"{sh//1000}張" if sh >= 1000 else f"{sh}股"
+            else:
+                lots = ""
+            lbl = f"[{label}] " if label != "我的" else ""
+            lines.append(f"  {lbl}{sid} {name} {lots} @ {ep:.2f}（{pnl}）")
             if adv:
                 lines.append(f"    {adv}")
         return "\n".join(lines)
@@ -246,8 +268,8 @@ def _my_positions() -> str:
         return f"❌ 無法取得部位資料：{e}"
 
 
-def _handle_command(text_raw: str) -> str:
-    """把指令文字轉成回覆文字。支援參數（如 /watch 2330 950）。"""
+def _handle_command(text_raw: str, user: dict) -> str:
+    """把指令文字轉成回覆文字。支援參數（如 /watch 2330 950）。user 為歸戶對象。"""
     parts = text_raw.strip().split()
     cmd = parts[0].lower().split("@")[0]
     args = parts[1:]
@@ -283,28 +305,28 @@ def _handle_command(text_raw: str) -> str:
         return f"🖥 台股顧問系統狀態\n日期：{date.today()}\n{db_line}"
 
     if cmd == "/positions":
-        return _my_positions()
+        return _my_positions(user)
 
     if cmd == "/watchlist":
-        return _list_watch()
+        return _list_watch(user)
 
     if cmd == "/watch":
         if not args:
             return "用法：/watch 2330 [目標價]"
         target = float(args[1]) if len(args) > 1 and _re.fullmatch(r'\d+(\.\d+)?', args[1]) else None
-        return _add_watch(args[0].upper(), target)
+        return _add_watch(args[0].upper(), target, user=user)
 
     if cmd == "/unwatch":
         if not args:
             return "用法：/unwatch 2330"
-        return _remove_watch(args[0].upper())
+        return _remove_watch(args[0].upper(), user=user)
 
     if cmd == "/buy":
         if len(args) < 3:
             return "用法：/buy 代號 價格 張數\n例：/buy 2330 950 2"
         try:
             return _add_manual(args[0].upper(), float(args[1]), int(args[2]),
-                               note=" ".join(args[3:]) or None)
+                               note=" ".join(args[3:]) or None, user=user)
         except ValueError:
             return "❌ 價格/張數格式錯誤。例：/buy 2330 950 2"
 
@@ -312,14 +334,14 @@ def _handle_command(text_raw: str) -> str:
         if len(args) < 2:
             return "用法：/sell 代號 賣出價格\n例：/sell 2330 1010"
         try:
-            return _close_manual(args[0].upper(), float(args[1]))
+            return _close_manual(args[0].upper(), float(args[1]), user=user)
         except ValueError:
             return "❌ 價格格式錯誤。例：/sell 2330 1010"
 
     return f"❓ 未知指令：{cmd}，輸入 /help 查看可用指令"
 
 
-def _try_natural(text_raw: str) -> str | None:
+def _try_natural(text_raw: str, user: dict) -> str | None:
     """
     自然語言解析（規則式，零 LLM 成本）：
       「幫我關注 2330」「追蹤 2330 目標 900」        → watch
@@ -338,7 +360,7 @@ def _try_natural(text_raw: str) -> str | None:
     if any(k in t for k in ("賣", "平倉", "出場", "出掉")):
         if not nums:
             return f"要記錄 {sid} 平倉的話，請附上賣出價格，例：「{sid} 1010 賣掉了」"
-        return _close_manual(sid, nums[0])
+        return _close_manual(sid, nums[0], user=user)
 
     if any(k in t for k in ("買了", "買入", "買進", "進場", "建倉")):
         if not nums:
@@ -346,19 +368,48 @@ def _try_natural(text_raw: str) -> str | None:
         price = nums[0]
         lot_m = _re.search(r'(\d+)\s*張', rest)
         lots = int(lot_m.group(1)) if lot_m else (int(nums[1]) if len(nums) > 1 and nums[1] < 1000 else 1)
-        return _add_manual(sid, price, lots)
+        return _add_manual(sid, price, lots, user=user)
 
     if any(k in t for k in ("關注", "追蹤", "注意", "看看", "觀察")):
         target = nums[0] if nums else None
-        return _add_watch(sid, target)
+        return _add_watch(sid, target, user=user)
 
+    return None
+
+
+def _resolve_user(chat_id: str) -> dict | None:
+    """
+    chat_id → 使用者（多使用者歸戶）：
+      1. users.telegram_chat_id 綁定者 → 該使用者
+      2. 預設 TELEGRAM_CHAT_ID（env）→ 管理員（第一位 admin）
+      3. 其他 → None（未授權，不回應）
+    """
+    try:
+        from database.users import get_user_by_chat
+        u = get_user_by_chat(chat_id)
+        if u:
+            return u
+        if str(chat_id) == str(APIConfig.TELEGRAM_CHAT_ID):
+            from database.connection import get_session
+            from sqlalchemy import text as _text
+            with get_session() as s:
+                r = s.execute(_text("""
+                    SELECT user_id, username, display_name, role FROM users
+                    WHERE role = 'admin' ORDER BY user_id LIMIT 1
+                """)).fetchone()
+            if r:
+                return {"user_id": r[0], "username": r[1],
+                        "display_name": r[2] or r[1], "role": r[3]}
+    except Exception as e:
+        logger.warning(f"使用者解析失敗: {e}")
     return None
 
 
 def check_and_respond():
     """
     在 pipeline 開始時呼叫：處理用戶傳給 Bot 的所有排隊指令並回覆。
-    只處理來自已設定 TELEGRAM_CHAT_ID 的訊息（安全過濾）。
+    授權對象：env TELEGRAM_CHAT_ID（→管理員）+ users 表綁定 chat_id 的使用者。
+    回覆送回發訊者自己的 chat。
     """
     if not telegram_enabled():
         return
@@ -368,19 +419,20 @@ def check_and_respond():
         if not msg:
             continue
         chat_id = str(msg.get("chat", {}).get("id", ""))
-        if chat_id != str(APIConfig.TELEGRAM_CHAT_ID):
-            continue   # 只回應已授權的 chat
+        user = _resolve_user(chat_id)
+        if user is None:
+            continue   # 未授權的 chat 不回應
         text_raw = msg.get("text", "")
         if not text_raw:
             continue
         if text_raw.startswith("/"):
-            reply = _handle_command(text_raw)
+            reply = _handle_command(text_raw, user)
         else:
-            reply = _try_natural(text_raw)   # 自然語言：「幫我關注 2330」等
+            reply = _try_natural(text_raw, user)   # 自然語言：「幫我關注 2330」等
             if reply is None:
                 continue   # 看不懂就不回，避免誤觸
-        send_telegram(reply)
-        logger.info(f"已回覆訊息：{text_raw[:30]}")
+        send_telegram(reply, chat_id=chat_id)
+        logger.info(f"已回覆 {user['username']}：{text_raw[:30]}")
 
 
 if __name__ == "__main__":

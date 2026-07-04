@@ -45,11 +45,14 @@ def ensure_positions_table():
 
 
 def open_positions() -> list[dict]:
+    """AI 部位（source='ai'）——排除手動倉！手動倉只建議不自動平倉，
+    若不過濾，evaluate_exits 會把使用者的真實持股自動平倉。"""
     with get_session() as s:
         rows = s.execute(text("""
             SELECT p.stock_id, st.stock_name, p.entry_date, p.entry_price, p.peak_price
             FROM positions p JOIN stocks st ON st.stock_id = p.stock_id
-            WHERE p.status = 'open' ORDER BY p.entry_date
+            WHERE p.status = 'open' AND COALESCE(p.source, 'ai') = 'ai'
+            ORDER BY p.entry_date
         """)).fetchall()
     return [dict(stock_id=r[0], stock_name=r[1], entry_date=r[2],
                  entry_price=float(r[3]), peak_price=float(r[4]) if r[4] else float(r[3]))

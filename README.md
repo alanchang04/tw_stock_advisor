@@ -287,6 +287,7 @@ python run_pipeline.py --mode backtest
 ## 重要注意事項
 
 - `.env` 含 API Key，**絕不可上傳 GitHub**（已被 `.gitignore` 排除）
+- **多使用者**：網頁需登入（帳號由管理員在「👤 帳號管理」頁建立，密碼以 pbkdf2 雜湊儲存）；「我的持倉」「追蹤清單」依使用者隔離；市場資料與 AI 推薦全系統共享；策略參數（strategy.py）為全域設定，改動影響所有使用者
 - 資料庫在 Neon.tech 雲端，**不需要 Docker**；Neon 免費方案 0.5GB，閒置 5 分鐘會自動休眠，首次連線 <1 秒喚醒
 - GitHub Secrets 和 Streamlit Secrets 要分開設定（兩邊都需要 DATABASE_URL 等）
 - GITHUB_PAT 只需要設在 Streamlit Secrets（不需要設在 GitHub Secrets）

@@ -59,10 +59,14 @@ def advise_manual_positions(target_date: date = None) -> str | None:
 
     with get_session() as s:
         rows = s.execute(text("""
-            SELECT p.id, p.stock_id, st.stock_name, p.entry_date, p.entry_price
-            FROM positions p JOIN stocks st ON st.stock_id = p.stock_id
+            SELECT p.id, p.stock_id, st.stock_name, p.entry_date, p.entry_price,
+                   COALESCE(u.display_name, u.username, ''),
+                   COALESCE(p.account_label, '我的')
+            FROM positions p
+            JOIN stocks st ON st.stock_id = p.stock_id
+            LEFT JOIN users u ON u.user_id = p.user_id
             WHERE p.source = 'manual' AND p.status = 'open'
-            ORDER BY p.entry_date
+            ORDER BY p.user_id, p.account_label, p.entry_date
         """)).fetchall()
 
     if not rows:
@@ -72,8 +76,9 @@ def advise_manual_positions(target_date: date = None) -> str | None:
     alerts = []
     cfg = exit_cfg()   # 空頭時自動加回死亡交叉保護（與 AI 部位一致）
 
-    for pid, sid, name, entry_date, entry_price in rows:
+    for pid, sid, name, entry_date, entry_price, owner, label in rows:
         entry_price = float(entry_price)
+        tag = f"（{owner}／{label}）" if owner else (f"（{label}）" if label != "我的" else "")
 
         with get_session() as s:
             history = _recent_rows(s, sid, target_date, n=40)
@@ -105,7 +110,7 @@ def advise_manual_positions(target_date: date = None) -> str | None:
 
         if should_exit:
             advice = f"⚠️ 建議賣出：{reason}（損益 {gain*100:+.1f}%）"
-            alerts.append(f"  {sid} {name}：{advice}")
+            alerts.append(f"  {sid} {name}{tag}：{advice}")
         else:
             # 2) 加碼判斷：賺錢中 + 回踩 MA20 ±3% + 趨勢未壞
             add_ok = (
@@ -117,7 +122,7 @@ def advise_manual_positions(target_date: date = None) -> str | None:
             if add_ok:
                 advice = (f"➕ 可考慮加碼：回踩月線（收 {close:.2f}／MA20 {ma20:.2f}），"
                           f"趨勢未壞（損益 {gain*100:+.1f}%）")
-                alerts.append(f"  {sid} {name}：{advice}")
+                alerts.append(f"  {sid} {name}{tag}：{advice}")
             else:
                 # 3) 續抱：附距停損/停利
                 dist_sl = (close / (entry_price * (1 - STRATEGY["stop_loss"])) - 1) * 100
