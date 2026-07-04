@@ -24,7 +24,7 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from database.connection import get_session
 from agent.strategy import decide_exit, STRATEGY
-from agent.portfolio import _recent_rows
+from agent.portfolio import _recent_rows, exit_cfg
 
 
 def _build_extra(history: list[dict]) -> dict:
@@ -69,6 +69,7 @@ def advise_manual_positions(target_date: date = None) -> str | None:
 
     logger.info(f"=== 我的持倉 AI 建議：{len(rows)} 筆 ===")
     alerts = []
+    cfg = exit_cfg()   # 空頭時自動加回死亡交叉保護（與 AI 部位一致）
 
     for pid, sid, name, entry_date, entry_price in rows:
         entry_price = float(entry_price)
@@ -95,10 +96,10 @@ def advise_manual_positions(target_date: date = None) -> str | None:
         peak = max(float(peak) if peak else close, entry_price, close)
         gain = close / entry_price - 1
 
-        # 1) 賣出判斷（沿用 12 條出場規則）
+        # 1) 賣出判斷（沿用 12 條出場規則；cfg 含空頭保護）
         should_exit, reason = decide_exit(
             entry_price, peak, close, ma5, ma20, hold_days,
-            extra=_build_extra(history), history=history,
+            cfg=cfg, extra=_build_extra(history), history=history,
         )
 
         if should_exit:

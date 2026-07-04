@@ -105,54 +105,254 @@ def get_updates() -> list[dict]:
         return []
 
 
-def _handle_command(cmd: str) -> str:
-    """把指令文字轉成回覆文字。"""
-    cmd = cmd.strip().lower().split()[0]  # 取第一個 token，忽略 @botname 後綴
+import re as _re
+
+_CODE_RE = _re.compile(r'(?<![\dA-Z])(\d{4,6}[A-Z]?)(?![\dA-Z])')
+
+
+def _stock_name(sid: str) -> str | None:
+    """代號 → 名稱；不存在回 None。"""
+    from database.connection import get_session
+    from sqlalchemy import text
+    with get_session() as s:
+        r = s.execute(text("SELECT stock_name FROM stocks WHERE stock_id = :sid"),
+                      {"sid": sid}).fetchone()
+    return r[0] if r else None
+
+
+def _add_watch(sid: str, target: float = None, note: str = None) -> str:
+    from database.connection import get_session
+    from sqlalchemy import text
+    name = _stock_name(sid)
+    if not name:
+        return f"❌ 代號 {sid} 不存在，請確認"
+    with get_session() as s:
+        s.execute(text("""
+            INSERT INTO user_watchlist (stock_id, note, target_price)
+            VALUES (:sid, :note, :tp)
+            ON CONFLICT (stock_id) DO UPDATE
+                SET note = COALESCE(EXCLUDED.note, user_watchlist.note),
+                    target_price = COALESCE(EXCLUDED.target_price, user_watchlist.target_price)
+        """), {"sid": sid, "note": note, "tp": target})
+    tp_txt = f"，目標價 {target:.2f}" if target else ""
+    return f"🔖 已加入追蹤：{sid} {name}{tp_txt}\n每日 21:00 會判斷買點並在出現 🟢 訊號時通知你"
+
+
+def _remove_watch(sid: str) -> str:
+    from database.connection import get_session
+    from sqlalchemy import text
+    with get_session() as s:
+        n = s.execute(text("DELETE FROM user_watchlist WHERE stock_id = :sid"),
+                      {"sid": sid}).rowcount
+    return f"🗑 已移除追蹤：{sid}" if n else f"❓ {sid} 不在追蹤清單中"
+
+
+def _list_watch() -> str:
+    from database.connection import get_session
+    from sqlalchemy import text
+    with get_session() as s:
+        rows = s.execute(text("""
+            SELECT w.stock_id, st.stock_name, w.target_price, w.last_signal
+            FROM user_watchlist w JOIN stocks st ON st.stock_id = w.stock_id
+            ORDER BY w.stock_id
+        """)).fetchall()
+    if not rows:
+        return "🔖 追蹤清單是空的\n用「/watch 2330」或直接說「幫我關注 2330」加入"
+    lines = [f"🔖 追蹤清單（{len(rows)} 檔）："]
+    for sid, name, tp, sig in rows:
+        tp_txt = f"｜目標 {float(tp):.2f}" if tp else ""
+        sig_txt = f"\n    {sig}" if sig else ""
+        lines.append(f"  {sid} {name}{tp_txt}{sig_txt}")
+    return "\n".join(lines)
+
+
+def _add_manual(sid: str, price: float, lots: int, note: str = None) -> str:
+    """新增手動持倉。lots = 張數（1張=1000股）。"""
+    from datetime import date
+    from database.connection import get_session
+    from sqlalchemy import text
+    name = _stock_name(sid)
+    if not name:
+        return f"❌ 代號 {sid} 不存在，請確認"
+    if price <= 0 or lots <= 0:
+        return "❌ 價格與張數必須大於 0"
+    with get_session() as s:
+        s.execute(text("""
+            INSERT INTO positions (stock_id, entry_date, entry_price, shares,
+                                   entry_reason, source, status)
+            VALUES (:sid, :d, :p, :sh, :note, 'manual', 'open')
+        """), {"sid": sid, "d": date.today(), "p": price,
+               "sh": lots * 1000, "note": note or "Telegram 建倉"})
+    return (f"📦 已記錄進場：{sid} {name} @ {price:.2f} × {lots} 張\n"
+            f"每日 21:00 會給出建議（賣出/加碼/續抱）")
+
+
+def _close_manual(sid: str, price: float) -> str:
+    """平掉某代號最早一筆 open 手動倉。"""
+    from datetime import date
+    from database.connection import get_session
+    from sqlalchemy import text
+    with get_session() as s:
+        row = s.execute(text("""
+            SELECT id, entry_price FROM positions
+            WHERE stock_id = :sid AND source = 'manual' AND status = 'open'
+            ORDER BY entry_date LIMIT 1
+        """), {"sid": sid}).fetchone()
+        if not row:
+            return f"❓ {sid} 沒有進行中的手動持倉"
+        pid, ep = row[0], float(row[1])
+        ret = (price / ep - 1) * 100
+        s.execute(text("""
+            UPDATE positions SET status='closed', exit_date=:d, exit_price=:p,
+                   exit_reason='Telegram 手動平倉', return_pct=:r
+            WHERE id = :pid
+        """), {"d": date.today(), "p": price, "r": round(ret, 4), "pid": pid})
+    name = _stock_name(sid) or ""
+    emoji = "🟢" if ret >= 0 else "🔴"
+    return f"{emoji} 已平倉：{sid} {name} @ {price:.2f}（成本 {ep:.2f}，報酬 {ret:+.2f}%）"
+
+
+def _my_positions() -> str:
+    """AI 部位 + 手動持倉（含最近 AI 建議）。"""
+    from database.connection import get_session
+    from sqlalchemy import text
+    lines = []
+    try:
+        from agent.portfolio import open_positions
+        held = open_positions()
+        lines.append(f"🤖 AI 部位（{len(held)} 檔）：" if held else "🤖 AI 部位：無")
+        for p in held:
+            lines.append(f"  {p['stock_id']} {p['stock_name']} — 進場 {p['entry_price']:.2f}，自 {p['entry_date']}")
+        with get_session() as s:
+            rows = s.execute(text("""
+                SELECT p.stock_id, st.stock_name, p.entry_price, p.shares, p.last_advice,
+                       (SELECT d.close FROM daily_prices d
+                        WHERE d.stock_id = p.stock_id AND d.close > 0
+                        ORDER BY d.trade_date DESC LIMIT 1)
+                FROM positions p JOIN stocks st ON st.stock_id = p.stock_id
+                WHERE p.source = 'manual' AND p.status = 'open'
+                ORDER BY p.entry_date
+            """)).fetchall()
+        lines.append(f"\n👤 我的持倉（{len(rows)} 檔）：" if rows else "\n👤 我的持倉：無")
+        for sid, name, ep, sh, adv, cur in rows:
+            ep = float(ep); cur = float(cur) if cur else None
+            pnl = f"{(cur/ep-1)*100:+.1f}%" if cur else "—"
+            lots = f"{int(sh)//1000}張" if sh else ""
+            lines.append(f"  {sid} {name} {lots} @ {ep:.2f}（{pnl}）")
+            if adv:
+                lines.append(f"    {adv}")
+        return "\n".join(lines)
+    except Exception as e:
+        return f"❌ 無法取得部位資料：{e}"
+
+
+def _handle_command(text_raw: str) -> str:
+    """把指令文字轉成回覆文字。支援參數（如 /watch 2330 950）。"""
+    parts = text_raw.strip().split()
+    cmd = parts[0].lower().split("@")[0]
+    args = parts[1:]
 
     if cmd in ("/help", "/start"):
         return (
             "📋 台股顧問 Bot 指令：\n"
-            "/status    — 系統狀態與今日日期\n"
-            "/positions — 目前追蹤中的持倉\n"
-            "/help      — 顯示此說明\n\n"
-            "每日 21:00 自動推送選股推薦與出場提醒。"
+            "／追蹤清單\n"
+            "/watch 2330 [目標價] — 加入追蹤\n"
+            "/unwatch 2330 — 移除追蹤\n"
+            "/watchlist — 看清單與買點訊號\n"
+            "／我的持倉\n"
+            "/buy 2330 950 2 — 記錄進場（價格 950、2 張）\n"
+            "/sell 2330 1010 — 記錄平倉\n"
+            "/positions — AI 部位 + 我的持倉\n"
+            "／系統\n"
+            "/status — 系統狀態\n\n"
+            "💬 也可以直接說：「幫我關注 2330」「我買了 2330 950 2張」「2330 我 1010 賣掉了」\n"
+            "每日 21:00 自動推送推薦、持倉建議與追蹤買點。"
         )
 
     if cmd == "/status":
         from datetime import date
-        import sys, os
-        # 嘗試連 DB
         try:
-            sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
             from database.connection import get_session
             from sqlalchemy import text
             with get_session() as s:
                 cnt = s.execute(text("SELECT COUNT(*) FROM daily_prices")).scalar()
-            db_line = f"✅ DB 連線正常，daily_prices 共 {cnt:,} 筆"
+                last = s.execute(text("SELECT MAX(trade_date) FROM daily_prices")).scalar()
+            db_line = f"✅ DB 正常，行情至 {last}（{cnt:,} 筆）"
         except Exception as e:
             db_line = f"❌ DB 連線失敗：{e}"
-        return (
-            f"🖥 台股顧問系統狀態\n"
-            f"日期：{date.today()}\n"
-            f"{db_line}"
-        )
+        return f"🖥 台股顧問系統狀態\n日期：{date.today()}\n{db_line}"
 
     if cmd == "/positions":
+        return _my_positions()
+
+    if cmd == "/watchlist":
+        return _list_watch()
+
+    if cmd == "/watch":
+        if not args:
+            return "用法：/watch 2330 [目標價]"
+        target = float(args[1]) if len(args) > 1 and _re.fullmatch(r'\d+(\.\d+)?', args[1]) else None
+        return _add_watch(args[0].upper(), target)
+
+    if cmd == "/unwatch":
+        if not args:
+            return "用法：/unwatch 2330"
+        return _remove_watch(args[0].upper())
+
+    if cmd == "/buy":
+        if len(args) < 3:
+            return "用法：/buy 代號 價格 張數\n例：/buy 2330 950 2"
         try:
-            sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-            from agent.portfolio import open_positions
-            held = open_positions()
-            if not held:
-                return "📦 目前無追蹤中部位"
-            lines = [f"📦 追蹤中部位（{len(held)} 檔）："]
-            for p in held:
-                gain_ref = f"進場 {p['entry_price']:.2f}"
-                lines.append(f"  {p['stock_id']} {p['stock_name']} — {gain_ref}，自 {p['entry_date']}")
-            return "\n".join(lines)
-        except Exception as e:
-            return f"❌ 無法取得部位資料：{e}"
+            return _add_manual(args[0].upper(), float(args[1]), int(args[2]),
+                               note=" ".join(args[3:]) or None)
+        except ValueError:
+            return "❌ 價格/張數格式錯誤。例：/buy 2330 950 2"
+
+    if cmd == "/sell":
+        if len(args) < 2:
+            return "用法：/sell 代號 賣出價格\n例：/sell 2330 1010"
+        try:
+            return _close_manual(args[0].upper(), float(args[1]))
+        except ValueError:
+            return "❌ 價格格式錯誤。例：/sell 2330 1010"
 
     return f"❓ 未知指令：{cmd}，輸入 /help 查看可用指令"
+
+
+def _try_natural(text_raw: str) -> str | None:
+    """
+    自然語言解析（規則式，零 LLM 成本）：
+      「幫我關注 2330」「追蹤 2330 目標 900」        → watch
+      「我買了 2330 950 2張」「2330 進場 950 兩張」   → buy（張數缺省 1）
+      「2330 1010 賣掉了」「賣出 2330 1010」          → sell
+    看不懂回 None（不回覆，避免誤觸）。
+    """
+    t = text_raw.strip()
+    m = _CODE_RE.search(t)
+    if not m:
+        return None
+    sid = m.group(1).upper()
+    rest = t.replace(m.group(1), " ")
+    nums = [float(x) for x in _re.findall(r'\d+(?:\.\d+)?', rest)]
+
+    if any(k in t for k in ("賣", "平倉", "出場", "出掉")):
+        if not nums:
+            return f"要記錄 {sid} 平倉的話，請附上賣出價格，例：「{sid} 1010 賣掉了」"
+        return _close_manual(sid, nums[0])
+
+    if any(k in t for k in ("買了", "買入", "買進", "進場", "建倉")):
+        if not nums:
+            return f"要記錄 {sid} 進場的話，請附上價格（與張數），例：「我買了 {sid} 950 2張」"
+        price = nums[0]
+        lot_m = _re.search(r'(\d+)\s*張', rest)
+        lots = int(lot_m.group(1)) if lot_m else (int(nums[1]) if len(nums) > 1 and nums[1] < 1000 else 1)
+        return _add_manual(sid, price, lots)
+
+    if any(k in t for k in ("關注", "追蹤", "注意", "看看", "觀察")):
+        target = nums[0] if nums else None
+        return _add_watch(sid, target)
+
+    return None
 
 
 def check_and_respond():
@@ -171,11 +371,16 @@ def check_and_respond():
         if chat_id != str(APIConfig.TELEGRAM_CHAT_ID):
             continue   # 只回應已授權的 chat
         text_raw = msg.get("text", "")
-        if not text_raw.startswith("/"):
-            continue   # 只處理指令
-        reply = _handle_command(text_raw)
+        if not text_raw:
+            continue
+        if text_raw.startswith("/"):
+            reply = _handle_command(text_raw)
+        else:
+            reply = _try_natural(text_raw)   # 自然語言：「幫我關注 2330」等
+            if reply is None:
+                continue   # 看不懂就不回，避免誤觸
         send_telegram(reply)
-        logger.info(f"已回覆指令：{text_raw.split()[0]}")
+        logger.info(f"已回覆訊息：{text_raw[:30]}")
 
 
 if __name__ == "__main__":

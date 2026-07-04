@@ -122,13 +122,28 @@ def record_entries(picks: list[dict], on_date: date) -> list[dict]:
     return opened
 
 
+def exit_cfg() -> dict:
+    """
+    出場參數：空頭時（市場濾網觸發）加回死亡交叉保護，多頭時用預設。
+    portfolio / manual_advisor 共用，確保 AI 部位與手動倉判斷一致。
+    """
+    if STRATEGY.get("bear_reenable_death_cross"):
+        try:
+            from agent.stock_selector import market_is_bull
+            if not market_is_bull():
+                return {**STRATEGY, "exit_on_death_cross": True}
+        except Exception as e:
+            logger.warning(f"市場濾網檢查失敗（用預設出場參數）: {e}")
+    return STRATEGY
+
+
 def evaluate_exits(on_date: date) -> list[dict]:
     """
     檢查所有持有中部位：更新最高價，依 strategy.decide_exit 判斷是否出場。
     回傳今日「該出場」的清單（含原因與報酬）。
     """
     ensure_positions_table()
-    cfg = STRATEGY
+    cfg = exit_cfg()
     avg_days = cfg.get("volume_avg_days", 20)
     exits = []
 

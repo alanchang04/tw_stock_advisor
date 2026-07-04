@@ -34,6 +34,12 @@ def mode_market_signals():
     """
     logger.info("=== 市場情報模組開始 ===")
     try:
+        from data_pipeline.fetchers.us_market import fetch_us_market_summary
+        fetch_us_market_summary()
+    except Exception as e:
+        logger.error(f"美股速覽失敗: {e}")
+
+    try:
         from data_pipeline.fetchers.etf_fetcher import run_etf_tracking
         run_etf_tracking()
     except Exception as e:

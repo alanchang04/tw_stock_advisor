@@ -31,6 +31,36 @@ MIN_CLOSE  = STRATEGY["min_close"]
 MIN_VOLUME = STRATEGY["min_volume"]
 
 
+def market_is_bull() -> bool:
+    """
+    市場濾網：大盤代理（預設 0050）收盤 >= MA60 視為多頭。
+    空頭時 daily_runner 不開新倉、出場加回死亡交叉（見 STRATEGY market_filter 區塊）。
+    查無資料或未啟用時回傳 True（不阻擋）。
+    """
+    if not STRATEGY.get("market_filter"):
+        return True
+    sid = STRATEGY.get("market_filter_stock", "0050")
+    try:
+        with get_session() as s:
+            r = s.execute(text("""
+                SELECT p.close, t.ma60
+                FROM daily_prices p
+                JOIN technical_indicators t
+                  ON t.stock_id = p.stock_id AND t.trade_date = p.trade_date
+                WHERE p.stock_id = :sid AND t.ma60 IS NOT NULL
+                ORDER BY p.trade_date DESC LIMIT 1
+            """), {"sid": sid}).fetchone()
+        if r is None:
+            return True
+        bull = float(r[0]) >= float(r[1])
+        if not bull:
+            logger.warning(f"市場濾網：{sid} 收盤 {float(r[0]):.2f} < MA60 {float(r[1]):.2f} → 空頭模式")
+        return bull
+    except Exception as e:
+        logger.warning(f"市場濾網查詢失敗（視為多頭）: {e}")
+        return True
+
+
 def get_hot_sectors(top_n: int = 5, min_stocks: int = 10) -> list[str]:
     """
     取今日熱度前 N 個產業（排除 ETF 類、且族群股票數要夠）
@@ -138,6 +168,27 @@ def get_candidate_stocks(
         return pd.DataFrame()
 
     df = pd.DataFrame(rows, columns=cols)
+
+    # 60 日動能：取 60 個交易日前的收盤，算區間報酬（候選池內相對排名進評分）
+    try:
+        with get_session() as session:
+            base_rows = session.execute(text("""
+                WITH d AS (
+                    SELECT DISTINCT trade_date FROM daily_prices
+                    ORDER BY trade_date DESC LIMIT 61
+                )
+                SELECT p.stock_id, p.close
+                FROM daily_prices p
+                WHERE p.trade_date = (SELECT MIN(trade_date) FROM d)
+                  AND p.close > 0
+            """)).fetchall()
+        base_map = {r[0]: float(r[1]) for r in base_rows}
+        df["mom60"] = [
+            (float(c) / base_map[sid] - 1) if base_map.get(sid) else None
+            for sid, c in zip(df["stock_id"], df["close"])
+        ]
+    except Exception as e:
+        logger.warning(f"動能計算失敗（略過此因子）: {e}")
 
     # 綜合評分：統一使用 strategy.score_candidates（與回測共用同一份邏輯）
     df["score"] = score_candidates(df)

@@ -30,6 +30,15 @@ STRATEGY = {
     "w_inst_buy":  1.5,    # 三大法人買超
     "w_foreign_buy": 1.0,  # 外資買超
     "w_rsi_sweet": 1.0,    # RSI 落在 50~65
+    "w_momentum":  2.0,    # 60日動能相對排名（0~1 百分位）——強者恆強因子
+
+    # ── 市場濾網（regime filter）──
+    # 大盤代理（0050 收盤 vs MA60）：空頭時 (a) 不開新倉 (b) 出場加回死亡交叉保護
+    # 這是對「多頭年調參、空頭無保護」的補強——參考常見趨勢跟蹤系統的 market filter
+    "market_filter":            True,
+    "market_filter_stock":      "0050",
+    "market_filter_block_entries": False,  # True=空頭完全不開新倉（保守）；False=只加出場保護
+    "bear_reenable_death_cross": True,
 
     # ── 出場規則：基本 ──
     "stop_loss":      0.08,   # 自進場價跌 8% → 停損
@@ -88,6 +97,11 @@ def score_candidates(df: pd.DataFrame, cfg: dict = STRATEGY) -> pd.Series:
     s += (df["inst_net"] > 0).astype(float) * cfg["w_inst_buy"]
     s += (df["foreign_net"] > 0).astype(float) * cfg["w_foreign_buy"]
     s += ((df["rsi14"] >= 50) & (df["rsi14"] <= 65)).astype(float) * cfg["w_rsi_sweet"]
+    # 60 日動能：候選池內相對排名（0~1），有欄位才計（回測與正式選股都會提供）
+    if "mom60" in df.columns and cfg.get("w_momentum", 0) > 0:
+        mom = pd.to_numeric(df["mom60"], errors="coerce")
+        if mom.notna().sum() >= 2:
+            s += mom.rank(pct=True).fillna(0.5) * cfg["w_momentum"]
     return s
 
 

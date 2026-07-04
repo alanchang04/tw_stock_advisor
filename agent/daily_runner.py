@@ -54,6 +54,16 @@ def run_daily_recommendation(with_entries: bool = True):
     exits = evaluate_exits(eval_date)
 
     result, opened = {}, []
+
+    # 市場濾網：僅在 market_filter_block_entries=True 時空頭不開新倉
+    # （預設 False：空頭只加回死亡交叉出場保護，見 portfolio.exit_cfg）
+    from agent.strategy import STRATEGY as _S
+    if with_entries and _S.get("market_filter_block_entries"):
+        from agent.stock_selector import market_is_bull
+        if not market_is_bull():
+            logger.warning("市場濾網觸發（空頭）：今日不開新倉")
+            with_entries = False
+
     if with_entries:
         # Step 3: 取熱門產業 + 篩選候選股票
         logger.info("Step 3 — 篩選候選股票")

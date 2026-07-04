@@ -45,6 +45,16 @@ RSS_SOURCES = [
         "url":    "https://news.google.com/rss/search?q=Philadelphia+semiconductor+TSMC+stock&hl=en-US&gl=US&ceid=US:en",
         "region": "us",
     },
+    {
+        "name":   "川普/政策動態",
+        "url":    "https://news.google.com/rss/search?q=川普+關稅+半導體+台灣&hl=zh-TW&gl=TW&ceid=TW:zh-Hant",
+        "region": "tw",
+    },
+    {
+        "name":   "美股/總經",
+        "url":    "https://news.google.com/rss/search?q=美股+Fed+利率+decision&hl=zh-TW&gl=TW&ceid=TW:zh-Hant",
+        "region": "tw",
+    },
     # 要加新來源：
     # {
     #     "name":   "自訂名稱",

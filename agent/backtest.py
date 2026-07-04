@@ -145,9 +145,10 @@ def _hot_sectors_asof(data, d, top_n=5, min_stocks=10, window_days=7):
 
 
 # ── 某日（含當天）的候選股票，依正式評分排序取前 N ───────────────
-def _candidates_asof(data, d, industry_codes, top_n=5):
+def _candidates_asof(data, d, industry_codes, top_n=5, cfg=None):
     if not industry_codes:
         return []
+    cfg = cfg or STRATEGY
     pr = data["prices"]
     px = pr[pr["trade_date"] == d]
     tk = data["tech"][data["tech"]["trade_date"] == d]
@@ -172,8 +173,19 @@ def _candidates_asof(data, d, industry_codes, top_n=5):
     if df.empty:
         return []
 
+    # 60 日動能（用預先建好的 closes pivot；與正式選股的 mom60 對應）
+    piv = data.get("_closes")
+    if piv is not None and d in piv.index:
+        i = piv.index.get_loc(d)
+        if i >= 60:
+            base = piv.iloc[i - 60]
+            cur  = piv.iloc[i]
+            mom = (cur / base - 1)
+            df = df.copy()
+            df["mom60"] = df["stock_id"].map(mom)
+
     # 與正式選股共用 strategy.score_candidates（教授改權重，回測自動跟著變）
-    df["score"] = score_candidates(df)
+    df["score"] = score_candidates(df, cfg)
     return df.sort_values("score", ascending=False).head(top_n)["stock_id"].tolist()
 
 
@@ -195,6 +207,17 @@ def run_backtest(top_n=None, rebalance=5, cfg=None, data=None, quiet=False):
         data = _load()
     closes = data["prices"].pivot_table(index="trade_date", columns="stock_id", values="close")
     closes = closes.where(closes > 0)   # close<=0 為資料瑕疵(停牌/無成交)，視為缺值
+    data["_closes"] = closes            # 供 _candidates_asof 算 60 日動能
+
+    # 市場濾網：大盤代理收盤 vs 其 60 日均線（逐日 bull/bear）
+    regime_bull = None
+    mf_sid = cfg.get("market_filter_stock", "0050")
+    if cfg.get("market_filter") and mf_sid in closes.columns:
+        mkt = closes[mf_sid]
+        regime_bull = (mkt >= mkt.rolling(60, min_periods=30).mean()).fillna(True)
+    bear_cfg = ({**cfg, "exit_on_death_cross": True}
+                if cfg.get("bear_reenable_death_cross") else cfg)
+
     tech = data["tech"]
     ma5p = tech.pivot_table(index="trade_date", columns="stock_id", values="ma5")
     ma20p = tech.pivot_table(index="trade_date", columns="stock_id", values="ma20")
@@ -217,6 +240,9 @@ def run_backtest(top_n=None, rebalance=5, cfg=None, data=None, quiet=False):
     open_pos = {}     # stock_id -> {entry_date, entry_price, peak}
     trades = []       # 完整交易紀錄
     for i, d in enumerate(sim_dates):
+        bull = True if regime_bull is None else bool(regime_bull.get(d, True))
+        day_cfg = cfg if bull else bear_cfg
+
         # 1) 先處理出場
         for sid in list(open_pos.keys()):
             close = val(closes, d, sid)
@@ -227,7 +253,7 @@ def run_backtest(top_n=None, rebalance=5, cfg=None, data=None, quiet=False):
             hold = i - p["entry_i"]
             ex, reason = decide_exit(p["entry_price"], p["peak"], close,
                                      val(ma5p, d, sid), val(ma20p, d, sid), hold,
-                                     cfg=cfg)
+                                     cfg=day_cfg)
             if ex:
                 trades.append({"stock_id": sid, "entry_date": p["entry_date"], "exit_date": d,
                                "ret": close / p["entry_price"] - 1,
@@ -235,11 +261,12 @@ def run_backtest(top_n=None, rebalance=5, cfg=None, data=None, quiet=False):
                                "hold": hold, "reason": reason})
                 del open_pos[sid]
 
-        # 2) 再平衡日進場（未持有者才買）
+        # 2) 再平衡日進場（未持有者才買；濾網設 block_entries 時空頭不開新倉）
         gi = pos_idx[d]
-        if (gi - start_i) % rebalance == 0:
-            hot = _hot_sectors_asof(data, d, top_n=STRATEGY["hot_sectors_top_n"])
-            for sid in _candidates_asof(data, d, hot, top_n=top_n):
+        entry_ok = bull or not cfg.get("market_filter_block_entries", False)
+        if entry_ok and (gi - start_i) % rebalance == 0:
+            hot = _hot_sectors_asof(data, d, top_n=cfg["hot_sectors_top_n"])
+            for sid in _candidates_asof(data, d, hot, top_n=top_n, cfg=cfg):
                 if sid in open_pos:
                     continue
                 price = val(closes, d, sid)
