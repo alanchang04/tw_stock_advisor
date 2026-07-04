@@ -178,14 +178,21 @@ def _candidates_asof(data, d, industry_codes, top_n=5):
 
 
 # ── 主回測：真實進出場（round-trip）─────────────────────────────
-def run_backtest(top_n=None, rebalance=5):
+def run_backtest(top_n=None, rebalance=5, cfg=None, data=None, quiet=False):
     """
     模擬實際操作：再平衡日依評分進場，每日依 strategy 出場規則平倉，
     計算每筆完整交易(round-trip)的報酬、勝率、平均持有天數，並與買進持有比較。
+
+    cfg:   出場規則參數 dict（預設 STRATEGY）——消融測試用
+    data:  預載資料（_load() 的回傳）——多次回測共用，避免重複查 DB
+    quiet: True 時不印報告，只回傳交易 DataFrame
     """
-    top_n = top_n or STRATEGY["pick_top_n"]
-    logger.info("=== 回測開始（進場評分 + strategy 出場規則，不含 LLM）===")
-    data = _load()
+    cfg = cfg or STRATEGY
+    top_n = top_n or cfg["pick_top_n"]
+    if not quiet:
+        logger.info("=== 回測開始（進場評分 + strategy 出場規則，不含 LLM）===")
+    if data is None:
+        data = _load()
     closes = data["prices"].pivot_table(index="trade_date", columns="stock_id", values="close")
     closes = closes.where(closes > 0)   # close<=0 為資料瑕疵(停牌/無成交)，視為缺值
     tech = data["tech"]
@@ -219,7 +226,8 @@ def run_backtest(top_n=None, rebalance=5):
             p["peak"] = max(p["peak"], close)
             hold = i - p["entry_i"]
             ex, reason = decide_exit(p["entry_price"], p["peak"], close,
-                                     val(ma5p, d, sid), val(ma20p, d, sid), hold)
+                                     val(ma5p, d, sid), val(ma20p, d, sid), hold,
+                                     cfg=cfg)
             if ex:
                 trades.append({"stock_id": sid, "entry_date": p["entry_date"], "exit_date": d,
                                "ret": close / p["entry_price"] - 1,
@@ -252,15 +260,15 @@ def run_backtest(top_n=None, rebalance=5):
     if not trades:
         logger.error("回測期間沒有任何交易"); return
 
-    # 買進持有基準：同區間所有股票等權報酬
-    bench = []
-    base, fin = closes.loc[sim_dates[0]], closes.loc[last]
-    common = base.dropna().index.intersection(fin.dropna().index)
-    bench = (fin[common] / base[common] - 1)
-    bench = bench[base[common] > 0]
-
-    _report_roundtrip(pd.DataFrame(trades), bench, sim_dates, top_n, rebalance)
-    return pd.DataFrame(trades)
+    tdf = pd.DataFrame(trades)
+    if not quiet:
+        # 買進持有基準：同區間所有股票等權報酬
+        base, fin = closes.loc[sim_dates[0]], closes.loc[last]
+        common = base.dropna().index.intersection(fin.dropna().index)
+        bench = (fin[common] / base[common] - 1)
+        bench = bench[base[common] > 0]
+        _report_roundtrip(tdf, bench, sim_dates, top_n, rebalance)
+    return tdf
 
 
 def _report_roundtrip(tdf, bench, sim_dates, top_n, rebalance):

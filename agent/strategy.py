@@ -33,15 +33,18 @@ STRATEGY = {
 
     # ── 出場規則：基本 ──
     "stop_loss":      0.08,   # 自進場價跌 8% → 停損
-    "take_profit":    0.25,   # 獲利達 25% → 停利
+    "take_profit":    0.30,   # 獲利達 30% → 停利（2026-07 消融測試：25%→30% 平均淨 +2.67→+2.89%）
     "trail_activate": 0.10,   # 漲超過 10% 後啟動移動停利
     "trail_stop":     0.08,   # 從最高點回落 8% → 出場
     "max_hold_days":  40,     # 持有超過 40 個交易日 → 到期出場
 
     # ── 出場規則：均線 ──
-    "exit_on_death_cross": True,   # MA5 跌破 MA20（死亡交叉）→ 出場
-    "exit_below_ma20":     True,   # 收盤跌破 MA20 → 出場
-    "exit_below_ma5":      True,   # 收盤跌破 MA5 → 出場
+    # 2026-07 消融測試（scripts/ablation_result.md）：三條均線規則讓平均持有僅 3.7 日、
+    # 勝率 32%（MA5 幾乎每次搶先出場，波段被洗掉）。全關後勝率 43.6%、持有 19.8 日、
+    # 平均淨報酬 +2.04%→+2.89%。注意：測試區間為多頭年，保護交給停損+移動停利。
+    "exit_on_death_cross": False,  # MA5 跌破 MA20（死亡交叉）→ 出場
+    "exit_below_ma20":     False,  # 收盤跌破 MA20 → 出場
+    "exit_below_ma5":      False,  # 收盤跌破 MA5 → 出場
 
     # ── 出場規則：KD 高檔死叉 + MACD 同步轉負 ──
     "exit_kd_macd":   True,   # 啟用此規則
