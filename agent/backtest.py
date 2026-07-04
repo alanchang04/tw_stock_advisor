@@ -303,6 +303,16 @@ def _report_roundtrip(tdf, bench, sim_dates, top_n, rebalance):
     nets = tdf["net_ret"] if "net_ret" in tdf.columns else rets
     win = (rets > 0).mean()
     net_win = (nets > 0).mean()
+
+    # 進階指標（依出場日排序的逐筆權益曲線，等權重近似）
+    seq = tdf.sort_values("exit_date")["net_ret"] if "net_ret" in tdf.columns \
+        else tdf.sort_values("exit_date")["ret"]
+    equity = seq.cumsum()
+    mdd = (equity - equity.cummax()).min() * 100          # 最大回撤（百分點）
+    gross_win  = nets[nets > 0].sum()
+    gross_loss = abs(nets[nets <= 0].sum())
+    profit_factor = gross_win / gross_loss if gross_loss > 0 else float("inf")
+    sharpe_pt = nets.mean() / nets.std() if nets.std() > 0 else 0.0   # 每筆 Sharpe
     # 出場原因分布
     by_reason = tdf.groupby("reason")["ret"].agg(["count", "mean"]).sort_values("count", ascending=False)
     lines = [
@@ -315,6 +325,8 @@ def _report_roundtrip(tdf, bench, sim_dates, top_n, rebalance):
         f"  毛報酬：勝率 {win*100:.1f}%   平均 {rets.mean()*100:+.2f}%   中位數 {rets.median()*100:+.2f}%",
         f"  淨報酬：勝率 {net_win*100:.1f}%   平均 {nets.mean()*100:+.2f}%   （含手續費6折+證交稅，每筆約 -{(rets.mean()-nets.mean())*100:.2f}%）",
         f"  最佳：{rets.max()*100:+.1f}%   最差：{rets.min()*100:+.1f}%",
+        f"  獲利因子：{profit_factor:.2f}   每筆Sharpe：{sharpe_pt:.2f}   "
+        f"逐筆權益最大回撤：{mdd:.1f} 個百分點",
         f"  平均持有天數：{tdf['hold'].mean():.1f} 交易日",
         f"  大盤(等權買進持有)同期：{bench.mean()*100:+.2f}%",
         f"  選股淨報酬 − 大盤：{(nets.mean()-bench.mean())*100:+.2f}%",

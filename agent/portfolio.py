@@ -101,9 +101,21 @@ def record_entries(picks: list[dict], on_date: date) -> list[dict]:
     """
     ensure_positions_table()
     held = {p["stock_id"] for p in open_positions()}
+
+    # 風控守門員：同時持倉上限（參考 TradingAgents 的 Risk Manager 概念）
+    max_open = STRATEGY.get("max_open_positions", 10)
+    slots = max_open - len(held)
+    if slots <= 0:
+        logger.warning(f"持倉已達上限 {max_open} 檔，今日不開新倉")
+        return []
+
+    from agent.strategy import suggest_shares
     opened = []
     with get_session() as s:
         for pk in picks:
+            if len(opened) >= slots:
+                logger.info(f"已達持倉上限 {max_open} 檔，其餘推薦略過")
+                break
             sid = pk["stock_id"]
             if sid in held:
                 continue
@@ -111,12 +123,15 @@ def record_entries(picks: list[dict], on_date: date) -> list[dict]:
             if not rows or rows[-1]["close"] <= 0:
                 continue
             price = rows[-1]["close"]
+            # migration 07 後唯一約束為 partial index（WHERE source='ai'），
+            # ON CONFLICT 需帶相同條件才能匹配
             s.execute(text("""
                 INSERT INTO positions (stock_id, entry_date, entry_price, entry_reason, peak_price)
                 VALUES (:sid, :d, :price, :reason, :price)
-                ON CONFLICT (stock_id, entry_date) DO NOTHING
+                ON CONFLICT (stock_id, entry_date) WHERE source = 'ai' DO NOTHING
             """), {"sid": sid, "d": on_date, "price": price, "reason": pk.get("reason", "")})
-            opened.append({"stock_id": sid, "entry_price": price})
+            opened.append({"stock_id": sid, "entry_price": price,
+                           "shares": suggest_shares(price)})
     if opened:
         logger.info(f"📌 新增追蹤部位 {len(opened)} 檔")
     return opened
@@ -219,6 +234,15 @@ def format_positions_report(exits: list[dict], opened: list[dict]) -> str:
                          f"{sign}{e['return_pct']:.1f}%（持有{e['holding_days']}日，{e['reason']}）")
     else:
         lines.append("🔔 今日無出場訊號（續抱）")
+
+    if opened:
+        from agent.strategy import format_size
+        cfg = STRATEGY
+        lines.append(f"\n💰 部位規模建議（資金 {cfg['capital']:,} 元、單筆風險 {cfg['risk_per_trade']*100:.0f}%）：")
+        for o in opened:
+            lines.append(f"  {o['stock_id']} @ {o['entry_price']:.2f} → "
+                         f"{format_size(o.get('shares', 0))}")
+
     held = open_positions()
-    lines.append(f"📦 目前追蹤中部位：{len(held)} 檔")
+    lines.append(f"📦 目前追蹤中部位：{len(held)} 檔（上限 {STRATEGY.get('max_open_positions', 10)}）")
     return "\n".join(lines)

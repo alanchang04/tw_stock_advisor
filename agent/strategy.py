@@ -10,6 +10,8 @@ agent/strategy.py
   - decide_exit(...): 出場判斷（回傳 (是否出場, 原因)）
 """
 from __future__ import annotations
+import math
+import os
 import pandas as pd
 
 
@@ -39,6 +41,12 @@ STRATEGY = {
     "market_filter_stock":      "0050",
     "market_filter_block_entries": False,  # True=空頭完全不開新倉（保守）；False=只加出場保護
     "bear_reenable_death_cross": True,
+
+    # ── 資金/風險管理（參考 freqtrade money management / 1% 風險法則）──
+    # 每筆交易最多虧總資金的 risk_per_trade（配合停損距離反推張數）
+    "capital":            int(os.getenv("TRADING_CAPITAL", "300000")),  # 可投入總資金（元）
+    "risk_per_trade":     0.01,   # 單筆風險上限 = 資金的 1%
+    "max_open_positions": 10,     # 同時持倉上限（portfolio 風控守門員）
 
     # ── 出場規則：基本 ──
     "stop_loss":      0.08,   # 自進場價跌 8% → 停損
@@ -103,6 +111,37 @@ def score_candidates(df: pd.DataFrame, cfg: dict = STRATEGY) -> pd.Series:
         if mom.notna().sum() >= 2:
             s += mom.rank(pct=True).fillna(0.5) * cfg["w_momentum"]
     return s
+
+
+# ══════════════════════════════════════════════════════════════════
+#  資金管理：建議張數
+# ══════════════════════════════════════════════════════════════════
+def suggest_shares(price: float, cfg: dict = STRATEGY) -> int:
+    """
+    1% 風險法則（股為單位，支援零股）：
+      單筆最大虧損 = capital × risk_per_trade；停損打到每股虧 price × stop_loss
+      → 建議股數 = 風險額度 ÷ 每股風險。
+    另設集中度天花板：單一部位市值 ≤ 資金 ÷ pick_top_n。
+    """
+    if not price or price <= 0:
+        return 0
+    risk_budget     = cfg["capital"] * cfg["risk_per_trade"]
+    shares_by_risk  = risk_budget / (price * cfg["stop_loss"])
+    cap_value       = cfg["capital"] / max(cfg.get("pick_top_n", 5), 1)
+    shares_by_cap   = cap_value / price
+    return max(math.floor(min(shares_by_risk, shares_by_cap)), 0)
+
+
+def format_size(shares: int) -> str:
+    """股數 → 人話：1000 股以上顯示張（+零股），不足顯示零股。"""
+    if shares <= 0:
+        return "資金不足（跳過或縮小停損）"
+    lots, odd = divmod(shares, 1000)
+    if lots and odd:
+        return f"{lots} 張 + {odd} 股"
+    if lots:
+        return f"{lots} 張"
+    return f"{odd} 股（零股）"
 
 
 # ══════════════════════════════════════════════════════════════════

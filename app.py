@@ -660,14 +660,60 @@ elif page == "🔄 歷史績效":
     avg_h  = pd.to_numeric(df["持有天數"], errors="coerce").mean()
     total  = (df["報酬%"] + 100).prod() ** (1 / len(df)) - 100  # 幾何平均
 
-    c1, c2, c3, c4 = st.columns(4)
+    # 進階指標：逐筆權益曲線（依出場日）→ MDD / 獲利因子
+    df_seq = df.sort_values("出場日").copy()
+    df_seq["累計%"] = df_seq["報酬%"].cumsum()
+    mdd = (df_seq["累計%"] - df_seq["累計%"].cummax()).min()
+    g_win  = df.loc[wins, "報酬%"].sum()
+    g_loss = abs(df.loc[~wins, "報酬%"].sum())
+    pf = g_win / g_loss if g_loss > 0 else float("inf")
+
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
     c1.metric("總交易筆數", len(df))
     c2.metric("勝率",       f"{win_r:.0f}%")
     c3.metric("平均報酬",   f"{avg_r:+.2f}%")
     c4.metric("平均持有",   f"{avg_h:.1f} 天")
+    c5.metric("獲利因子",   f"{pf:.2f}", help="總獲利÷總虧損，>1.5 較穩健")
+    c6.metric("最大回撤",   f"{mdd:.1f}pp", help="逐筆累計報酬曲線的最大回落（百分點）")
 
-    t1, t2 = st.tabs(["📊 報酬分布", "📋 交易紀錄"])
+    t1, t2, t3 = st.tabs(["📈 累計績效 vs 大盤", "📊 報酬分布", "📋 交易紀錄"])
+
+    # ── Tab 1：累計績效曲線（AI 實際推薦紀錄 vs 0050）─────────────
     with t1:
+        st.caption("AI 每筆已平倉交易的累計報酬（逐筆加總）對比同期 0050 買進持有——"
+                   "這是判斷「值不值得跟單」的最直接依據")
+        try:
+            start_d, end_d = df_seq["出場日"].min(), df_seq["出場日"].max()
+            with get_session() as s:
+                bench_rows = s.execute(text("""
+                    SELECT trade_date, close FROM daily_prices
+                    WHERE stock_id = '0050' AND close > 0
+                      AND trade_date BETWEEN :a AND :b
+                    ORDER BY trade_date
+                """), {"a": start_d, "b": end_d}).fetchall()
+            fig_eq = go.Figure()
+            fig_eq.add_trace(go.Scatter(
+                x=df_seq["出場日"], y=df_seq["累計%"],
+                mode="lines+markers", name="AI 推薦（逐筆累計）",
+                line=dict(color="#e74c3c", width=2)))
+            if bench_rows:
+                bd = [r[0] for r in bench_rows]
+                bc = [float(r[1]) for r in bench_rows]
+                bench_pct = [(c / bc[0] - 1) * 100 for c in bc]
+                fig_eq.add_trace(go.Scatter(
+                    x=bd, y=bench_pct, mode="lines", name="0050 買進持有",
+                    line=dict(color="#7f8c8d", width=1.5, dash="dot")))
+            fig_eq.add_hline(y=0, line_dash="dash", line_color="#95a5a6")
+            fig_eq.update_layout(height=380, margin=dict(l=0, r=0, t=30, b=0),
+                                 yaxis_title="累計報酬 %",
+                                 legend=dict(orientation="h", y=1.1))
+            st.plotly_chart(fig_eq, use_container_width=True)
+            st.caption("注意：AI 曲線為「逐筆報酬加總」（未含手續費/證交稅，約每筆 -0.47%），"
+                       "0050 為區間價格漲幅；兩者口徑略有差異，看趨勢與相對強弱即可。")
+        except Exception as e:
+            st.warning(f"績效曲線繪製失敗：{e}")
+
+    with t2:
         fig = px.histogram(df, x="報酬%", nbins=30,
                            color_discrete_sequence=["#3498db"],
                            title="報酬率分布")
@@ -685,7 +731,7 @@ elif page == "🔄 歷史績效":
         fig2.update_layout(height=320, margin=dict(l=0, r=0, t=40, b=0))
         st.plotly_chart(fig2, use_container_width=True)
 
-    with t2:
+    with t3:
         def color_ret(val):
             if isinstance(val, (int, float)):
                 return "color: #e74c3c" if val < 0 else "color: #27ae60"
