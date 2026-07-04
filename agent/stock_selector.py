@@ -190,6 +190,18 @@ def get_candidate_stocks(
     except Exception as e:
         logger.warning(f"動能計算失敗（略過此因子）: {e}")
 
+    # 月營收年增（最新已公布月份）
+    try:
+        with get_session() as session:
+            rev_rows = session.execute(text("""
+                SELECT stock_id, yoy_pct FROM monthly_revenue
+                WHERE year_month = (SELECT MAX(year_month) FROM monthly_revenue)
+            """)).fetchall()
+        rev_map = {r[0]: float(r[1]) for r in rev_rows if r[1] is not None}
+        df["rev_yoy"] = df["stock_id"].map(rev_map)
+    except Exception as e:
+        logger.warning(f"月營收因子讀取失敗（略過）: {e}")
+
     # 綜合評分：統一使用 strategy.score_candidates（與回測共用同一份邏輯）
     df["score"] = score_candidates(df)
 

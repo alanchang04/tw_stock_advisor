@@ -76,6 +76,16 @@ def _load() -> dict:
             s.execute(text("SELECT code, name_zh FROM industries")).fetchall(),
             columns=["industry_code", "name_zh"],
         )
+        try:
+            rev = pd.DataFrame(
+                s.execute(text(
+                    "SELECT stock_id, year_month, yoy_pct FROM monthly_revenue"
+                )).fetchall(),
+                columns=["stock_id", "year_month", "yoy_pct"],
+            )
+            rev["yoy_pct"] = pd.to_numeric(rev["yoy_pct"], errors="coerce")
+        except Exception:
+            rev = pd.DataFrame(columns=["stock_id", "year_month", "yoy_pct"])
 
     # 型別整理：DB 的 NUMERIC → float
     for df, cols in [
@@ -88,7 +98,20 @@ def _load() -> dict:
     for df in (prices, tech, inst):
         df["trade_date"] = pd.to_datetime(df["trade_date"]).dt.date
 
-    return {"prices": prices, "tech": tech, "inst": inst, "imap": imap, "inds": inds}
+    # 月營收 → point-in-time 查表 {(stock_id, 'YYYY-MM'): yoy}
+    rev_map = {(r.stock_id, r.year_month): r.yoy_pct for r in rev.itertuples()}
+
+    return {"prices": prices, "tech": tech, "inst": inst,
+            "imap": imap, "inds": inds, "rev_map": rev_map}
+
+
+def _available_rev_month(d) -> str:
+    """日期 d 當下「已公布」的最新營收月份（M 月營收於 M+1 月 10 日公布）。"""
+    y, m = d.year, d.month - (1 if d.day >= 11 else 2)
+    while m <= 0:
+        m += 12
+        y -= 1
+    return f"{y:04d}-{m:02d}"
 
 
 def _normalize(s: pd.Series) -> pd.Series:
@@ -183,6 +206,13 @@ def _candidates_asof(data, d, industry_codes, top_n=5, cfg=None):
             mom = (cur / base - 1)
             df = df.copy()
             df["mom60"] = df["stock_id"].map(mom)
+
+    # 月營收年增（point-in-time：只用當日已公布的月份，避免前視偏差）
+    rev_map = data.get("rev_map")
+    if rev_map:
+        ym = _available_rev_month(d)
+        df = df.copy()
+        df["rev_yoy"] = [rev_map.get((sid, ym)) for sid in df["stock_id"]]
 
     # 與正式選股共用 strategy.score_candidates（教授改權重，回測自動跟著變）
     df["score"] = score_candidates(df, cfg)

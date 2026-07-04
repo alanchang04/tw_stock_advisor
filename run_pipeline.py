@@ -40,6 +40,12 @@ def mode_market_signals():
         logger.error(f"美股速覽失敗: {e}")
 
     try:
+        from data_pipeline.fetchers.revenue_fetcher import run_revenue_fetch
+        run_revenue_fetch()
+    except Exception as e:
+        logger.error(f"月營收擷取失敗: {e}")
+
+    try:
         from data_pipeline.fetchers.etf_fetcher import run_etf_tracking
         run_etf_tracking()
     except Exception as e:

@@ -33,6 +33,8 @@ STRATEGY = {
     "w_foreign_buy": 1.0,  # 外資買超
     "w_rsi_sweet": 1.0,    # RSI 落在 50~65
     "w_momentum":  2.0,    # 60日動能相對排名（0~1 百分位）——強者恆強因子
+    "w_rev_yoy":   1.0,    # 月營收年增 >0（FinLab 式營收動能，來源 MOPS）
+    "w_rev_accel": 0.5,    # 月營收年增 >20%（高成長加碼）
 
     # ── 市場濾網（regime filter）──
     # 大盤代理（0050 收盤 vs MA60）：空頭時 (a) 不開新倉 (b) 出場加回死亡交叉保護
@@ -110,6 +112,11 @@ def score_candidates(df: pd.DataFrame, cfg: dict = STRATEGY) -> pd.Series:
         mom = pd.to_numeric(df["mom60"], errors="coerce")
         if mom.notna().sum() >= 2:
             s += mom.rank(pct=True).fillna(0.5) * cfg["w_momentum"]
+    # 月營收年增（缺資料 = 0 分，不懲罰）
+    if "rev_yoy" in df.columns:
+        yoy = pd.to_numeric(df["rev_yoy"], errors="coerce")
+        s += (yoy > 0).fillna(False).astype(float) * cfg.get("w_rev_yoy", 0)
+        s += (yoy > 20).fillna(False).astype(float) * cfg.get("w_rev_accel", 0)
     return s
 
 
