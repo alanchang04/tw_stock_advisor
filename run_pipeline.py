@@ -196,6 +196,22 @@ def mode_pipeline(source: str = "openapi", with_entries: bool = True, review: bo
         mode_market_signals()                    # 3. ETF換股 + 新聞 + YouTube
         result = run_daily_recommendation(with_entries=with_entries)  # 4. 出場檢查(+進場推薦)
         msg = result.get("report_text") if result else None
+
+        # 5. 我的持倉建議 + 追蹤清單買點（只建議，不影響主流程）
+        try:
+            from agent.manual_advisor import advise_manual_positions
+            manual_msg = advise_manual_positions()
+            if manual_msg:
+                msg = (msg or "") + "\n\n📦 我的持倉提醒\n" + manual_msg
+        except Exception as e:
+            logger.error(f"手動持倉建議失敗: {e}")
+        try:
+            from data_pipeline.analysis.watchlist_advisor import evaluate_watchlist
+            wl_msg = evaluate_watchlist()
+            if wl_msg:
+                msg = (msg or "") + "\n\n🔖 追蹤清單買點\n" + wl_msg
+        except Exception as e:
+            logger.error(f"追蹤清單判斷失敗: {e}")
         if review:
             msg = (msg or "") + "\n\n" + _weekly_review_text()
         notify_success(msg)

@@ -9,7 +9,7 @@ agent/backtest.py
 
 說明 / 限制：
   - 不含 LLM：LLM 為非決定性的再排序/解說層，無法重現；回測驗證的是底層量化訊號。
-  - 收盤價對收盤價，未計手續費/滑價/實際無法以收盤價成交，屬理想化估計。
+  - 收盤價對收盤價、未計滑價；「淨報酬」已計手續費(14.25bp×6折,買賣各一次)與證交稅(30bp,賣出)。
   - 法人歷史資料較短（FinMind 免費版約近 90 天），早期樣本的籌碼分數可能偏弱。
 
 用法：
@@ -29,6 +29,17 @@ from agent.stock_selector import (
     EXCLUDE_INDUSTRIES, MIN_RSI, MAX_RSI, MIN_CLOSE, MIN_VOLUME,
 )
 from agent.strategy import STRATEGY, score_candidates, decide_exit
+
+# ── 交易成本（台股現股）──────────────────────────────────────────
+FEE_RATE = 0.001425 * 0.6   # 券商手續費 14.25bp，一般電子下單 6 折（買賣各收一次）
+TAX_RATE = 0.003            # 證交稅 30bp（僅賣出時收）
+
+
+def net_return(entry_price: float, exit_price: float) -> float:
+    """一買一賣扣除手續費+證交稅後的淨報酬。"""
+    cost_in  = entry_price * (1 + FEE_RATE)
+    cash_out = exit_price * (1 - FEE_RATE - TAX_RATE)
+    return cash_out / cost_in - 1
 
 
 # ── 載入資料（一次全載入記憶體，避免每個日期重複查 DB）───────────
@@ -211,7 +222,9 @@ def run_backtest(top_n=None, rebalance=5):
                                      val(ma5p, d, sid), val(ma20p, d, sid), hold)
             if ex:
                 trades.append({"stock_id": sid, "entry_date": p["entry_date"], "exit_date": d,
-                               "ret": close / p["entry_price"] - 1, "hold": hold, "reason": reason})
+                               "ret": close / p["entry_price"] - 1,
+                               "net_ret": net_return(p["entry_price"], close),
+                               "hold": hold, "reason": reason})
                 del open_pos[sid]
 
         # 2) 再平衡日進場（未持有者才買）
@@ -232,7 +245,9 @@ def run_backtest(top_n=None, rebalance=5):
         if close:
             hold = len(sim_dates) - 1 - p["entry_i"]
             trades.append({"stock_id": sid, "entry_date": p["entry_date"], "exit_date": last,
-                           "ret": close / p["entry_price"] - 1, "hold": hold, "reason": "回測結束平倉"})
+                           "ret": close / p["entry_price"] - 1,
+                           "net_ret": net_return(p["entry_price"], close),
+                           "hold": hold, "reason": "回測結束平倉"})
 
     if not trades:
         logger.error("回測期間沒有任何交易"); return
@@ -250,7 +265,9 @@ def run_backtest(top_n=None, rebalance=5):
 
 def _report_roundtrip(tdf, bench, sim_dates, top_n, rebalance):
     rets = tdf["ret"]
+    nets = tdf["net_ret"] if "net_ret" in tdf.columns else rets
     win = (rets > 0).mean()
+    net_win = (nets > 0).mean()
     # 出場原因分布
     by_reason = tdf.groupby("reason")["ret"].agg(["count", "mean"]).sort_values("count", ascending=False)
     lines = [
@@ -260,20 +277,20 @@ def _report_roundtrip(tdf, bench, sim_dates, top_n, rebalance):
         "=" * 66,
         f"  區間：{sim_dates[0]} ~ {sim_dates[-1]}（每 {rebalance} 交易日再平衡，每次最多 {top_n} 檔）",
         f"  完整交易數：{len(tdf)}",
-        f"  勝率：{win*100:.1f}%",
-        f"  平均每筆報酬：{rets.mean()*100:+.2f}%   中位數：{rets.median()*100:+.2f}%",
+        f"  毛報酬：勝率 {win*100:.1f}%   平均 {rets.mean()*100:+.2f}%   中位數 {rets.median()*100:+.2f}%",
+        f"  淨報酬：勝率 {net_win*100:.1f}%   平均 {nets.mean()*100:+.2f}%   （含手續費6折+證交稅，每筆約 -{(rets.mean()-nets.mean())*100:.2f}%）",
         f"  最佳：{rets.max()*100:+.1f}%   最差：{rets.min()*100:+.1f}%",
         f"  平均持有天數：{tdf['hold'].mean():.1f} 交易日",
         f"  大盤(等權買進持有)同期：{bench.mean()*100:+.2f}%",
-        f"  選股平均報酬 − 大盤：{(rets.mean()-bench.mean())*100:+.2f}%",
+        f"  選股淨報酬 − 大盤：{(nets.mean()-bench.mean())*100:+.2f}%",
         "-" * 66,
-        "  出場原因分布（次數 / 該原因平均報酬）：",
+        "  出場原因分布（次數 / 該原因平均毛報酬）：",
     ]
     for reason, row in by_reason.iterrows():
         lines.append(f"    {reason:<16} {int(row['count']):>3} 筆   {row['mean']*100:+.2f}%")
     lines += [
         "-" * 66,
-        "  註：理想化估計(收盤價、未計手續費滑價)；法人資料僅近 90 天故樣本偏少。",
+        "  註：收盤價成交、未計滑價；淨報酬含手續費(買賣)與證交稅(賣出)。",
         "  調 agent/strategy.py 的參數後重跑此回測，即可比較買賣邏輯優劣。",
         "=" * 66,
     ]

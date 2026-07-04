@@ -38,11 +38,13 @@ def generate_daily_digest(target_date: date = None) -> str | None:
             logger.info("  今日彙整已存在，跳過")
             return None
 
-        # 抓今日所有情報（不含 digest 本身）
+        # 抓今日所有情報（不含 digest 本身與 smart_money——後者一天可達 60 筆，
+        # 會塞爆 prompt 稀釋新聞/YT 重點；聰明資金已有專頁呈現）
         rows = session.execute(text("""
             SELECT signal_type, source, title, summary
             FROM market_signals
-            WHERE signal_date = :dt AND signal_type != 'digest'
+            WHERE signal_date = :dt
+              AND signal_type NOT IN ('digest', 'smart_money')
             ORDER BY signal_type, id
             LIMIT 120
         """), {"dt": target_date}).fetchall()
@@ -109,7 +111,9 @@ def generate_daily_digest(target_date: date = None) -> str | None:
 （如有明確提及，列：代號 名稱 — 理由；若無則寫「今日無特別提及」）
 
 【今日市場氛圍】
-（一句話：多頭/偏多/中性/偏空，及主要驅動因素）"""
+（一句話：多頭/偏多/中性/偏空，及主要驅動因素）
+
+直接以【被看好的族群】開頭，不要任何開場白或結語。"""
 
     try:
         import litellm
@@ -125,6 +129,12 @@ def generate_daily_digest(target_date: date = None) -> str | None:
         if not digest_text:
             logger.warning("  Gemini 回應為空")
             return None
+
+        # 去除 AI 開場白（如「好的，根據您提供的…」）——第一個【之前的文字都刪掉
+        import re as _re
+        cleaned = _re.sub(r"^[^【]*?(?=【)", "", digest_text, count=1).strip()
+        if cleaned:
+            digest_text = cleaned
 
         with get_session() as session:
             session.execute(text("""

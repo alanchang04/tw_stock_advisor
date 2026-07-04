@@ -26,7 +26,6 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install --no-cache-dir -r requirements.txt
-          python -m pip install --no-cache-dir litellm google-generativeai
           python -m pip install --no-cache-dir FinMind
           python -c "import importlib.metadata; print('✅ litellm OK:', importlib.metadata.version('litellm'))"
           python -c "from FinMind.data import DataLoader; print('✅ FinMind OK')"

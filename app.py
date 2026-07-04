@@ -31,7 +31,7 @@ st.set_page_config(
 st.sidebar.title("📈 台股顧問")
 page = st.sidebar.radio(
     "導覽",
-    ["📊 首頁", "📦 持倉追蹤", "🏦 法人動向", "📉 個股走勢", "🔄 歷史績效", "📰 市場情報", "🧠 聰明資金"],
+    ["📊 首頁", "📦 持倉追蹤", "🔖 追蹤清單", "🔥 族群輪動", "🏦 法人動向", "📉 個股走勢", "🔄 歷史績效", "📰 市場情報", "🧠 聰明資金"],
 )
 st.sidebar.markdown("---")
 
@@ -101,7 +101,8 @@ def load_open_positions() -> list[dict]:
         rows = s.execute(text("""
             SELECT p.stock_id, st.stock_name, p.entry_date, p.entry_price, p.peak_price
             FROM positions p JOIN stocks st ON st.stock_id = p.stock_id
-            WHERE p.status = 'open' ORDER BY p.entry_date
+            WHERE p.status = 'open' AND COALESCE(p.source, 'ai') = 'ai'
+            ORDER BY p.entry_date
         """)).fetchall()
 
         for r in rows:
@@ -386,33 +387,142 @@ elif page == "📦 持倉追蹤":
     if st.button("🔄 重新整理"):
         load_open_positions.clear()
 
-    positions = load_open_positions()
-    if not positions:
-        st.info("目前無持倉")
-        st.stop()
+    tab_ai, tab_manual = st.tabs(["🤖 AI 部位", "👤 我的持倉"])
 
-    df = pd.DataFrame([{k: v for k, v in p.items() if k != "_exit"} for p in positions])
-    exit_flags = [p["_exit"] for p in positions]
+    # ── Tab 1：AI 部位（系統推薦、自動出場）─────────────────────
+    with tab_ai:
+        positions = load_open_positions()
+        if not positions:
+            st.info("目前無 AI 持倉")
+        else:
+            df = pd.DataFrame([{k: v for k, v in p.items() if k != "_exit"} for p in positions])
+            exit_flags = [p["_exit"] for p in positions]
 
-    # 色彩標記：出場訊號的列標紅
-    def row_style(row):
-        idx = df.index.get_loc(row.name)
-        if exit_flags[idx]:
-            return ["background-color: #fdecea"] * len(row)
-        return [""] * len(row)
+            # 色彩標記：出場訊號的列標紅
+            def row_style(row):
+                idx = df.index.get_loc(row.name)
+                if exit_flags[idx]:
+                    return ["background-color: #fdecea"] * len(row)
+                return [""] * len(row)
 
-    st.dataframe(
-        df.style.apply(row_style, axis=1)
-          .format({"成本": "{:.2f}", "現價": "{:.2f}", "損益%": "{:+.2f}%",
-                   "MA5": "{:.2f}", "MA20": "{:.2f}"}),
-        use_container_width=True, hide_index=True
-    )
+            st.dataframe(
+                df.style.apply(row_style, axis=1)
+                  .format({"成本": "{:.2f}", "現價": "{:.2f}", "損益%": "{:+.2f}%",
+                           "MA5": "{:.2f}", "MA20": "{:.2f}"}),
+                use_container_width=True, hide_index=True
+            )
 
-    exit_pos = [p for p in positions if p["_exit"]]
-    if exit_pos:
-        st.error(f"⚠ {len(exit_pos)} 檔觸發出場訊號")
-        for p in exit_pos:
-            st.write(f"- **{p['股號']} {p['名稱']}**：{p['出場訊號']}（損益 {p['損益%']:+.2f}%）")
+            exit_pos = [p for p in positions if p["_exit"]]
+            if exit_pos:
+                st.error(f"⚠ {len(exit_pos)} 檔觸發出場訊號")
+                for p in exit_pos:
+                    st.write(f"- **{p['股號']} {p['名稱']}**：{p['出場訊號']}（損益 {p['損益%']:+.2f}%）")
+
+    # ── Tab 2：我的持倉（手動建倉、AI 只建議不自動平倉）─────────
+    with tab_manual:
+        st.caption("輸入實際持有的股票，每日 pipeline 自動判斷：⚠️建議賣出 / ➕可加碼 / ✅續抱")
+
+        # 新增持倉表單
+        with st.form("add_manual_position", clear_on_submit=True):
+            c1, c2, c3, c4 = st.columns([1, 1, 1, 1])
+            f_sid    = c1.text_input("股票代號", placeholder="2330")
+            f_date   = c2.date_input("買入日期", value=date.today())
+            f_price  = c3.number_input("買入價格", min_value=0.01, step=0.01, format="%.2f")
+            f_shares = c4.number_input("股數（1張=1000股）", min_value=1, step=1000, value=1000)
+            f_note   = st.text_input("備註（選填）", placeholder="例：AI 伺服器題材")
+            submitted = st.form_submit_button("➕ 新增持倉")
+
+        if submitted:
+            sid = f_sid.strip()
+            with get_session() as s:
+                exists = s.execute(text(
+                    "SELECT stock_name FROM stocks WHERE stock_id = :sid"
+                ), {"sid": sid}).fetchone()
+            if not exists:
+                st.error(f"代號 {sid} 不存在於股票清單，請確認")
+            else:
+                with get_session() as s:
+                    s.execute(text("""
+                        INSERT INTO positions
+                            (stock_id, entry_date, entry_price, shares,
+                             entry_reason, source, status)
+                        VALUES (:sid, :d, :p, :sh, :note, 'manual', 'open')
+                    """), {"sid": sid, "d": f_date, "p": f_price,
+                           "sh": int(f_shares), "note": f_note or "手動建倉"})
+                st.success(f"已新增 {sid} {exists[0]}：{f_date} @ {f_price:.2f} × {int(f_shares):,} 股")
+
+        # 持倉列表（含現價與 AI 建議）
+        with get_session() as s:
+            mrows = s.execute(text("""
+                SELECT p.id, p.stock_id, st.stock_name, p.entry_date,
+                       p.entry_price, p.shares, p.last_advice, p.advice_date,
+                       (SELECT d.close FROM daily_prices d
+                        WHERE d.stock_id = p.stock_id AND d.close > 0
+                        ORDER BY d.trade_date DESC LIMIT 1) AS cur_close
+                FROM positions p JOIN stocks st ON st.stock_id = p.stock_id
+                WHERE p.source = 'manual' AND p.status = 'open'
+                ORDER BY p.entry_date
+            """)).fetchall()
+
+        if not mrows:
+            st.info("尚無手動持倉，用上方表單新增")
+        else:
+            recs = []
+            for pid, sid, name, ed, ep, sh, adv, adv_d, cur in mrows:
+                ep = float(ep); cur = float(cur) if cur else None
+                sh = int(sh) if sh else 0
+                pnl_pct = (cur / ep - 1) * 100 if cur else None
+                pnl_amt = (cur - ep) * sh if cur else None
+                recs.append({
+                    "編號": pid, "代號": sid, "名稱": name, "買入日": ed,
+                    "買入價": ep, "股數": sh,
+                    "現價": cur, "損益%": pnl_pct, "損益金額": pnl_amt,
+                    "AI 建議": _clean_val(adv) or "（今晚 pipeline 後產生）",
+                    "建議日": _clean_val(adv_d) or "—",
+                })
+            dfm = pd.DataFrame(recs)
+
+            def advice_style(v):
+                v = str(v)
+                if "賣出" in v:
+                    return "color: #e74c3c; font-weight: bold"
+                if "加碼" in v:
+                    return "color: #27ae60; font-weight: bold"
+                return ""
+
+            st.dataframe(
+                dfm.style.map(advice_style, subset=["AI 建議"])
+                   .format({"買入價": "{:.2f}", "現價": "{:.2f}",
+                            "損益%": "{:+.2f}%", "股數": "{:,d}",
+                            "損益金額": "{:+,.0f}"}, na_rep="—"),
+                use_container_width=True, hide_index=True,
+            )
+
+            total_pnl = sum(r["損益金額"] for r in recs if r["損益金額"] is not None)
+            st.metric("合計未實現損益", f"{total_pnl:+,.0f} 元")
+
+            # 平倉表單
+            st.markdown("---")
+            with st.form("close_manual_position"):
+                c1, c2, c3 = st.columns([2, 1, 1])
+                options = {f"#{r['編號']} {r['代號']} {r['名稱']}（{r['買入日']} @ {r['買入價']:.2f}）": r
+                           for r in recs}
+                pick = c1.selectbox("選擇要平倉的持倉", list(options.keys()))
+                sell_price = c2.number_input("賣出價格", min_value=0.01, step=0.01, format="%.2f")
+                closed = c3.form_submit_button("✅ 已賣出")
+            if closed and pick:
+                r = options[pick]
+                ret_pct = (sell_price / r["買入價"] - 1) * 100
+                with get_session() as s:
+                    s.execute(text("""
+                        UPDATE positions
+                        SET status='closed', exit_date=:d, exit_price=:p,
+                            exit_reason='手動平倉', return_pct=:r
+                        WHERE id = :pid
+                    """), {"d": date.today(), "p": sell_price,
+                           "r": round(ret_pct, 4), "pid": r["編號"]})
+                st.success(f"已平倉 {r['代號']} {r['名稱']}：報酬 {ret_pct:+.2f}%")
+                st.rerun()
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -970,4 +1080,194 @@ elif page == "🧠 聰明資金":
                     "累計買超張": st.column_config.NumberColumn("累計買超(張)", format="%,d"),
                     "單日峰值張": st.column_config.NumberColumn("峰值(張)", format="%,d"),
                 },
+            )
+
+
+# ══════════════════════════════════════════════════════════════════
+#  Page 8：追蹤清單（自選股買點判斷）
+# ══════════════════════════════════════════════════════════════════
+elif page == "🔖 追蹤清單":
+    st.title("🔖 追蹤清單")
+    st.caption("加入有興趣的股票，每日 pipeline 自動判斷波段買點（🟢買點浮現 / 🟡接近買點 / ⚪觀望）")
+
+    # 新增表單
+    with st.form("add_watchlist", clear_on_submit=True):
+        c1, c2, c3 = st.columns([1, 2, 1])
+        w_sid    = c1.text_input("股票代號", placeholder="2330")
+        w_note   = c2.text_input("備註（選填）", placeholder="例：等回檔到月線")
+        w_target = c3.number_input("目標買入價（選填，0=不設）", min_value=0.0, step=0.5, value=0.0)
+        w_submit = st.form_submit_button("➕ 加入追蹤")
+
+    if w_submit:
+        sid = w_sid.strip()
+        with get_session() as s:
+            exists = s.execute(text(
+                "SELECT stock_name FROM stocks WHERE stock_id = :sid"), {"sid": sid}).fetchone()
+        if not exists:
+            st.error(f"代號 {sid} 不存在於股票清單，請確認")
+        else:
+            with get_session() as s:
+                s.execute(text("""
+                    INSERT INTO user_watchlist (stock_id, note, target_price)
+                    VALUES (:sid, :note, :tp)
+                    ON CONFLICT (stock_id) DO UPDATE
+                        SET note = EXCLUDED.note, target_price = EXCLUDED.target_price
+                """), {"sid": sid, "note": w_note or None,
+                       "tp": w_target if w_target > 0 else None})
+            st.success(f"已加入 {sid} {exists[0]}")
+
+    # 立即重新判斷按鈕（平常由每日 pipeline 自動跑）
+    col_a, col_b = st.columns([1, 5])
+    if col_a.button("⚡ 立即重新判斷"):
+        with st.spinner("計算買點訊號中…"):
+            from data_pipeline.analysis.watchlist_advisor import evaluate_watchlist
+            evaluate_watchlist()
+        st.success("已更新")
+        st.rerun()
+
+    # 清單表格
+    with get_session() as s:
+        wrows = s.execute(text("""
+            SELECT w.stock_id, st.stock_name, w.added_date, w.note,
+                   w.target_price, w.last_signal, w.signal_date,
+                   (SELECT d.close FROM daily_prices d
+                    WHERE d.stock_id = w.stock_id AND d.close > 0
+                    ORDER BY d.trade_date DESC LIMIT 1) AS cur_close,
+                   (SELECT d.close FROM daily_prices d
+                    WHERE d.stock_id = w.stock_id AND d.close > 0
+                      AND d.trade_date >= w.added_date
+                    ORDER BY d.trade_date ASC LIMIT 1) AS base_close
+            FROM user_watchlist w JOIN stocks st ON st.stock_id = w.stock_id
+            ORDER BY w.added_date DESC, w.stock_id
+        """)).fetchall()
+
+    if not wrows:
+        st.info("清單目前是空的，用上方表單加入想追蹤的股票")
+    else:
+        wrecs = []
+        for sid, name, added, note, tp, sig, sig_d, cur, base in wrows:
+            cur = float(cur) if cur else None
+            base = float(base) if base else None
+            chg = (cur / base - 1) * 100 if cur and base else None
+            wrecs.append({
+                "代號": sid, "名稱": name, "加入日": added,
+                "現價": cur, "加入後%": chg,
+                "目標價": float(tp) if tp else None,
+                "買點判斷": _clean_val(sig) or "（尚未判斷）",
+                "判斷日": _clean_val(sig_d) or "—",
+                "備註": _clean_val(note) or "",
+            })
+        dfw = pd.DataFrame(wrecs)
+
+        def signal_style(v):
+            v = str(v)
+            if v.startswith("🟢"):
+                return "background-color: rgba(39,174,96,.15); font-weight: bold"
+            if v.startswith("🟡"):
+                return "background-color: rgba(241,196,15,.15)"
+            return ""
+
+        st.dataframe(
+            dfw.style.map(signal_style, subset=["買點判斷"])
+               .format({"現價": "{:.2f}", "加入後%": "{:+.2f}%", "目標價": "{:.2f}"},
+                       na_rep="—"),
+            use_container_width=True, hide_index=True,
+        )
+
+        # 移除
+        with st.form("remove_watchlist"):
+            c1, c2 = st.columns([3, 1])
+            rm_pick = c1.selectbox("移除追蹤",
+                                   [f"{r['代號']} {r['名稱']}" for r in wrecs])
+            rm_go = c2.form_submit_button("🗑 移除")
+        if rm_go and rm_pick:
+            rm_sid = rm_pick.split()[0]
+            with get_session() as s:
+                s.execute(text("DELETE FROM user_watchlist WHERE stock_id = :sid"),
+                          {"sid": rm_sid})
+            st.success(f"已移除 {rm_pick}")
+            st.rerun()
+
+
+# ══════════════════════════════════════════════════════════════════
+#  Page 9：族群輪動（細分族群 + 龍頭股）
+# ══════════════════════════════════════════════════════════════════
+elif page == "🔥 族群輪動":
+    st.title("🔥 族群輪動")
+    st.caption("細分族群（記憶體/AI伺服器/散熱…）+ 龍頭股表現，一眼看出今天輪到誰")
+
+    from data_pipeline.analysis.group_momentum import (
+        calc_group_momentum, group_members_detail, rotation_alerts,
+    )
+
+    @st.cache_data(ttl=300)
+    def load_group_momentum():
+        return calc_group_momentum()
+
+    if st.button("🔄 重新整理"):
+        load_group_momentum.clear()
+
+    gdf = load_group_momentum()
+    if gdf.empty:
+        st.info("尚無族群資料（需先執行 migration 09 並確認 daily_prices 有當日資料）")
+    else:
+        trade_dt = gdf["trade_date"].iloc[0]
+        st.caption(f"資料日期：{trade_dt}")
+
+        # 輪動提示
+        alerts = rotation_alerts(gdf)
+        if alerts:
+            for a in alerts:
+                st.warning(a)
+        else:
+            st.info("今日無明顯族群輪動（龍頭漲>2% 且 6 成成員上漲才提示）")
+
+        # 熱度排行（台股慣例：紅漲綠跌）
+        plot_df = gdf.sort_values("avg_change_pct")
+        colors = ["#e74c3c" if v >= 0 else "#27ae60" for v in plot_df["avg_change_pct"]]
+        fig = go.Figure(go.Bar(
+            x=plot_df["avg_change_pct"], y=plot_df["group_name"],
+            orientation="h", marker_color=colors,
+            text=[f"{v:+.2f}%" for v in plot_df["avg_change_pct"]],
+            textposition="outside",
+        ))
+        fig.update_layout(
+            title="各族群當日平均漲跌（依熱度分數排序見下表）",
+            height=420, margin=dict(l=0, r=40, t=40, b=0),
+            xaxis_title="平均漲跌 %",
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+        # 排行表
+        show = gdf[["group_name", "avg_change_pct", "rising", "total",
+                    "leader_names", "leader_change_pct", "inst_net_lots",
+                    "momentum_score"]].rename(columns={
+            "group_name": "族群", "avg_change_pct": "平均漲跌%",
+            "rising": "上漲家數", "total": "總家數",
+            "leader_names": "龍頭", "leader_change_pct": "龍頭漲跌%",
+            "inst_net_lots": "法人買超(張)", "momentum_score": "熱度分",
+        })
+        st.dataframe(
+            show.style.format({"平均漲跌%": "{:+.2f}%", "龍頭漲跌%": "{:+.2f}%",
+                               "法人買超(張)": "{:+,d}", "熱度分": "{:.3f}"}),
+            use_container_width=True, hide_index=True,
+        )
+
+        # 族群明細
+        st.markdown("---")
+        pick_name = st.selectbox("查看族群成員明細", gdf["group_name"].tolist())
+        pick_code = gdf[gdf["group_name"] == pick_name]["group_code"].iloc[0]
+        det = group_members_detail(pick_code)
+        if det.empty:
+            st.info("此族群今日無成員資料")
+        else:
+            det["龍頭"] = det["龍頭"].map(lambda x: "👑" if x else "")
+            for c in ("漲跌%", "收盤", "RSI", "近5日法人(張)"):
+                det[c] = pd.to_numeric(det[c], errors="coerce")
+            det["成交量"] = pd.to_numeric(det["成交量"], errors="coerce").fillna(0).astype("int64")
+            st.dataframe(
+                det.style.format({"漲跌%": "{:+.2f}%", "收盤": "{:.2f}",
+                                  "RSI": "{:.0f}", "近5日法人(張)": "{:+,.0f}",
+                                  "成交量": "{:,d}"}, na_rep="—"),
+                use_container_width=True, hide_index=True,
             )
