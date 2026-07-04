@@ -20,6 +20,7 @@ from loguru import logger
 from sqlalchemy import text
 
 from database.connection import get_session
+from config.settings import tw_today
 
 # Yahoo 代碼 → 顯示名稱
 SYMBOLS = [
@@ -56,7 +57,7 @@ def _fetch_change(sym: str) -> tuple[float, float, str] | None:
 
 def fetch_us_market_summary() -> int:
     """抓美股收盤寫入 market_signals。當日已有記錄則跳過。回傳寫入筆數。"""
-    today = date.today()
+    today = tw_today()
 
     with get_session() as s:
         exists = s.execute(text("""
@@ -94,6 +95,7 @@ def fetch_us_market_summary() -> int:
             INSERT INTO market_signals
                 (signal_type, source, title, summary, sentiment, signal_date)
             VALUES ('news', '美股指數', :t, :su, :se, :dt)
+            ON CONFLICT DO NOTHING
         """), {"t": title, "su": summary, "se": sentiment, "dt": today})
 
     logger.info(f"  美股速覽：{summary}")

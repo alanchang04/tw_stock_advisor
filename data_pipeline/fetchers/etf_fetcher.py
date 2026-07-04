@@ -34,6 +34,16 @@ _HEADERS = {
 
 # ── 自動建立所需資料表（首次執行時）──────────────────────────────
 def _ensure_tables():
+    """表已存在（正常情況）就直接返回，不重放整份 migration。"""
+    with get_session() as session:
+        exists = session.execute(text("""
+            SELECT 1 FROM information_schema.tables
+            WHERE table_name = 'etf_watchlist' LIMIT 1
+        """)).fetchone()
+    if exists:
+        return
+
+    logger.warning("etf_watchlist 不存在，執行 migration 03（首次建置）")
     migration_sql = os.path.join(
         os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
         "database", "migrations", "03_market_signals.sql"
@@ -239,6 +249,7 @@ def detect_and_save_changes(etf_id: str, etf_name: str, df_new: pd.DataFrame) ->
                 (signal_type, source, title, summary, related_stocks, sentiment, signal_date)
             VALUES
                 (:signal_type, :source, :title, :summary, :related_stocks, :sentiment, :signal_date)
+            ON CONFLICT DO NOTHING
         """), signal_rows)
 
         logger.info(f"  {etf_id}：偵測到 {len(changes)} 筆換股異動")

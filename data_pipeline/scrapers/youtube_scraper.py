@@ -23,7 +23,7 @@ from loguru import logger
 from sqlalchemy import text
 
 from database.connection import get_session
-from config.settings import APIConfig
+from config.settings import APIConfig, tw_today
 
 
 # ── 追蹤的 YouTube 頻道 ──────────────────────────────────────────
@@ -96,7 +96,7 @@ def _fetch_channel_videos(channel_id: str) -> list[dict]:
             try:
                 pub_date = datetime.fromisoformat(pub[:10]).date()
             except Exception:
-                pub_date = date.today()
+                pub_date = tw_today()
             videos.append({"video_id": vid_id, "title": title, "published": pub_date})
 
     return videos
@@ -152,15 +152,16 @@ def _analyze_with_gemini(channel_name: str, title: str, transcript: str) -> dict
 字幕（節錄）：
 {transcript}
 
-請用繁體中文回答以下問題（不要有多餘格式，直接回答）：
-1. 簡短摘要（2-3句話，含主要觀點或市場看法）
-2. 提及的台股代號（只列出4位數字代號，用逗號分隔，沒有則填無）
-3. 整體情緒（只回答：正面、負面、中立 其中一個）
+請用繁體中文整理這集節目重點（讓人 5~10 行內看完整集精華）：
 
-格式：
-摘要：<摘要>
-股票：<代號列表>
-情緒：<情緒>"""
+摘要：
+- <重點1：大盤/市場觀點>
+- <重點2：看好或看壞的族群與理由>
+- <重點3：提及的個股與觀點>
+- <重點4：風險提醒或操作建議>
+（4~6 點，每點一句話，只寫字幕中真的有講的內容）
+股票：<提及的台股4位數代號，逗號分隔，無則填無>
+情緒：<正面/負面/中立>"""
 
     try:
         import litellm
@@ -174,26 +175,68 @@ def _analyze_with_gemini(channel_name: str, title: str, transcript: str) -> dict
         text_ = response.choices[0].message.content or ""
 
         summary, stocks, sentiment = default["summary"], [], default["sentiment"]
+        bullets, in_summary = [], False
         for line in text_.splitlines():
-            if line.startswith("摘要："):
-                summary = line[3:].strip()
-            elif line.startswith("股票："):
-                raw = line[3:].strip()
+            stripped = line.strip()
+            if stripped.startswith("摘要："):
+                in_summary = True
+                rest = stripped[3:].strip()
+                if rest:                      # 摘要與第一點同行的情況
+                    bullets.append(rest.lstrip("-• "))
+            elif stripped.startswith("股票："):
+                in_summary = False
+                raw = stripped[3:].strip()
                 codes = STOCK_CODE_RE.findall(raw)
-                stocks = [c for c in set(codes) if len(c) == 4][:10]
-            elif line.startswith("情緒："):
-                val = line[3:].strip()
-                if "正面" in val:
-                    sentiment = "positive"
-                elif "負面" in val:
-                    sentiment = "negative"
-                else:
-                    sentiment = "neutral"
+                stocks = [c for c in dict.fromkeys(codes) if len(c) == 4][:10]
+            elif stripped.startswith("情緒："):
+                in_summary = False
+                val = stripped[3:].strip()
+                sentiment = ("positive" if "正面" in val
+                             else "negative" if "負面" in val else "neutral")
+            elif in_summary and stripped.startswith(("-", "•", "・")):
+                bullets.append(stripped.lstrip("-•・ ").strip())
+
+        if bullets:
+            summary = "\n".join(f"• {b}" for b in bullets if b)
 
         return {"summary": summary, "stocks": stocks, "sentiment": sentiment}
 
     except Exception as e:
         logger.warning(f"  Gemini 分析失敗: {e}")
+        return default
+
+
+def _analyze_title_only(channel_name: str, title: str) -> dict:
+    """
+    無字幕時的降級分析（雲端 IP 常被 YouTube 擋字幕）：
+    只根據標題請 Gemini 推測主題與提及個股，明確標註為推測。
+    """
+    default = {"summary": None, "stocks": [], "sentiment": "neutral"}
+    if not APIConfig.GEMINI_API_KEY:
+        return default
+    try:
+        import litellm
+        resp = litellm.completion(
+            model=APIConfig.GEMINI_MODEL,
+            messages=[{"role": "user", "content":
+                f"台灣財經節目「{channel_name}」影片標題：{title}\n"
+                "僅根據標題，用 1-2 句繁體中文推測本集主題與可能討論的個股/族群"
+                "（有 4 位數代號就寫出來）。直接輸出推測內容，不要前綴。"}],
+            api_key=APIConfig.GEMINI_API_KEY,
+            max_tokens=200,
+            reasoning_effort="disable",
+        )
+        guess = (resp.choices[0].message.content or "").strip()
+        if not guess:
+            return default
+        codes = STOCK_CODE_RE.findall(guess)
+        return {
+            "summary": f"（無字幕，僅依標題推測）{guess}",
+            "stocks": [c for c in dict.fromkeys(codes) if len(c) == 4][:10],
+            "sentiment": "neutral",
+        }
+    except Exception as e:
+        logger.debug(f"  標題推測失敗: {e}")
         return default
 
 
@@ -207,7 +250,7 @@ def run_youtube_scraper(lookback_days: int = MAX_LOOKBACK_DAYS):
     logger.info(f"=== YouTube 財經頻道分析開始（追蹤 {len(YOUTUBE_CHANNELS)} 個頻道，"
                 f"看回 {lookback_days} 天）===")
     saved = 0
-    cutoff = date.today() - timedelta(days=lookback_days)
+    cutoff = tw_today() - timedelta(days=lookback_days)
 
     for ch in YOUTUBE_CHANNELS:
         channel_name = ch["name"]
@@ -246,12 +289,8 @@ def run_youtube_scraper(lookback_days: int = MAX_LOOKBACK_DAYS):
                 if analysis["summary"] == title:
                     analysis["summary"] = None
             else:
-                logger.info(f"    無字幕，存標題（無 AI 摘要）")
-                analysis = {
-                    "summary":   None,   # 無字幕 → 不存假摘要
-                    "stocks":    [],
-                    "sentiment": "neutral",
-                }
+                logger.info(f"    無字幕 → 改用標題推測（降級模式）")
+                analysis = _analyze_title_only(channel_name, title)
 
             with get_session() as session:
                 session.execute(text("""

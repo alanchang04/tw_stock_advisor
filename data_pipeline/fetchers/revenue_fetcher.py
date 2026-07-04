@@ -25,6 +25,7 @@ from loguru import logger
 from sqlalchemy import text
 
 from database.connection import get_session
+from config.settings import tw_today
 
 _URL = "https://mopsov.twse.com.tw/nas/t21/{market}/t21sc03_{roc}_{month}_0.html"
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
@@ -43,7 +44,7 @@ def _num(s: str) -> float | None:
 def latest_published_month(today: date = None) -> tuple[int, int]:
     """最新「應已公布」的營收月份：每月 10 日後為上月，否則上上月。"""
     if today is None:
-        today = date.today()
+        today = tw_today()
     y, m = today.year, today.month - (1 if today.day > 10 else 2)
     while m <= 0:
         m += 12

@@ -45,3 +45,6 @@ plotly>=5.20.0
 tqdm==4.67.1
 loguru==0.7.2
 
+# 測試
+pytest>=8.0
+

@@ -648,9 +648,24 @@ elif page == "📉 個股走勢":
 elif page == "🔄 歷史績效":
     st.title("🔄 歷史績效")
 
+    # 策略版本過濾：2026-07-04 起採用新策略（關均線出場+動能+營收因子），
+    # 舊策略交易保留當對照組，但觀察期評估預設只看新策略進場的交易
+    STRATEGY_V2_DATE = date(2026, 7, 5)
+    era = st.radio("評估範圍",
+                   [f"🆕 新策略（{STRATEGY_V2_DATE} 後進場）", "📜 全部歷史（含舊策略）"],
+                   horizontal=True)
+
     df = load_closed_positions()
+    if not df.empty and era.startswith("🆕"):
+        df = df[pd.to_datetime(df["進場日"]).dt.date >= STRATEGY_V2_DATE]
+
     if df.empty:
-        st.info("尚無已平倉記錄")
+        if era.startswith("🆕"):
+            st.info(f"新策略（{STRATEGY_V2_DATE} 後進場）尚無已平倉交易——這是正常的，"
+                    "波段平均持有約 3~4 週，觀察期需要一到兩個月累積樣本。"
+                    "可切「全部歷史」看舊策略對照組。")
+        else:
+            st.info("尚無已平倉記錄")
         st.stop()
 
     df["報酬%"] = pd.to_numeric(df["報酬%"], errors="coerce")

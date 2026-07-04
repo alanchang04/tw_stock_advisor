@@ -15,7 +15,7 @@ from loguru import logger
 from sqlalchemy import text
 
 from database.connection import get_session
-from config.settings import APIConfig
+from config.settings import APIConfig, tw_today
 
 
 def generate_daily_digest(target_date: date = None) -> str | None:
@@ -24,7 +24,7 @@ def generate_daily_digest(target_date: date = None) -> str | None:
     回傳摘要文字（供 Telegram / app 顯示），若無內容則回傳 None。
     """
     if target_date is None:
-        target_date = date.today()
+        target_date = tw_today()
 
     logger.info(f"=== 生成每日彙整：{target_date} ===")
 

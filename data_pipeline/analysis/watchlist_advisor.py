@@ -33,7 +33,8 @@ YELLOW_THRESHOLD = 2.0
 
 def evaluate_watchlist(target_date: date = None) -> str | None:
     if target_date is None:
-        target_date = date.today()
+        from config.settings import tw_today
+        target_date = tw_today()
 
     with get_session() as s:
         stocks = s.execute(text("""

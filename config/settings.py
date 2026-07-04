@@ -3,9 +3,20 @@ config.py — 集中管理系統設定
 從 .env 讀取，所有模組 import 這個檔即可
 """
 import os
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# 台灣時區（GitHub Actions 跑在 UTC，date.today() 會差 8 小時；
+# 所有「訊號日期/資料日期」判斷一律用 tw_today()）
+TW_TZ = ZoneInfo("Asia/Taipei")
+
+
+def tw_today():
+    return datetime.now(TW_TZ).date()
 
 
 class DBConfig:

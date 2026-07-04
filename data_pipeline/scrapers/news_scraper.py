@@ -18,7 +18,7 @@ from loguru import logger
 from sqlalchemy import text
 
 from database.connection import get_session
-from config.settings import APIConfig
+from config.settings import APIConfig, tw_today
 
 
 # ── RSS 來源設定 ─────────────────────────────────────────────────
@@ -75,7 +75,7 @@ HEADERS = {
 
 # ── 工具函式 ──────────────────────────────────────────────────────
 def _parse_pub_date(pub_str: str) -> date:
-    today = date.today()
+    today = tw_today()
     if not pub_str:
         return today
     for fmt in ("%a, %d %b %Y %H:%M:%S %z",
@@ -100,6 +100,30 @@ def _already_saved(session, title: str, signal_date: date) -> bool:
     if r is None:
         return False
     return bool(r[0] and len(r[0].strip()) > 20)
+
+
+# ── Gemini 回應行解析（獨立函式，供單元測試）──────────────────────
+def _parse_analysis_line(line: str, default_summary: str) -> dict:
+    """解析 '[N] 重點：xx | 情緒：正面 | 股票：2330,2454' 格式的一行。"""
+    summary, stocks, sentiment = default_summary, [], "neutral"
+    if line:
+        line = re.sub(r'^\[\d+\]\s*', '', line).strip()
+        for part in line.split("|"):
+            part = part.strip()
+            if "重點：" in part:
+                v = part.split("重點：", 1)[-1].strip()
+                if v:
+                    summary = v
+            elif "情緒：" in part:
+                v = part.split("情緒：", 1)[-1].strip()
+                sentiment = ("positive" if "正面" in v
+                             else "negative" if "負面" in v
+                             else "neutral")
+            elif "股票：" in part:
+                v = part.split("股票：", 1)[-1].strip()
+                if v != "無":
+                    stocks = [c for c in re.findall(r'\d{4}', v)][:10]
+    return {"summary": summary, "stocks": stocks, "sentiment": sentiment}
 
 
 # ── Gemini 批次分析新聞 ───────────────────────────────────────────
@@ -150,30 +174,8 @@ def _batch_analyze(articles: list[dict]) -> list[dict]:
                 (l for l in text_.splitlines() if l.strip().startswith(f"[{i+1}]")),
                 ""
             )
-            summary   = (a.get("desc") or a["title"])[:300]
-            stocks    = []
-            sentiment = "neutral"
-
-            if line:
-                # 去掉 [N] 前綴
-                line = re.sub(r'^\[\d+\]\s*', '', line).strip()
-                for part in line.split("|"):
-                    part = part.strip()
-                    if "重點：" in part:
-                        v = part.split("重點：", 1)[-1].strip()
-                        if v:
-                            summary = v
-                    elif "情緒：" in part:
-                        v = part.split("情緒：", 1)[-1].strip()
-                        sentiment = ("positive" if "正面" in v
-                                     else "negative" if "負面" in v
-                                     else "neutral")
-                    elif "股票：" in part:
-                        v = part.split("股票：", 1)[-1].strip()
-                        if v != "無":
-                            stocks = [c for c in re.findall(r'\d{4}', v)][:10]
-
-            results.append({"summary": summary, "stocks": stocks, "sentiment": sentiment})
+            default_summary = (a.get("desc") or a["title"])[:300]
+            results.append(_parse_analysis_line(line, default_summary))
 
         return results
 
@@ -185,7 +187,7 @@ def _batch_analyze(articles: list[dict]) -> list[dict]:
 # ── RSS 抓取 ──────────────────────────────────────────────────────
 def fetch_rss_news(max_items: int = 30) -> int:
     """抓取 RSS 新聞 → Gemini 批次分析 → 寫入 market_signals。回傳新增筆數"""
-    today = date.today()
+    today = tw_today()
 
     # Step 1：收集所有尚未存入 DB 的新文章
     pending = []
@@ -303,7 +305,7 @@ def fetch_rss_news(max_items: int = 30) -> int:
 # ── MOPS 重大訊息 ─────────────────────────────────────────────────
 def fetch_mops_announcements(max_items: int = 30) -> int:
     saved = 0
-    today = date.today()
+    today = tw_today()
     url = "https://mops.twse.com.tw/mops/web/ajax_t05sr01_1"
     params = {
         "encodeURIComponent": 1, "step": 1, "firstin": 1, "off": 1,
@@ -355,10 +357,139 @@ def fetch_mops_announcements(max_items: int = 30) -> int:
     return saved
 
 
+# ── 鉅亨網深度新聞（有完整內文 → 5~10 行條列重點）──────────────────
+# Google News RSS 只有標題（連結是 JS 跳轉抓不到全文），摘要品質受限；
+# 鉅亨公開 API 的 content 欄位有完整文章，才能生成真正的重點整理。
+_CNYES_API = "https://api.cnyes.com/media/api/v1/newslist/category/{cat}?limit={limit}&page=1"
+_CNYES_CATS = ["tw_stock"]          # 要加分類：wd_stock(國際)、future(期貨)...
+_CNYES_HEADERS = {**HEADERS, "Origin": "https://news.cnyes.com",
+                  "Referer": "https://news.cnyes.com/"}
+
+
+def _cnyes_deep_analyze(articles: list[dict]) -> list[dict]:
+    """
+    一次 Gemini 呼叫分析一批（含全文），輸出 JSON：
+    {"items":[{"idx":1,"summary":["句1",...],"sentiment":"正面","stocks":["2330"]}]}
+    """
+    fallback = [{"summary": [a["title"]], "stocks": [], "sentiment": "neutral"}
+                for a in articles]
+    if not APIConfig.GEMINI_API_KEY or not articles:
+        return fallback
+
+    body = "\n\n".join(
+        f"【第 {i+1} 篇】{a['title']}\n{a['content'][:1500]}"
+        for i, a in enumerate(articles)
+    )
+    prompt = f"""你是台灣股票分析師。以下 {len(articles)} 篇財經新聞（含全文），為每篇整理重點。
+
+{body}
+
+輸出 JSON（不要其他文字）：
+{{"items":[{{"idx":1,"summary":["重點句1","重點句2","重點句3"],"sentiment":"正面|負面|中立","stocks":["4位數代號"]}}]}}
+
+summary 要求：3~5 句條列，每句獨立可讀，涵蓋「發生什麼事、影響哪些公司/族群、關鍵數字、後續觀察點」。
+stocks 只列文中明確提及的台股代號，無則空陣列。"""
+
+    try:
+        import litellm, json as _json
+        resp = litellm.completion(
+            model=APIConfig.GEMINI_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            api_key=APIConfig.GEMINI_API_KEY,
+            max_tokens=min(len(articles) * 350 + 300, 6000),
+            response_format={"type": "json_object"},
+            reasoning_effort="disable",
+        )
+        parsed = _json.loads(resp.choices[0].message.content or "{}")
+        items = {it.get("idx"): it for it in parsed.get("items", [])}
+        out = []
+        for i, a in enumerate(articles):
+            it = items.get(i + 1, {})
+            sents = it.get("summary") or [a["title"]]
+            sent_map = {"正面": "positive", "負面": "negative"}
+            out.append({
+                "summary":   [str(s).strip() for s in sents if str(s).strip()][:6],
+                "stocks":    [c for c in it.get("stocks", []) if re.fullmatch(r"\d{4}", str(c))][:10],
+                "sentiment": sent_map.get(str(it.get("sentiment", "")).strip(), "neutral"),
+            })
+        return out
+    except Exception as e:
+        logger.warning(f"  鉅亨深度分析失敗: {e}")
+        return fallback
+
+
+def fetch_cnyes_news(limit: int = 15) -> int:
+    """鉅亨 API 抓含全文的新聞 → Gemini 條列重點 → market_signals。"""
+    from datetime import datetime as _dt
+    saved = 0
+    pending = []
+
+    for cat in _CNYES_CATS:
+        try:
+            r = requests.get(_CNYES_API.format(cat=cat, limit=limit),
+                             headers=_CNYES_HEADERS, timeout=20)
+            r.raise_for_status()
+            data = r.json().get("items", {}).get("data", [])
+        except Exception as e:
+            logger.warning(f"  鉅亨 API 失敗 {cat}: {e}")
+            continue
+
+        with get_session() as session:
+            for it in data:
+                title = (it.get("title") or "").strip()
+                nid   = it.get("newsId")
+                if not title or not nid:
+                    continue
+                ts = it.get("publishAt")
+                try:
+                    pub_date = _dt.fromtimestamp(int(ts)).date() if ts else tw_today()
+                except Exception:
+                    pub_date = tw_today()
+                if _already_saved(session, title, pub_date):
+                    continue
+                content = re.sub(r"<[^>]+>", " ", it.get("content") or "")
+                content = re.sub(r"\s+", " ", content).strip()
+                if len(content) < 80:      # 內文太短沒有分析價值
+                    continue
+                pending.append({
+                    "title": title[:300], "content": content,
+                    "url": f"https://news.cnyes.com/news/id/{nid}",
+                    "pub_date": pub_date,
+                })
+
+    if not pending:
+        logger.info("  鉅亨新聞：無新文章")
+        return 0
+
+    logger.info(f"  鉅亨新聞：{len(pending)} 篇待深度分析")
+    BATCH = 5   # 含全文，批次小一點確保輸出完整
+    analyses = []
+    for i in range(0, len(pending), BATCH):
+        analyses.extend(_cnyes_deep_analyze(pending[i:i + BATCH]))
+
+    with get_session() as session:
+        for art, ana in zip(pending, analyses):
+            summary_text = "\n".join(f"• {s}" for s in ana["summary"])
+            session.execute(text("""
+                INSERT INTO market_signals
+                    (signal_type, source, title, summary, url,
+                     related_stocks, sentiment, signal_date)
+                VALUES ('news', '鉅亨網', :t, :su, :u, :st, :se, :dt)
+                ON CONFLICT DO NOTHING
+            """), {"t": art["title"], "su": summary_text[:1500], "u": art["url"],
+                   "st": ana["stocks"] or None, "se": ana["sentiment"],
+                   "dt": art["pub_date"]})
+            saved += 1
+
+    logger.info(f"  鉅亨新聞：新增 {saved} 筆（條列重點）")
+    return saved
+
+
 # ── 主入口 ────────────────────────────────────────────────────────
 def run_news_scraper():
     logger.info("=== 財經新聞爬取開始 ===")
-    n1 = fetch_rss_news()
+    n0 = fetch_cnyes_news()          # 深度摘要（有全文）
+    n1 = fetch_rss_news()            # 廣度掃描（Google News，僅標題）
     n2 = fetch_mops_announcements()
-    logger.info(f"=== 財經新聞爬取完成：共新增 {n1 + n2} 筆 ===")
-    return n1 + n2
+    logger.info(f"=== 財經新聞爬取完成：共新增 {n0 + n1 + n2} 筆 ===")
+    return n0 + n1 + n2

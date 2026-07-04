@@ -16,6 +16,7 @@ from loguru import logger
 from sqlalchemy import text
 
 from database.connection import get_session
+from config.settings import tw_today
 
 # ── 可調參數 ──────────────────────────────────────────────────────
 # 注意：institutional_trading.invest_net 單位為「股」，門檻以張(=1000股)表示，比較時 ×1000
@@ -98,7 +99,7 @@ def run_smart_money_analysis() -> int:
     已有今日訊號則跳過（idempotent）。
     回傳新增訊號數。
     """
-    today = date.today()
+    today = tw_today()
     logger.info("=== 聰明資金分析開始 ===")
 
     with get_session() as session:
@@ -186,6 +187,7 @@ def run_smart_money_analysis() -> int:
                 VALUES
                     ('smart_money', :source, :title, :summary,
                      :stocks, 'positive', :dt)
+                ON CONFLICT DO NOTHING
             """), {**r, "dt": today})
             saved += 1
 

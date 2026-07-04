@@ -240,7 +240,8 @@ def mode_auto(source: str = "openapi"):
       週日~週四(隔天是交易日) → 產生隔日進場推薦
       週五、週六            → 不進場，只追蹤持倉 + 週末策略回顧
     """
-    wd = date.today().weekday()          # Mon=0 ... Sun=6
+    from config.settings import tw_today
+    wd = tw_today().weekday()            # Mon=0 ... Sun=6（台灣時區，Actions 跑在 UTC 會差 8 小時）
     is_weekend_review = wd in (4, 5)     # 週五、週六
     mode_pipeline(source=source,
                   with_entries=not is_weekend_review,

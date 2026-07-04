@@ -54,7 +54,8 @@ def advise_manual_positions(target_date: date = None) -> str | None:
     回傳彙總文字（只含賣出/加碼建議；全部續抱回傳 None）。
     """
     if target_date is None:
-        target_date = date.today()
+        from config.settings import tw_today
+        target_date = tw_today()
 
     with get_session() as s:
         rows = s.execute(text("""
