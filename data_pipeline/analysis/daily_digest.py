@@ -18,6 +18,21 @@ from database.connection import get_session
 from config.settings import APIConfig, tw_today
 
 
+def get_latest_digest(days: int = 5) -> tuple[date, str] | None:
+    """
+    最近 days 天內最新一份彙整（不管本次呼叫是否剛生成），
+    供 Telegram 每日報告與 /digest 指令共用。
+    """
+    with get_session() as session:
+        row = session.execute(text("""
+            SELECT signal_date, summary FROM market_signals
+            WHERE signal_type = 'digest'
+              AND signal_date >= CURRENT_DATE - :days * INTERVAL '1 day'
+            ORDER BY signal_date DESC, id DESC LIMIT 1
+        """), {"days": days}).fetchone()
+    return (row[0], row[1]) if row else None
+
+
 def generate_daily_digest(target_date: date = None) -> str | None:
     """
     彙整當日所有情報，用 Gemini 生成精簡每日總結。

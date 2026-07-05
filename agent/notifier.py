@@ -65,6 +65,47 @@ def notify_failure(stage: str, err: str):
 
 
 # ══════════════════════════════════════════════════════════════════
+#  Bot 指令選單（Telegram 原生「/」選單，點了就看得到全部指令與說明）
+# ══════════════════════════════════════════════════════════════════
+_BOT_COMMANDS = [
+    ("help",       "查看所有指令說明"),
+    ("status",     "系統狀態（資料更新到哪天）"),
+    ("stock",      "查詢個股即時狀態，例：/stock 2330"),
+    ("digest",     "今日市場情報彙整（族群/風險/氛圍）"),
+    ("recommend",  "今日 AI 選股推薦"),
+    ("smartmoney", "聰明資金重點（投信連買/統一ETF換股）"),
+    ("sector",     "族群輪動排行（含龍頭股）"),
+    ("etf",        "近期 ETF 換股記錄"),
+    ("positions",  "我的持倉（AI部位 + 手動記錄）"),
+    ("watchlist",  "我的追蹤清單與買點訊號"),
+    ("watch",      "加入追蹤，例：/watch 2330 900"),
+    ("unwatch",    "移除追蹤，例：/unwatch 2330"),
+    ("buy",        "記錄進場，例：/buy 2330 950 2"),
+    ("sell",       "記錄平倉，例：/sell 2330 1010"),
+]
+
+
+def register_bot_commands() -> bool:
+    """
+    向 Telegram 註冊指令選單（setMyCommands）——註冊後使用者在聊天室點「/」
+    會直接跳出全部指令＋一行說明，不用死記或猜。冪等，可重複呼叫。
+    """
+    if not telegram_enabled():
+        return False
+    try:
+        resp = requests.post(
+            f"https://api.telegram.org/bot{APIConfig.TELEGRAM_TOKEN}/setMyCommands",
+            json={"commands": [{"command": c, "description": d} for c, d in _BOT_COMMANDS]},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        return True
+    except Exception as e:
+        logger.warning(f"註冊 Bot 指令選單失敗: {e}")
+        return False
+
+
+# ══════════════════════════════════════════════════════════════════
 #  Bot 互動指令
 # ══════════════════════════════════════════════════════════════════
 def _load_offset() -> int:
@@ -268,6 +309,143 @@ def _my_positions(user: dict = None) -> str:
         return f"❌ 無法取得部位資料：{e}"
 
 
+def _stock_snapshot(sid: str, user: dict) -> str:
+    """個股即時狀態：價格/技術訊號/近5日籌碼 + 是否在自己的清單或持倉中。"""
+    from database.connection import get_session
+    from sqlalchemy import text
+    name = _stock_name(sid)
+    if not name:
+        return f"❌ 代號 {sid} 不存在，請確認"
+
+    with get_session() as s:
+        row = s.execute(text("""
+            SELECT p.trade_date, p.close, p.change_pct,
+                   t.rsi14, t.macd_hist, t.signal_ma_cross, t.signal_breakout
+            FROM daily_prices p
+            LEFT JOIN technical_indicators t
+                   ON t.stock_id = p.stock_id AND t.trade_date = p.trade_date
+            WHERE p.stock_id = :sid AND p.close > 0
+            ORDER BY p.trade_date DESC LIMIT 1
+        """), {"sid": sid}).fetchone()
+        if row is None:
+            return f"❌ {sid} {name} 尚無價格資料"
+
+        inst5 = s.execute(text("""
+            SELECT COALESCE(SUM(total_net),0), COALESCE(SUM(invest_net),0)
+            FROM (SELECT total_net, invest_net FROM institutional_trading
+                  WHERE stock_id = :sid ORDER BY trade_date DESC LIMIT 5) t5
+        """), {"sid": sid}).fetchone()
+
+        in_watch = s.execute(text("""
+            SELECT w.list_name FROM watchlist_items i
+            JOIN watchlists w ON w.list_id = i.list_id
+            WHERE w.user_id = :uid AND i.stock_id = :sid
+        """), {"uid": user["user_id"], "sid": sid}).fetchall()
+
+        in_pos = s.execute(text("""
+            SELECT source FROM positions
+            WHERE stock_id = :sid AND status = 'open' AND (source = 'ai' OR user_id = :uid)
+        """), {"uid": user["user_id"], "sid": sid}).fetchall()
+
+    trade_date, close, chg, rsi, macd_hist, ma_cross, breakout = row
+    close, chg = float(close), float(chg or 0)
+    total5, invest5 = float(inst5[0] or 0) / 1000, float(inst5[1] or 0) / 1000
+
+    lines = [f"📉 {sid} {name}　（{trade_date}）",
+             f"收盤 {close:.2f}（{chg:+.2f}%）"]
+    if rsi is not None:
+        lines.append(f"RSI {float(rsi):.1f}　MACD柱 {'正' if (macd_hist or 0) > 0 else '負'}")
+    ma_txt = {1: "黃金交叉", -1: "死亡交叉"}.get(int(ma_cross or 0), "無訊號")
+    bo_txt = {1: "突破壓力", -1: "跌破支撐"}.get(int(breakout or 0), "無訊號")
+    lines.append(f"均線：{ma_txt}　突破：{bo_txt}")
+    lines.append(f"近5日：三大法人 {total5:+,.0f} 張｜投信 {invest5:+,.0f} 張")
+    if in_watch:
+        lines.append(f"🔖 在你的清單：{', '.join(r[0] for r in in_watch)}")
+    if in_pos:
+        tags = ["AI部位" if r[0] == "ai" else "你的持倉" for r in in_pos]
+        lines.append(f"📦 持有中：{', '.join(tags)}")
+    return "\n".join(lines)
+
+
+def _today_digest() -> str:
+    from data_pipeline.analysis.daily_digest import get_latest_digest
+    latest = get_latest_digest()
+    if not latest:
+        return "📋 近期尚無市場彙整（每日 21:00 pipeline 跑完後自動產生）"
+    d, text_ = latest
+    return f"📋 {d} 市場情報每日彙整\n\n{text_}"
+
+
+def _today_recommend() -> str:
+    from database.connection import get_session
+    from sqlalchemy import text
+    with get_session() as s:
+        rec_date = s.execute(text("SELECT MAX(rec_date) FROM daily_recommendations")).scalar()
+        if not rec_date:
+            return "📊 尚無 AI 選股推薦紀錄"
+        rows = s.execute(text("""
+            SELECT r.rank, r.stock_id, st.stock_name, r.reason
+            FROM daily_recommendations r JOIN stocks st ON st.stock_id = r.stock_id
+            WHERE r.rec_date = :d ORDER BY r.rank
+        """), {"d": rec_date}).fetchall()
+    lines = [f"📊 {rec_date} AI 選股推薦（{len(rows)} 檔）："]
+    for rank, sid, name, reason in rows:
+        lines.append(f"#{rank} {sid} {name}")
+        if reason:
+            lines.append(f"   {reason[:80]}")
+    return "\n".join(lines)
+
+
+def _today_smart_money() -> str:
+    from data_pipeline.analysis.smart_money import get_todays_highlights
+    highlights = get_todays_highlights(limit=10)
+    if not highlights:
+        return "🧠 今日尚無聰明資金訊號（資料每日 21:00 更新）"
+    return f"🧠 今日聰明資金重點：\n{highlights}"
+
+
+def _today_sector() -> str:
+    from data_pipeline.analysis.group_momentum import calc_group_momentum, rotation_alerts
+    df = calc_group_momentum()
+    if df.empty:
+        return "🔥 尚無族群輪動資料"
+    lines = [f"🔥 族群輪動排行（{df['trade_date'].iloc[0]}）："]
+    for _, r in df.head(6).iterrows():
+        lines.append(f"  {r['group_name']}　平均{r['avg_change_pct']:+.1f}%"
+                     f"　龍頭{r['leader_names']}{r['leader_change_pct']:+.1f}%")
+    alerts = rotation_alerts(df)
+    if alerts:
+        lines.append("\n" + "\n".join(alerts))
+    return "\n".join(lines)
+
+
+def _today_etf() -> str:
+    from database.connection import get_session
+    from sqlalchemy import text
+    from data_pipeline.fetchers.uni_etf_fetcher import UNI_ACTIVE_FUNDS
+    with get_session() as s:
+        rows = s.execute(text("""
+            SELECT ec.etf_id, ec.etf_name, ec.stock_id, ec.stock_name,
+                   ec.change_type, ec.old_weight, ec.new_weight, ec.detected_date
+            FROM etf_changes ec
+            WHERE ec.detected_date >= CURRENT_DATE - 14 * INTERVAL '1 day'
+            ORDER BY ec.detected_date DESC LIMIT 20
+        """)).fetchall()
+    if not rows:
+        return "🔀 近14天無 ETF 換股記錄"
+    label = {"added": "🆕新增", "removed": "🚫剔除", "increased": "⬆加碼", "decreased": "⬇減碼"}
+    lines = ["🔀 近期 ETF 換股（統一主動式優先）："]
+    uni, other = [], []
+    for eid, ename, sid, sname, ctype, old_w, new_w, dd in rows:
+        line = f"  [{eid} {ename}] {sid} {sname} {label.get(ctype, ctype)}（{float(old_w or 0):.1f}%→{float(new_w or 0):.1f}%）{dd}"
+        (uni if eid in UNI_ACTIVE_FUNDS else other).append(line)
+    lines += uni or []
+    if other:
+        lines.append(f"— 其他ETF（{len(other)}筆）—")
+        lines += other[:10]
+    return "\n".join(lines)
+
+
 def _handle_command(text_raw: str, user: dict) -> str:
     """把指令文字轉成回覆文字。支援參數（如 /watch 2330 950）。user 為歸戶對象。"""
     parts = text_raw.strip().split()
@@ -276,19 +454,29 @@ def _handle_command(text_raw: str, user: dict) -> str:
 
     if cmd in ("/help", "/start"):
         return (
-            "📋 台股顧問 Bot 指令：\n"
+            "📋 台股顧問 Bot 指令一覽\n"
+            "（也可點輸入框旁的「/」按鈕看選單，隨時跳出說明）\n\n"
+            "／查詢市場（隨時可問，不用等每日報告）\n"
+            "/stock 2330 — 查個股價格/技術/籌碼即時狀態\n"
+            "/digest — 今日市場情報彙整（族群/風險/氛圍）\n"
+            "/recommend — 今日 AI 選股推薦\n"
+            "/smartmoney — 聰明資金重點（投信連買/統一ETF換股）\n"
+            "/sector — 族群輪動排行＋龍頭股\n"
+            "/etf — 近14天 ETF 換股記錄\n\n"
             "／追蹤清單\n"
             "/watch 2330 [目標價] — 加入追蹤\n"
             "/unwatch 2330 — 移除追蹤\n"
-            "/watchlist — 看清單與買點訊號\n"
+            "/watchlist — 看清單與買點訊號\n\n"
             "／我的持倉\n"
             "/buy 2330 950 2 — 記錄進場（價格 950、2 張）\n"
             "/sell 2330 1010 — 記錄平倉\n"
-            "/positions — AI 部位 + 我的持倉\n"
+            "/positions — AI 部位 + 我的持倉\n\n"
             "／系統\n"
             "/status — 系統狀態\n\n"
-            "💬 也可以直接說：「幫我關注 2330」「我買了 2330 950 2張」「2330 我 1010 賣掉了」\n"
-            "每日 21:00 自動推送推薦、持倉建議與追蹤買點。"
+            "💬 也可以直接說：「幫我關注 2330」「我買了 2330 950 2張」「2330 我 1010 賣掉了」\n\n"
+            "每日 21:00 自動推送推薦、持倉建議與追蹤買點；上面的查詢指令則是隨問隨查——"
+            "但 Bot 只在每日 pipeline 執行時（21:00 或你按「立即更新」）處理排隊訊息，"
+            "不是秒回，傳完稍等一下即可。"
         )
 
     if cmd == "/status":
@@ -338,7 +526,27 @@ def _handle_command(text_raw: str, user: dict) -> str:
         except ValueError:
             return "❌ 價格格式錯誤。例：/sell 2330 1010"
 
-    return f"❓ 未知指令：{cmd}，輸入 /help 查看可用指令"
+    if cmd == "/stock":
+        if not args:
+            return "用法：/stock 2330"
+        return _stock_snapshot(args[0].upper(), user)
+
+    if cmd == "/digest":
+        return _today_digest()
+
+    if cmd == "/recommend":
+        return _today_recommend()
+
+    if cmd == "/smartmoney":
+        return _today_smart_money()
+
+    if cmd == "/sector":
+        return _today_sector()
+
+    if cmd == "/etf":
+        return _today_etf()
+
+    return f"❓ 未知指令：{cmd}\n輸入 /help 查看可用指令，或點輸入框旁的「/」按鈕看選單"
 
 
 def _try_natural(text_raw: str, user: dict) -> str | None:
@@ -347,7 +555,8 @@ def _try_natural(text_raw: str, user: dict) -> str | None:
       「幫我關注 2330」「追蹤 2330 目標 900」        → watch
       「我買了 2330 950 2張」「2330 進場 950 兩張」   → buy（張數缺省 1）
       「2330 1010 賣掉了」「賣出 2330 1010」          → sell
-    看不懂回 None（不回覆，避免誤觸）。
+      句中有股票代號但看不懂動作 → 提示 /stock 查詢與可用寫法（不留白讓人猜）
+    完全沒有股票代號的雜訊訊息才回 None（不回覆，避免誤觸/洗版）。
     """
     t = text_raw.strip()
     m = _CODE_RE.search(t)
@@ -356,6 +565,10 @@ def _try_natural(text_raw: str, user: dict) -> str | None:
     sid = m.group(1).upper()
     rest = t.replace(m.group(1), " ")
     nums = [float(x) for x in _re.findall(r'\d+(?:\.\d+)?', rest)]
+
+    # 唯讀查詢優先判斷（最安全，放最前面）
+    if any(k in t for k in ("如何", "現在", "怎樣", "狀態", "近況", "查一下", "查詢")):
+        return _stock_snapshot(sid, user)
 
     if any(k in t for k in ("賣", "平倉", "出場", "出掉")):
         if not nums:
@@ -374,7 +587,12 @@ def _try_natural(text_raw: str, user: dict) -> str | None:
         target = nums[0] if nums else None
         return _add_watch(sid, target, user=user)
 
-    return None
+    # 偵測到股票代號但看不懂想做什麼 → 給提示而非沉默，這是 Bot 好不好用的關鍵
+    return (f"看到 {sid}，但不確定你想做什麼，可以試試：\n"
+            f"「{sid} 現在如何」或 /stock {sid} — 查即時狀態\n"
+            f"「幫我關注 {sid}」— 加入追蹤清單\n"
+            f"「我買了 {sid} 價格 張數」— 記錄進場\n"
+            f"「{sid} 價格 賣掉了」— 記錄平倉")
 
 
 def _resolve_user(chat_id: str) -> dict | None:
@@ -413,6 +631,7 @@ def check_and_respond():
     """
     if not telegram_enabled():
         return
+    register_bot_commands()   # 確保 Telegram 的「/」選單隨時是最新指令列表（冪等，成本可忽略）
     updates = get_updates()
     for upd in updates:
         msg = upd.get("message") or upd.get("edited_message")

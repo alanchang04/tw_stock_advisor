@@ -98,6 +98,29 @@ def _etf_additions(session, etf_id: str) -> list[dict]:
     return [dict(r._mapping) for r in rows]
 
 
+def get_todays_highlights(limit: int = 8, target_date: date = None) -> str | None:
+    """
+    今日聰明資金重點（雙重確認優先），供 Telegram 每日報告與 /smartmoney 指令共用。
+    不管訊號是這次 pipeline 剛算出來還是先前已存在，都能撈到（讀 DB，非重算）。
+    """
+    if target_date is None:
+        target_date = tw_today()
+    with get_session() as session:
+        rows = session.execute(text("""
+            SELECT title FROM market_signals
+            WHERE signal_type = 'smart_money' AND signal_date = :dt
+            ORDER BY CASE source
+                WHEN '雙重確認' THEN 0
+                WHEN '統一ETF'  THEN 1
+                ELSE 2
+            END, id
+            LIMIT :n
+        """), {"dt": target_date, "n": limit}).fetchall()
+    if not rows:
+        return None
+    return "\n".join(f"• {r[0]}" for r in rows)
+
+
 def _all_etf_additions(session) -> list[dict]:
     """彙整 TRACK_ETFS 全部 ETF 的加碼/新增（同一股票被多檔 ETF 選中時，取最新一筆）。"""
     by_stock: dict[str, dict] = {}
