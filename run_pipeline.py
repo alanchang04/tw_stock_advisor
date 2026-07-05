@@ -30,9 +30,11 @@ from config.settings import ScheduleConfig
 def mode_market_signals():
     """
     ETF 換股偵測 + 財經新聞（含 AI 摘要）+ YouTube 摘要 + 每日彙整
-    每日 pipeline 結尾呼叫，結果寫入 market_signals
+    每日 pipeline 結尾呼叫，結果寫入 market_signals。
+    回傳 ETF 換股報告文字（有異動時），供 mode_pipeline 併入 Telegram 推播。
     """
     logger.info("=== 市場情報模組開始 ===")
+    etf_msg = None
     try:
         from data_pipeline.fetchers.us_market import fetch_us_market_summary
         fetch_us_market_summary()
@@ -46,8 +48,9 @@ def mode_market_signals():
         logger.error(f"月營收擷取失敗: {e}")
 
     try:
-        from data_pipeline.fetchers.etf_fetcher import run_etf_tracking
-        run_etf_tracking()
+        from data_pipeline.fetchers.etf_fetcher import run_etf_tracking, format_etf_changes_report
+        changes = run_etf_tracking()
+        etf_msg = format_etf_changes_report(changes)
     except Exception as e:
         logger.error(f"ETF 換股偵測失敗: {e}")
 
@@ -76,6 +79,7 @@ def mode_market_signals():
         logger.error(f"每日彙整失敗: {e}")
 
     logger.info("=== 市場情報模組完成 ===")
+    return etf_msg
 
 # 設定 log 輸出到檔案
 logger.add("logs/pipeline_{time:YYYY-MM-DD}.log",
@@ -204,10 +208,12 @@ def mode_pipeline(source: str = "openapi", with_entries: bool = True, review: bo
             backfill()                   # 1. 自動補齊 DB 最後一天 ~ 今天
         else:
             mode_daily(source="finmind")
-        run_technical_analysis(recent_days=5)    # 2. 技術指標（增量：只寫最近 5 天，日常更新夠用）
-        mode_market_signals()                    # 3. ETF換股 + 新聞 + YouTube
+        run_technical_analysis(recent_days=5)     # 2. 技術指標（增量：只寫最近 5 天，日常更新夠用）
+        etf_msg = mode_market_signals()           # 3. ETF換股 + 新聞 + YouTube
         result = run_daily_recommendation(with_entries=with_entries)  # 4. 出場檢查(+進場推薦)
         msg = result.get("report_text") if result else None
+        if etf_msg:
+            msg = (msg or "") + "\n\n🔀 ETF換股偵測\n" + etf_msg
 
         # 5. 我的持倉建議 + 追蹤清單買點（只建議，不影響主流程）
         try:

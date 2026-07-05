@@ -256,6 +256,35 @@ def detect_and_save_changes(etf_id: str, etf_name: str, df_new: pd.DataFrame) ->
         return changes
 
 
+def format_etf_changes_report(changes: list[tuple[str, str, dict]]) -> str | None:
+    """
+    把 run_etf_tracking() 回傳的異動清單格式化成 Telegram 可讀報告。
+    統一旗下主動式 ETF（每日全持股，跟著大戶操作的核心）優先列出並標註⭐，
+    其餘 ETF（MoneyDJ 月更）列在後面。無異動回傳 None。
+    """
+    if not changes:
+        return None
+
+    from data_pipeline.fetchers.uni_etf_fetcher import UNI_ACTIVE_FUNDS
+    TYPE_LABEL = {"added": "🆕新增", "removed": "🚫剔除", "increased": "⬆加碼", "decreased": "⬇減碼"}
+
+    uni_lines, other_lines = [], []
+    for etf_id, etf_name, c in changes:
+        line = (f"  {c['stock_id']} {c['name']} {TYPE_LABEL.get(c['type'], c['type'])}"
+                f"（{c['old']:.2f}% → {c['new']:.2f}%）")
+        if etf_id in UNI_ACTIVE_FUNDS:
+            uni_lines.append(f"[{etf_id} {etf_name}]{line}")
+        else:
+            other_lines.append(f"[{etf_id} {etf_name}]{line}")
+
+    parts = []
+    if uni_lines:
+        parts.append("⭐ 統一主動式ETF換股（每日全持股，同步大戶操作）：\n" + "\n".join(uni_lines))
+    if other_lines:
+        parts.append(f"📊 其他ETF換股（{len(other_lines)}筆，MoneyDJ月更）：\n" + "\n".join(other_lines))
+    return "\n\n".join(parts)
+
+
 # ── 主入口：跑全部追蹤名單 ───────────────────────────────────────
 def run_etf_tracking():
     """從 DB etf_watchlist 讀取追蹤清單，逐一偵測換股"""
