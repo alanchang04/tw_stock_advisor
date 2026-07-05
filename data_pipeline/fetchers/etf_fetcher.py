@@ -277,9 +277,16 @@ def run_etf_tracking():
     logger.info(f"=== ETF 換股偵測：共 {len(etfs)} 支 ETF ===")
     all_changes = []
 
+    # 統一主動式 ETF 走官網每日全持股（跟大戶換股的核心）；其他走 MoneyDJ 月更
+    from data_pipeline.fetchers.uni_etf_fetcher import UNI_ACTIVE_FUNDS, fetch_uni_holdings
+
     for etf_id, etf_name, etf_type in etfs:
-        logger.info(f"  [{etf_type}] {etf_id} {etf_name}")
-        df = fetch_etf_holdings(etf_id)
+        src = "統一官網(每日)" if etf_id in UNI_ACTIVE_FUNDS else "MoneyDJ(月更)"
+        logger.info(f"  [{etf_type}] {etf_id} {etf_name} ← {src}")
+        if etf_id in UNI_ACTIVE_FUNDS:
+            df = fetch_uni_holdings(etf_id)
+        else:
+            df = fetch_etf_holdings(etf_id)
         if df.empty:
             continue
         changes = detect_and_save_changes(etf_id, etf_name, df)

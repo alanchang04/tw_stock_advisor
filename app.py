@@ -969,9 +969,11 @@ elif page == "📰 市場情報":
 # ══════════════════════════════════════════════════════════════════
 elif page == "🧠 聰明資金":
     st.title("🧠 聰明資金追蹤")
-    st.caption("統一台股增長 (00981A) 換股動態 × 投信連續買超 — 尋找波段機會")
+    st.caption("統一旗下主動式ETF換股動態（每日全持股）× 投信連續買超 — 跟著大戶集體操作做波段")
 
-    TRACK_ETF   = "00981A"
+    from data_pipeline.fetchers.uni_etf_fetcher import UNI_ACTIVE_FUNDS
+    TRACK_ETFS  = list(UNI_ACTIVE_FUNDS.keys())          # ["00981A", "00403A"]
+    ETF_NAMES   = {k: v["name"] for k, v in UNI_ACTIVE_FUNDS.items()}
     inv_days    = st.sidebar.slider("投信回看天數", 10, 30, 15)
     etf_days    = st.sidebar.slider("ETF換股回看天數", 14, 90, 45)
     min_buy_d   = st.sidebar.slider("投信最少買超天數", 2, 7, 3)
@@ -1017,7 +1019,8 @@ elif page == "🧠 聰明資金":
             st.error(f"查詢失敗: {e}")
             return pd.DataFrame()
 
-    def _query_etf(etf_id, days):
+    def _query_etf(etf_ids, days):
+        """跨多檔 ETF（統一旗下主動式）彙整加碼/新增，含來源 ETF 名稱。"""
         try:
             with get_session() as s:
                 rows = s.execute(text("""
@@ -1033,13 +1036,15 @@ elif page == "🧠 聰明資金":
                         COALESCE(ec.new_weight, 0)                          AS 新權重,
                         ROUND(COALESCE(ec.new_weight,0)
                               - COALESCE(ec.old_weight,0), 4)               AS 權重變化,
-                        ec.detected_date                                    AS 偵測日期
+                        ec.detected_date                                    AS 偵測日期,
+                        ec.etf_id                                           AS ETF代號,
+                        ec.etf_name                                         AS ETF名稱
                     FROM etf_changes ec
-                    WHERE ec.etf_id = :etf_id
+                    WHERE ec.etf_id = ANY(:etf_ids)
                       AND ec.change_type IN ('added','increased')
                       AND ec.detected_date >= CURRENT_DATE - :days * INTERVAL '1 day'
                     ORDER BY ec.detected_date DESC, 權重變化 DESC
-                """), {"etf_id": etf_id, "days": days}).fetchall()
+                """), {"etf_ids": etf_ids, "days": days}).fetchall()
             return pd.DataFrame(rows)
         except Exception as e:
             st.error(f"查詢失敗: {e}")
@@ -1065,7 +1070,7 @@ elif page == "🧠 聰明資金":
             return pd.DataFrame()
 
     df_invest = _query_invest(inv_days, min_buy_d, min_single)
-    df_etf    = _query_etf(TRACK_ETF, etf_days)
+    df_etf    = _query_etf(TRACK_ETFS, etf_days)
 
     # 計算重疊
     overlap_ids = set()
@@ -1084,13 +1089,14 @@ elif page == "🧠 聰明資金":
     # ── Tab 1：黃金交叉 ─────────────────────────────────────────
     with tab_gold:
         st.subheader("⭐ 雙重確認訊號")
-        st.caption("同時出現在「投信連買」與「統一ETF加碼/新增」的股票——波段勝率最高")
+        st.caption("同時出現在「投信連買」與「統一旗下主動式ETF加碼/新增」的股票——波段勝率最高")
 
         if not overlap_ids:
             if df_etf.empty:
                 st.info(
-                    "目前無 ETF 換股記錄可交叉比對。ETF 持股來源為 MoneyDJ（約每月更新），"
-                    "換股需待下次月報更新才會偵測到。**每日**的主動買賣訊號請看 **🏦 投信連買排行**。"
+                    "目前無 ETF 換股記錄可交叉比對（統一主動式 ETF 為每日全持股，"
+                    "首次執行後需隔天才會出現換股比對結果）。"
+                    "**每日**的主動買賣訊號請先看 **🏦 投信連買排行**。"
                 )
             elif df_invest.empty:
                 st.info("目前無符合條件的投信買超記錄。")
@@ -1116,7 +1122,7 @@ elif page == "🧠 聰明資金":
                     with col2:
                         if etf_row is not None:
                             st.markdown(
-                                f"**📊 統一ETF：** {etf_row['動作']} "
+                                f"**📊 {etf_row.get('ETF名稱', '統一ETF')}：** {etf_row['動作']} "
                                 f"（{etf_row['偵測日期']}）  \n"
                                 f"權重 {etf_row['舊權重']:.2f}% → **{etf_row['新權重']:.2f}%** "
                                 f"（+{etf_row['權重變化']:.2f}%）"
@@ -1124,14 +1130,13 @@ elif page == "🧠 聰明資金":
 
     # ── Tab 2：統一ETF動態 ──────────────────────────────────────
     with tab_etf:
-        st.subheader(f"📊 {TRACK_ETF} 統一台股增長 — 近{etf_days}日加碼/新增")
-        st.caption("持股來源：MoneyDJ（約每月更新、前十大持股）。每日主動買賣訊號請看投信連買排行。")
+        etf_label = "、".join(f"{eid} {name}" for eid, name in ETF_NAMES.items())
+        st.subheader(f"📊 統一旗下主動式ETF — 近{etf_days}日加碼/新增")
+        st.caption(f"追蹤：{etf_label}｜持股來源：統一官網每日全持股（非月更前十大），"
+                   "換股偵測與大戶操作幾乎同步。")
 
         if df_etf.empty:
-            st.info(
-                "近期無換股記錄。ETF 持股來源 MoneyDJ 約每月更新，"
-                "換股（新增/加碼）需待下次月報更新才會偵測到；下方為最新一期持股明細。"
-            )
+            st.info("近期無換股記錄；下方為最新一期持股明細。")
         else:
             for _, r in df_etf.iterrows():
                 weight_delta = r["權重變化"]
@@ -1139,13 +1144,18 @@ elif page == "🧠 聰明資金":
                 st.markdown(
                     f"{r['動作']} **{r['股票代號']} {r['股票名稱']}**"
                     f"　權重 {r['舊權重']:.2f}% → **{r['新權重']:.2f}%**（{delta_str}）"
-                    f"　📅 {r['偵測日期']}"
+                    f"　📅 {r['偵測日期']}　`{r['ETF代號']} {r['ETF名稱']}`"
                     + ("　⭐" if r["股票代號"] in overlap_ids else "")
                 )
 
         st.markdown("---")
+        pick_etf = st.selectbox(
+            "查看持股明細",
+            TRACK_ETFS,
+            format_func=lambda eid: f"{eid} {ETF_NAMES.get(eid, '')}",
+        )
         st.subheader(f"最新持股明細（前 20）")
-        df_hold = _query_etf_holdings(TRACK_ETF)
+        df_hold = _query_etf_holdings(pick_etf)
         if df_hold.empty:
             st.caption("尚無持股快照（pipeline 執行 ETF 追蹤後自動更新）。")
         else:

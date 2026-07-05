@@ -1,9 +1,10 @@
 """
 data_pipeline/analysis/smart_money.py
 
-聰明資金追蹤：投信連買 × 統一ETF換股
+聰明資金追蹤：投信連買 × 統一主動式ETF換股
 - 投信（信託投資公司）連續或大量買超 → 主力建倉訊號
-- 統一台股增長 (00981A) 新增/加碼成分股 → 主動型ETF操盤手看好
+- 統一旗下主動式 ETF（00981A 主動統一台股增長、00403A 主動統一升級50）
+  新增/加碼成分股 → 統一集團操盤手看好（每日全持股，見 uni_etf_fetcher.py）
 - 兩者同時發生 = 雙重確認，波段勝率最高
 結果存入 market_signals (signal_type='smart_money')，供 app 顯示與 Telegram 推播
 """
@@ -17,10 +18,11 @@ from sqlalchemy import text
 
 from database.connection import get_session
 from config.settings import tw_today
+from data_pipeline.fetchers.uni_etf_fetcher import UNI_ACTIVE_FUNDS
 
 # ── 可調參數 ──────────────────────────────────────────────────────
 # 注意：institutional_trading.invest_net 單位為「股」，門檻以張(=1000股)表示，比較時 ×1000
-TRACK_ETF = "00981A"   # 追蹤的主動型 ETF（統一台股增長）
+TRACK_ETFS = list(UNI_ACTIVE_FUNDS.keys())   # ["00981A", "00403A"]——統一旗下追蹤的主動式 ETF
 MIN_BUY_DAYS   = 3     # 投信至少連買幾天（在 LOOKBACK_DAYS 內）
 MIN_SINGLE_BUY = 500   # 單日大量門檻（張）—— 達到此值即使只買 1 天也入選
 LOOKBACK_DAYS  = 15    # 投信買超回看自然日數
@@ -57,21 +59,23 @@ def _invest_buying(session) -> list[dict]:
         GROUP BY stock_id
         HAVING
             COUNT(*) FILTER (WHERE invest_net > 0) >= :min_days
-            OR MAX(invest_net) >= :min_single * :lot
+            OR MAX(invest_net) >= :min_single_shares
         ORDER BY buy_days DESC, total_bought DESC NULLS LAST
         LIMIT 60
     """), {
-        "days":       LOOKBACK_DAYS,
-        "min_days":   MIN_BUY_DAYS,
-        "min_single": MIN_SINGLE_BUY,
-        "lot":        _SHARES_PER_LOT,
+        "days":              LOOKBACK_DAYS,
+        "min_days":          MIN_BUY_DAYS,
+        # 門檻先在 Python 端算好（張→股）再綁單一參數：兩個小整數參數相乘
+        # 會被 psycopg3 推斷成 smallint，Postgres 用原生 int2*int2 相乘導致溢位
+        # （500*1000=500,000 > smallint 上限 32767）。
+        "min_single_shares": MIN_SINGLE_BUY * _SHARES_PER_LOT,
     }).fetchall()
 
     return [dict(r._mapping) for r in rows]
 
 
-def _etf_additions(session, etf_id: str = TRACK_ETF) -> list[dict]:
-    """回傳指定 ETF 近 ETF_LOOKBACK 日新增或加碼的成分股。"""
+def _etf_additions(session, etf_id: str) -> list[dict]:
+    """回傳指定 ETF 近 ETF_LOOKBACK 日新增或加碼的成分股（含 etf_id/etf_name 供多檔彙整用）。"""
     rows = session.execute(text("""
         SELECT
             ec.stock_id,
@@ -79,7 +83,9 @@ def _etf_additions(session, etf_id: str = TRACK_ETF) -> list[dict]:
             ec.change_type,
             ec.old_weight,
             ec.new_weight,
-            ec.detected_date
+            ec.detected_date,
+            ec.etf_id,
+            ec.etf_name
         FROM etf_changes ec
         WHERE ec.etf_id    = :etf_id
           AND ec.change_type IN ('added', 'increased')
@@ -90,6 +96,17 @@ def _etf_additions(session, etf_id: str = TRACK_ETF) -> list[dict]:
     """), {"etf_id": etf_id, "days": ETF_LOOKBACK}).fetchall()
 
     return [dict(r._mapping) for r in rows]
+
+
+def _all_etf_additions(session) -> list[dict]:
+    """彙整 TRACK_ETFS 全部 ETF 的加碼/新增（同一股票被多檔 ETF 選中時，取最新一筆）。"""
+    by_stock: dict[str, dict] = {}
+    for etf_id in TRACK_ETFS:
+        for row in _etf_additions(session, etf_id):
+            sid = row["stock_id"]
+            if sid not in by_stock or row["detected_date"] > by_stock[sid]["detected_date"]:
+                by_stock[sid] = row
+    return list(by_stock.values())
 
 
 # ── 主入口 ────────────────────────────────────────────────────────
@@ -114,7 +131,7 @@ def run_smart_money_analysis() -> int:
 
     with get_session() as session:
         invest_list = _invest_buying(session)
-        etf_list    = _etf_additions(session)
+        etf_list    = _all_etf_additions(session)
 
     if not invest_list and not etf_list:
         logger.info("  今日無聰明資金訊號（institutional_trading / etf_changes 資料可能尚未更新）")
@@ -139,10 +156,10 @@ def run_smart_money_analysis() -> int:
         rows_to_save.append({
             "source":  "雙重確認",
             "title":   (f"⭐【雙確認】{inv['stock_id']} {inv['stock_name']} "
-                        f"— 投信連買{inv['buy_days']}日 + 統一ETF{action}"),
+                        f"— 投信連買{inv['buy_days']}日 + {etf['etf_name']}{action}"),
             "summary": (f"投信近{LOOKBACK_DAYS}日買超 {inv['buy_days']} 天，"
                         f"累計 {(inv['total_bought'] or 0):,.0f} 張（峰值 {(inv['peak_day'] or 0):,.0f} 張）；"
-                        f"統一台股增長({TRACK_ETF}) {action} {etf['detected_date']}"
+                        f"{etf['etf_name']}({etf['etf_id']}) {action} {etf['detected_date']}"
                         + (f"，權重 {weight_str}" if weight_str else "")),
             "stocks":  [inv["stock_id"]],
         })
@@ -170,9 +187,9 @@ def run_smart_money_analysis() -> int:
                       if etf.get("new_weight") else "")
         rows_to_save.append({
             "source":  "統一ETF",
-            "title":   (f"【統一ETF】{etf['stock_id']} {etf['stock_name']} "
+            "title":   (f"【{etf['etf_name']}】{etf['stock_id']} {etf['stock_name']} "
                         f"— {action}（{etf['detected_date']}）"),
-            "summary": (f"統一台股增長({TRACK_ETF}) {action}"
+            "summary": (f"{etf['etf_name']}({etf['etf_id']}) {action}"
                         + (f"，權重 {weight_str}" if weight_str else "")),
             "stocks":  [etf["stock_id"]],
         })
