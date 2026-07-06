@@ -450,7 +450,7 @@ elif page == "📦 持倉追蹤":
             def row_style(row):
                 idx = df.index.get_loc(row.name)
                 if exit_flags[idx]:
-                    return ["background-color: #fdecea"] * len(row)
+                    return ["background-color: rgba(231, 76, 60, 0.25)"] * len(row)
                 return [""] * len(row)
 
             st.dataframe(
@@ -871,11 +871,12 @@ elif page == "📰 市場情報":
                 df_chg = df_chg[df_chg["ETF"] == selected_etf]
 
             def _etf_row_style(row):
+                # 半透明底色：深色/淺色主題都能讀（實心淺色底在深色主題會白字配淺底看不見）
                 t = row["異動"]
                 if "新增" in str(t) or "加碼" in str(t):
-                    return ["background-color: #eafaf1"] * len(row)
+                    return ["background-color: rgba(46, 204, 113, 0.25)"] * len(row)
                 if "移除" in str(t) or "減碼" in str(t):
-                    return ["background-color: #fdedec"] * len(row)
+                    return ["background-color: rgba(231, 76, 60, 0.25)"] * len(row)
                 return [""] * len(row)
 
             st.dataframe(
@@ -1053,8 +1054,10 @@ elif page == "🧠 聰明資金":
                         ROUND(COALESCE(ec.new_weight,0)
                               - COALESCE(ec.old_weight,0), 4)               AS 權重變化,
                         ec.detected_date                                    AS 偵測日期,
-                        ec.etf_id                                           AS ETF代號,
-                        ec.etf_name                                         AS ETF名稱
+                        -- 英文字母別名必須加引號，否則 PostgreSQL 折成小寫（etf代號）
+                        -- 導致頁面 r['ETF代號'] KeyError
+                        ec.etf_id                                           AS "ETF代號",
+                        ec.etf_name                                         AS "ETF名稱"
                     FROM etf_changes ec
                     WHERE ec.etf_id = ANY(:etf_ids)
                       AND ec.change_type IN ('added','increased')
