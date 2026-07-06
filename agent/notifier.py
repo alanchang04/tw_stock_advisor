@@ -644,12 +644,19 @@ def check_and_respond():
         text_raw = msg.get("text", "")
         if not text_raw:
             continue
-        if text_raw.startswith("/"):
-            reply = _handle_command(text_raw, user)
-        else:
-            reply = _try_natural(text_raw, user)   # 自然語言：「幫我關注 2330」等
-            if reply is None:
-                continue   # 看不懂就不回，避免誤觸
+        # 單則訊息處理失敗不可炸掉整條 pipeline（check_and_respond 在
+        # mode_pipeline 的 try 區塊之前執行，未捕捉的例外會讓每日流程
+        # 死在起跑點且連失敗通知都發不出去）
+        try:
+            if text_raw.startswith("/"):
+                reply = _handle_command(text_raw, user)
+            else:
+                reply = _try_natural(text_raw, user)   # 自然語言：「幫我關注 2330」等
+                if reply is None:
+                    continue   # 看不懂就不回，避免誤觸
+        except Exception as e:
+            logger.error(f"處理訊息失敗（{text_raw[:30]}）: {e}")
+            reply = "⚠️ 這個指令處理時發生錯誤，已記錄，請稍後再試或改用 /help 查看用法"
         send_telegram(reply, chat_id=chat_id)
         logger.info(f"已回覆 {user['username']}：{text_raw[:30]}")
 

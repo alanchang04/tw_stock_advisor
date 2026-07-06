@@ -121,9 +121,24 @@ def db_status() -> dict:
             last  = s.execute(text("SELECT MAX(trade_date) FROM daily_prices")).scalar()
             sc    = s.execute(text("SELECT COUNT(*) FROM stocks WHERE is_active=true")).scalar()
             pos_c = s.execute(text("SELECT COUNT(*) FROM positions WHERE status='open'")).scalar()
-        return {"ok": True, "last_date": last, "stocks": sc, "open_pos": pos_c}
+            sig_t = s.execute(text(
+                "SELECT COUNT(*) FROM market_signals WHERE signal_date = CURRENT_DATE"
+            )).scalar()
+        return {"ok": True, "last_date": last, "stocks": sc,
+                "open_pos": pos_c, "signals_today": sig_t}
     except Exception as e:
         return {"ok": False, "error": str(e)}
+
+
+# 側欄資料時間指示：按「立即更新」後看這裡就知道新資料落地了沒
+# （pipeline 約 5-10 分鐘；此快取 5 分鐘，按「🔄」可強制刷新）
+_dbs = db_status()
+if _dbs.get("ok"):
+    _c_info, _c_btn = st.sidebar.columns([4, 1])
+    _c_info.caption(f"📅 行情資料至 {_dbs['last_date']}｜今日情報 {_dbs.get('signals_today', 0)} 筆")
+    if _c_btn.button("🔄", help="重新讀取資料狀態（清除快取）"):
+        st.cache_data.clear()
+        st.rerun()
 
 
 @st.cache_data(ttl=60)
@@ -441,7 +456,7 @@ elif page == "📦 持倉追蹤":
             st.dataframe(
                 df.style.apply(row_style, axis=1)
                   .format({"成本": "{:.2f}", "現價": "{:.2f}", "損益%": "{:+.2f}%",
-                           "MA5": "{:.2f}", "MA20": "{:.2f}"}),
+                           "MA5": "{:.2f}", "MA20": "{:.2f}"}, na_rep="—"),
                 use_container_width=True, hide_index=True
             )
 
@@ -801,7 +816,8 @@ elif page == "🔄 歷史績效":
         _elementwise = getattr(styler, "map", None) or styler.applymap
         st.dataframe(
             _elementwise(color_ret, subset=["報酬%"])
-              .format({"進場價": "{:.2f}", "出場價": "{:.2f}", "報酬%": "{:+.2f}%"}),
+              .format({"進場價": "{:.2f}", "出場價": "{:.2f}", "報酬%": "{:+.2f}%"},
+                      na_rep="—"),
             use_container_width=True, hide_index=True,
         )
 
@@ -864,7 +880,7 @@ elif page == "📰 市場情報":
 
             st.dataframe(
                 df_chg.style.apply(_etf_row_style, axis=1)
-                      .format({"舊比重%": "{:.2f}", "新比重%": "{:.2f}"}),
+                      .format({"舊比重%": "{:.2f}", "新比重%": "{:.2f}"}, na_rep="—"),
                 use_container_width=True, hide_index=True,
             )
 
@@ -1402,7 +1418,7 @@ elif page == "🔥 族群輪動":
             "inst_net_lots": "法人買超(張)", "momentum_score": "熱度分",
         })
         st.dataframe(
-            show.style.format({"平均漲跌%": "{:+.2f}%", "龍頭漲跌%": "{:+.2f}%",
+            show.style.format(na_rep="—", formatter={"平均漲跌%": "{:+.2f}%", "龍頭漲跌%": "{:+.2f}%",
                                "法人買超(張)": "{:+,d}", "熱度分": "{:.3f}"}),
             use_container_width=True, hide_index=True,
         )
