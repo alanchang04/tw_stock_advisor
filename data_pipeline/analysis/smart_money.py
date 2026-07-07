@@ -98,17 +98,25 @@ def _etf_additions(session, etf_id: str) -> list[dict]:
     return [dict(r._mapping) for r in rows]
 
 
-def get_todays_highlights(limit: int = 8, target_date: date = None) -> str | None:
+def get_todays_highlights(limit: int = 8, target_date: date = None,
+                          gold_cross_only: bool = False) -> str | None:
     """
-    今日聰明資金重點（雙重確認優先），供 Telegram 每日報告與 /smartmoney 指令共用。
+    今日聰明資金重點，供 Telegram 每日報告與 /smartmoney 指令共用。
     不管訊號是這次 pipeline 剛算出來還是先前已存在，都能撈到（讀 DB，非重算）。
+
+    gold_cross_only=True：只回傳「雙重確認」（投信連買×統一ETF加碼同時成立）。
+    每日推播用這個模式——純投信買超清單資訊密度低且天天都有一堆，不值得每天推播
+    佔版面；純統一ETF加碼也已經在「🔀 ETF換股偵測」區塊出現過，重複列在這裡只是
+    洗版。要看完整清單改用 /smartmoney 指令隨時查。
     """
     if target_date is None:
         target_date = tw_today()
+    source_filter = "AND source = '雙重確認'" if gold_cross_only else ""
     with get_session() as session:
-        rows = session.execute(text("""
+        rows = session.execute(text(f"""
             SELECT title FROM market_signals
             WHERE signal_type = 'smart_money' AND signal_date = :dt
+            {source_filter}
             ORDER BY CASE source
                 WHEN '雙重確認' THEN 0
                 WHEN '統一ETF'  THEN 1

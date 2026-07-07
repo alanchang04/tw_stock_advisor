@@ -278,7 +278,10 @@ def fetch_rss_news(max_items: int = 30) -> int:
             }).rowcount
 
             if updated == 0:
-                # 全新文章 → INSERT
+                # 全新文章 → INSERT；ON CONFLICT DO NOTHING 是必要的：
+                # updated==0 不代表「不存在」，也可能是「已存在且已有完整摘要」
+                # （例如鉅亨網深度分析已先存過同標題），此時裸 INSERT 會撞
+                # migration 11 的 uq_market_signals_type_title_date 唯一鍵。
                 session.execute(text("""
                     INSERT INTO market_signals
                         (signal_type, source, title, summary, url,
@@ -286,6 +289,7 @@ def fetch_rss_news(max_items: int = 30) -> int:
                     VALUES
                         (:signal_type, :source, :title, :summary, :url,
                          :related_stocks, :sentiment, :signal_date)
+                    ON CONFLICT (signal_type, title, signal_date) DO NOTHING
                 """), {
                     "signal_type":    "news",
                     "source":         article["source"],

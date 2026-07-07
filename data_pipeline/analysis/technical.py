@@ -170,21 +170,32 @@ def run_technical_analysis(stock_ids: list = None, recent_days: int = None):
     mode = "完整" if not recent_days else f"增量(最近{recent_days}日)"
     logger.info(f"=== 開始計算技術指標（{mode}）===")
 
+    # 增量模式只需要「算出最長指標(MA240)」所需的歷史窗，不必每次撈全表。
+    # daily_prices 每天持續累積（目前13個月、49萬+筆），若不設上限，
+    # 這裡的 SELECT 與後續 pandas 計算量會隨時間單調增長、越跑越慢。
+    # 420 個日曆天 ≈ 300 個交易日，足夠覆蓋 MA240 + 假日緩衝；
+    # 完整重算模式（recent_days=None，--mode technical 用）維持撈全表。
+    HISTORY_WINDOW_DAYS = 420
+    date_filter = "AND trade_date >= CURRENT_DATE - :hwd * INTERVAL '1 day'" if recent_days else ""
+
     # ── Step 1：一次讀入全部需要的價格（1 次 DB 請求）────────────
     with get_session() as session:
+        params = {"hwd": HISTORY_WINDOW_DAYS} if recent_days else {}
         if stock_ids is not None:
-            result = session.execute(text("""
+            params["ids"] = list(stock_ids)
+            result = session.execute(text(f"""
                 SELECT stock_id, trade_date, open, high, low, close, volume
                 FROM daily_prices
-                WHERE stock_id = ANY(:ids)
+                WHERE stock_id = ANY(:ids) {date_filter}
                 ORDER BY stock_id, trade_date ASC
-            """), {"ids": list(stock_ids)})
+            """), params)
         else:
-            result = session.execute(text("""
+            result = session.execute(text(f"""
                 SELECT stock_id, trade_date, open, high, low, close, volume
                 FROM daily_prices
+                WHERE 1=1 {date_filter}
                 ORDER BY stock_id, trade_date ASC
-            """))
+            """), params)
         all_rows = result.fetchall()
         col_names = list(result.keys())
 

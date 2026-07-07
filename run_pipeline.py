@@ -71,7 +71,9 @@ def mode_market_signals() -> dict:
     try:
         from data_pipeline.analysis.smart_money import run_smart_money_analysis, get_todays_highlights
         run_smart_money_analysis()
-        info["smart_money"] = get_todays_highlights()
+        # 每日推播只放「雙重確認」（高信號、少見）；純投信買超/純ETF加碼清單
+        # 資訊量大且與 ETF 換股區塊重複，天天全推太雜亂，改用 /smartmoney 隨時查
+        info["smart_money"] = get_todays_highlights(gold_cross_only=True)
     except Exception as e:
         logger.error(f"聰明資金分析失敗: {e}")
 
@@ -218,28 +220,37 @@ def mode_pipeline(source: str = "openapi", with_entries: bool = True, review: bo
         info = mode_market_signals()              # 3. ETF換股 + 新聞 + YouTube + 彙整 + 聰明資金
         result = run_daily_recommendation(with_entries=with_entries)  # 4. 出場檢查(+進場推薦)
         msg = result.get("report_text") if result else None
-        if info.get("etf"):
-            msg = (msg or "") + "\n\n🔀 ETF換股偵測\n" + info["etf"]
-        if info.get("smart_money"):
-            msg = (msg or "") + "\n\n🧠 聰明資金重點\n" + info["smart_money"]
 
         # 5. 我的持倉建議 + 追蹤清單買點（只建議，不影響主流程）
+        manual_msg = wl_msg = None
         try:
             from agent.manual_advisor import advise_manual_positions
             manual_msg = advise_manual_positions()
-            if manual_msg:
-                msg = (msg or "") + "\n\n📦 我的持倉提醒\n" + manual_msg
         except Exception as e:
             logger.error(f"手動持倉建議失敗: {e}")
         try:
             from data_pipeline.analysis.watchlist_advisor import evaluate_watchlist
             wl_msg = evaluate_watchlist()
-            if wl_msg:
-                msg = (msg or "") + "\n\n🔖 追蹤清單買點\n" + wl_msg
         except Exception as e:
             logger.error(f"追蹤清單判斷失敗: {e}")
+
+        # 組報告：每段用分隔線隔開，只塞「有內容」的區塊——避免每天固定一大串
+        # 空段落/低信號清單洗版；詳細清單留給 /smartmoney /etf /sector 隨時查
+        DIVIDER = "\n" + "─" * 22 + "\n"
+        sections = []
+        if manual_msg:
+            sections.append("📦 我的持倉提醒\n" + manual_msg)
+        if wl_msg:
+            sections.append("🔖 追蹤清單買點\n" + wl_msg)
+        if info.get("smart_money"):
+            sections.append("⭐ 聰明資金雙重確認\n" + info["smart_money"])
+        if info.get("etf"):
+            sections.append("🔀 ETF換股偵測\n" + info["etf"])
+        if sections:
+            msg = (msg or "") + DIVIDER + DIVIDER.join(sections)
         if review:
-            msg = (msg or "") + "\n\n" + _weekly_review_text()
+            msg = (msg or "") + DIVIDER + _weekly_review_text()
+        msg = (msg or "") + "\n\n📋 更多細節：/digest /smartmoney /etf /sector /recommend"
         notify_success(msg)
 
         # 每日彙整用「獨立訊息」推播（內容較長，併進主報告會被 4000 字上限截斷）
