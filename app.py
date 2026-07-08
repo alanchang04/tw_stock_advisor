@@ -783,7 +783,7 @@ elif page == "🔄 歷史績效":
                                  yaxis_title="累計報酬 %",
                                  legend=dict(orientation="h", y=1.1))
             st.plotly_chart(fig_eq, use_container_width=True)
-            st.caption("注意：AI 曲線為「逐筆報酬加總」（未含手續費/證交稅，約每筆 -0.47%），"
+            st.caption("注意：AI 曲線為「逐筆報酬加總」（未含手續費/證交稅，約每筆 -0.49%），"
                        "0050 為區間價格漲幅；兩者口徑略有差異，看趨勢與相對強弱即可。")
         except Exception as e:
             st.warning(f"績效曲線繪製失敗：{e}")

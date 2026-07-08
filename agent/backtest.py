@@ -9,7 +9,7 @@ agent/backtest.py
 
 說明 / 限制：
   - 不含 LLM：LLM 為非決定性的再排序/解說層，無法重現；回測驗證的是底層量化訊號。
-  - 收盤價對收盤價、未計滑價；「淨報酬」已計手續費(14.25bp×6折,買賣各一次)與證交稅(30bp,賣出)。
+  - 收盤價對收盤價、未計滑價；「淨報酬」已計手續費(14.25bp×58折,買賣各一次)與證交稅(30bp,賣出)。
   - 法人歷史資料較短（FinMind 免費版約近 90 天），早期樣本的籌碼分數可能偏弱。
 
 用法：
@@ -31,8 +31,11 @@ from agent.stock_selector import (
 from agent.strategy import STRATEGY, score_candidates, decide_exit
 
 # ── 交易成本（台股現股）──────────────────────────────────────────
-FEE_RATE = 0.001425 * 0.6   # 券商手續費 14.25bp，一般電子下單 6 折（買賣各收一次）
-TAX_RATE = 0.003            # 證交稅 30bp（僅賣出時收）
+# 2026-07-09：用使用者元大帳戶 4 筆真實成交手續費反推折數（見對話紀錄），
+# 58% 完美吻合全部 4 筆（含捨去與四捨五入兩種進位假設皆成立）；
+# 原本假設的 6折(60%) 在四捨五入規則下有 2 筆對不上，已修正為實測值。
+FEE_RATE = 0.001425 * 0.58   # 券商手續費 14.25bp × 58折（買賣各收一次，實測反推）
+TAX_RATE = 0.003             # 證交稅 30bp（僅賣出時收，政府統一費率與券商無關）
 
 
 def net_return(entry_price: float, exit_price: float) -> float:
@@ -353,7 +356,7 @@ def _report_roundtrip(tdf, bench, sim_dates, top_n, rebalance):
         f"  區間：{sim_dates[0]} ~ {sim_dates[-1]}（每 {rebalance} 交易日再平衡，每次最多 {top_n} 檔）",
         f"  完整交易數：{len(tdf)}",
         f"  毛報酬：勝率 {win*100:.1f}%   平均 {rets.mean()*100:+.2f}%   中位數 {rets.median()*100:+.2f}%",
-        f"  淨報酬：勝率 {net_win*100:.1f}%   平均 {nets.mean()*100:+.2f}%   （含手續費6折+證交稅，每筆約 -{(rets.mean()-nets.mean())*100:.2f}%）",
+        f"  淨報酬：勝率 {net_win*100:.1f}%   平均 {nets.mean()*100:+.2f}%   （含手續費58折+證交稅，每筆約 -{(rets.mean()-nets.mean())*100:.2f}%）",
         f"  最佳：{rets.max()*100:+.1f}%   最差：{rets.min()*100:+.1f}%",
         f"  獲利因子：{profit_factor:.2f}   每筆Sharpe：{sharpe_pt:.2f}   "
         f"逐筆權益最大回撤：{mdd:.1f} 個百分點",
