@@ -299,6 +299,7 @@ python run_pipeline.py --mode backtest
 詳見 **[docs/FEATURES.md](docs/FEATURES.md)**（完整功能盤點、資料來源、短中長期規劃、已知限制）。
 
 其他文件：
+- [docs/TRADING_LOGIC.md](docs/TRADING_LOGIC.md) — **交易邏輯完整說明**（選股評分公式、12條出場規則、市場濾網、資金管理、已驗證的參數調整歷史）
 - [docs/TODO.md](docs/TODO.md) — 開發待辦清單（改進項目 + 新功能詳細規格）
 - [docs/neon_deployment_guide.md](docs/neon_deployment_guide.md) — Neon 雲端資料庫部署
 - [docs/shioaji_setup.md](docs/shioaji_setup.md) — 永豐金 Shioaji API 設定（未來擴充）

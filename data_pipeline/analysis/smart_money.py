@@ -25,6 +25,11 @@ from data_pipeline.fetchers.uni_etf_fetcher import UNI_ACTIVE_FUNDS
 TRACK_ETFS = list(UNI_ACTIVE_FUNDS.keys())   # ["00981A", "00403A"]——統一旗下追蹤的主動式 ETF
 MIN_BUY_DAYS   = 3     # 投信至少連買幾天（在 LOOKBACK_DAYS 內）
 MIN_SINGLE_BUY = 500   # 單日大量門檻（張）—— 達到此值即使只買 1 天也入選
+# 2026-07-08 實測：「連買天數」門檻原本沒有量體下限，319 檔通過門檻的股票裡
+# 177 檔（55%）單日最小買超不到10張，極端案例(帝寶/全科/志聖/萬潤/均華)3天
+# 總共只買3張——純雜訊卻被當成主力訊號。加這個下限只擋掉這種假訊號，
+# 不影響真訊號（兆豐金等日均數千~數萬張的案例遠高於此門檻）。
+MIN_TOTAL_LOTS = 100   # 連買天數門檻分支另外要求：累計買超 ≥ 此值（張）才算數
 LOOKBACK_DAYS  = 15    # 投信買超回看自然日數
 ETF_LOOKBACK   = 45    # ETF 換股回看天數（主動型可能任意日換股）
 _SHARES_PER_LOT = 1000  # 1 張 = 1000 股
@@ -58,7 +63,8 @@ def _invest_buying(session) -> list[dict]:
         FROM window_
         GROUP BY stock_id
         HAVING
-            COUNT(*) FILTER (WHERE invest_net > 0) >= :min_days
+            (COUNT(*) FILTER (WHERE invest_net > 0) >= :min_days
+             AND SUM(invest_net) FILTER (WHERE invest_net > 0) >= :min_total_shares)
             OR MAX(invest_net) >= :min_single_shares
         ORDER BY buy_days DESC, total_bought DESC NULLS LAST
         LIMIT 60
@@ -69,6 +75,7 @@ def _invest_buying(session) -> list[dict]:
         # 會被 psycopg3 推斷成 smallint，Postgres 用原生 int2*int2 相乘導致溢位
         # （500*1000=500,000 > smallint 上限 32767）。
         "min_single_shares": MIN_SINGLE_BUY * _SHARES_PER_LOT,
+        "min_total_shares":  MIN_TOTAL_LOTS * _SHARES_PER_LOT,
     }).fetchall()
 
     return [dict(r._mapping) for r in rows]

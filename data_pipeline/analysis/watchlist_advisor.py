@@ -29,6 +29,10 @@ from agent.strategy import STRATEGY
 INVEST_STREAK_BONUS = 1.5   # 投信連 3 日買超加分
 GREEN_THRESHOLD  = 4.0
 YELLOW_THRESHOLD = 2.0
+# 同 smart_money.py 的量體下限修正：純「連3天」不設量體下限會被雜訊觸發
+# （曾實測 3 天總共只買 3 張的股票也算「連買」）。30張 ≈ smart_money 100張/15天
+# 門檻的等比例縮小版（3天窗口）。
+MIN_STREAK_TOTAL_LOTS = 30
 
 
 def evaluate_watchlist(target_date: date = None) -> str | None:
@@ -88,13 +92,19 @@ def evaluate_watchlist(target_date: date = None) -> str | None:
                 ) t5
             """), {"sid": sid, "td": target_date}).fetchone()
             inst_5d_net = float(inst[0] or 0)
-            invest_streak3 = s.execute(text("""
-                SELECT COUNT(*) FROM (
+            streak3 = s.execute(text("""
+                SELECT COUNT(*) FILTER (WHERE invest_net > 0),
+                       COALESCE(SUM(invest_net) FILTER (WHERE invest_net > 0), 0)
+                FROM (
                     SELECT invest_net FROM institutional_trading
                     WHERE stock_id = :sid AND trade_date <= :td
                     ORDER BY trade_date DESC LIMIT 3
-                ) t3 WHERE invest_net > 0
-            """), {"sid": sid, "td": target_date}).scalar() == 3
+                ) t3
+            """), {"sid": sid, "td": target_date}).fetchone()
+            # 天數=3 且累計量達標才算「連買」；純天數會被雜訊觸發
+            # （曾實測3天總共只買3張的股票也符合舊版「連3買」條件）
+            invest_streak3 = (streak3[0] == 3
+                              and float(streak3[1]) / 1000 >= MIN_STREAK_TOTAL_LOTS)
 
         # ── 計分 ────────────────────────────────────────────────
         score, hits = 0.0, []

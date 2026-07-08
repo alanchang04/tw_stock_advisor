@@ -261,27 +261,48 @@ def format_etf_changes_report(changes: list[tuple[str, str, dict]]) -> str | Non
     把 run_etf_tracking() 回傳的異動清單格式化成 Telegram 可讀報告。
     統一旗下主動式 ETF（每日全持股，跟著大戶操作的核心）優先列出並標註⭐，
     其餘 ETF（MoneyDJ 月更）列在後面。無異動回傳 None。
+
+    每檔 ETF 內部再分成「資金流入」（新增/加碼）與「資金流出」（剔除/減碼）
+    兩區塊並排顯示——同一次 rebalance 通常一邊減碼騰出的權重就是另一邊加碼
+    的來源，只列減碼看不出轉去哪，兩邊對照才看得出真正的輪動方向。
+    （注意：這是「同一天同時發生」的並列呈現，不是嚴格因果關係——基金也可能
+    有申購/贖回造成的整體部位增減，不一定每筆减碼都對應到特定一筆加碼。）
     """
     if not changes:
         return None
 
     from data_pipeline.fetchers.uni_etf_fetcher import UNI_ACTIVE_FUNDS
-    TYPE_LABEL = {"added": "🆕新增", "removed": "🚫剔除", "increased": "⬆加碼", "decreased": "⬇減碼"}
+    IN_LABEL  = {"added": "🆕新增", "increased": "⬆加碼"}
+    OUT_LABEL = {"removed": "🚫剔除", "decreased": "⬇減碼"}
 
-    uni_lines, other_lines = [], []
+    # 依 ETF 分組，同一檔 ETF 的流入/流出分開收集
+    by_etf: dict[str, dict] = {}
     for etf_id, etf_name, c in changes:
-        line = (f"  {c['stock_id']} {c['name']} {TYPE_LABEL.get(c['type'], c['type'])}"
-                f"（{c['old']:.2f}% → {c['new']:.2f}%）")
-        if etf_id in UNI_ACTIVE_FUNDS:
-            uni_lines.append(f"[{etf_id} {etf_name}]{line}")
-        else:
-            other_lines.append(f"[{etf_id} {etf_name}]{line}")
+        d = by_etf.setdefault(etf_id, {"name": etf_name, "in": [], "out": []})
+        (d["in"] if c["type"] in IN_LABEL else d["out"]).append(c)
+
+    def _render_etf_block(etf_id: str, d: dict) -> str:
+        lines = [f"[{etf_id} {d['name']}]"]
+        if d["in"]:
+            lines.append("  💰 資金流入（新增/加碼）：")
+            for c in sorted(d["in"], key=lambda x: x["new"] - x["old"], reverse=True):
+                lines.append(f"    {c['stock_id']} {c['name']} {IN_LABEL[c['type']]}"
+                             f"（{c['old']:.2f}% → {c['new']:.2f}%）")
+        if d["out"]:
+            lines.append("  📤 資金流出（剔除/減碼）：")
+            for c in sorted(d["out"], key=lambda x: x["old"] - x["new"], reverse=True):
+                lines.append(f"    {c['stock_id']} {c['name']} {OUT_LABEL[c['type']]}"
+                             f"（{c['old']:.2f}% → {c['new']:.2f}%）")
+        return "\n".join(lines)
+
+    uni_blocks   = [_render_etf_block(eid, d) for eid, d in by_etf.items() if eid in UNI_ACTIVE_FUNDS]
+    other_blocks = [_render_etf_block(eid, d) for eid, d in by_etf.items() if eid not in UNI_ACTIVE_FUNDS]
 
     parts = []
-    if uni_lines:
-        parts.append("⭐ 統一主動式ETF換股（每日全持股，同步大戶操作）：\n" + "\n".join(uni_lines))
-    if other_lines:
-        parts.append(f"📊 其他ETF換股（{len(other_lines)}筆，MoneyDJ月更）：\n" + "\n".join(other_lines))
+    if uni_blocks:
+        parts.append("⭐ 統一主動式ETF換股（每日全持股，同步大戶操作）：\n" + "\n\n".join(uni_blocks))
+    if other_blocks:
+        parts.append("📊 其他ETF換股（MoneyDJ月更）：\n" + "\n\n".join(other_blocks))
     return "\n\n".join(parts)
 
 

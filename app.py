@@ -994,13 +994,17 @@ elif page == "🧠 聰明資金":
     inv_days    = st.sidebar.slider("投信回看天數", 10, 30, 15)
     etf_days    = st.sidebar.slider("ETF換股回看天數", 14, 90, 45)
     min_buy_d   = st.sidebar.slider("投信最少買超天數", 2, 7, 3)
+    min_total   = st.sidebar.number_input(
+        "連買期間累計最少張數", 0, 2000, 100, step=50,
+        help="防雜訊：只滿足『連買天數』但累計量太小（例：3天總共只買3張）會被濾掉，"
+             "不列入連買清單。此門檻不影響下方『單日大量門檻』分支。")
     min_single  = st.sidebar.number_input("單日大量門檻（張）", 100, 5000, 500, step=100)
 
     if st.button("🔄 重新整理"):
         st.cache_data.clear()
 
     # ── 即時查詢（不快取，確保最新）────────────────────────────
-    def _query_invest(days, min_days, min_single_v):
+    def _query_invest(days, min_days, min_single_v, min_total_v):
         try:
             with get_session() as s:
                 rows = s.execute(text("""
@@ -1026,11 +1030,13 @@ elif page == "🧠 聰明資金":
                     FROM w
                     GROUP BY stock_id
                     HAVING
-                        COUNT(*) FILTER (WHERE invest_net > 0) >= :min_days
+                        (COUNT(*) FILTER (WHERE invest_net > 0) >= :min_days
+                         AND SUM(invest_net) FILTER (WHERE invest_net > 0) >= :min_total * 1000)
                         OR MAX(invest_net) >= :min_s * 1000
                     ORDER BY 買超天數 DESC, 累計買超張 DESC
                     LIMIT 50
-                """), {"days": days, "min_days": min_days, "min_s": min_single_v}).fetchall()
+                """), {"days": days, "min_days": min_days, "min_s": min_single_v,
+                       "min_total": min_total_v}).fetchall()
             return pd.DataFrame(rows)
         except Exception as e:
             st.error(f"查詢失敗: {e}")
@@ -1088,7 +1094,7 @@ elif page == "🧠 聰明資金":
         except Exception:
             return pd.DataFrame()
 
-    df_invest = _query_invest(inv_days, min_buy_d, min_single)
+    df_invest = _query_invest(inv_days, min_buy_d, min_single, min_total)
     df_etf    = _query_etf(TRACK_ETFS, etf_days)
 
     # 計算重疊
@@ -1188,7 +1194,7 @@ elif page == "🧠 聰明資金":
 
     # ── Tab 3：投信連買排行 ─────────────────────────────────────
     with tab_invest:
-        st.subheader(f"🏦 投信連買排行 — 近{inv_days}日買超≥{min_buy_d}天 或 單日≥{int(min_single)}張")
+        st.subheader(f"🏦 投信連買排行 — 近{inv_days}日買超≥{min_buy_d}天(累計≥{int(min_total)}張) 或 單日≥{int(min_single)}張")
         st.caption("投信（信託投資公司）持續淨買超代表主力資金建倉，配合技術面做波段")
 
         if df_invest.empty:
