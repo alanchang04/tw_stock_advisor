@@ -37,34 +37,53 @@ def test_take_profit_not_triggered_below_when_enabled():
     assert not ex
 
 
-# ── 分級移動停利 ────────────────────────────────────────────────────
+# ── 分級移動停利機制（用明確的 trail_tiers 測機制，與 STRATEGY 現行預設脫鉤）──
+TIERS = [(0.10, 0.08), (0.40, 0.15), (1.00, 0.20), (2.00, 0.25)]
+
 def test_trailing_stop_triggers_after_activation():
     # 峰值+20%（落在第一層 10%~40%），回落容忍度8%：120*0.92=110.4，跌破出場
-    ex, reason = decide_exit(100, 120, 110.0, None, None, 5, cfg=cfg())
+    ex, reason = decide_exit(100, 120, 110.0, None, None, 5, cfg=cfg(trail_tiers=TIERS))
     assert ex and "移動停利" in reason
 
 def test_trailing_stop_inactive_before_activation():
     # 峰值只有 +5%，未達第一層門檻(10%)，回落不出場
     ex, _ = decide_exit(100, 105, 99.5, None, None, 5,
-                        cfg=cfg(stop_loss=0.08))
+                        cfg=cfg(stop_loss=0.08, trail_tiers=TIERS))
     assert not ex
 
 def test_trailing_stop_wider_giveback_after_big_gain():
     # 峰值+150%（落在第三層 100%~200%，容忍度20%）：250*0.80=200，剛好等於門檻(<=)出場
-    ex, reason = decide_exit(100, 250, 200.0, None, None, 5, cfg=cfg())
+    ex, reason = decide_exit(100, 250, 200.0, None, None, 5, cfg=cfg(trail_tiers=TIERS))
     assert ex and "移動停利" in reason
     # 站在門檻之上（200.5）不出場
-    ex, _ = decide_exit(100, 250, 200.5, None, None, 5, cfg=cfg())
+    ex, _ = decide_exit(100, 250, 200.5, None, None, 5, cfg=cfg(trail_tiers=TIERS))
     assert not ex
 
 def test_trailing_stop_would_have_stopped_out_small_gain_at_same_pullback():
     # 同樣的絕對跌幅，如果峰值只有 +20%（第一層8%），110左右的回落就會出場——
     # 驗證分級確實比固定8%給大波段更多空間，不是全域放寬。
-    ex, reason = decide_exit(100, 120, 108.0, None, None, 5, cfg=cfg())
+    ex, reason = decide_exit(100, 120, 108.0, None, None, 5, cfg=cfg(trail_tiers=TIERS))
     assert ex and "移動停利" in reason
 
 
-# ── 均線規則（現行預設關閉）────────────────────────────────────────
+# ── E4 趨勢騎乘出場的現行預設（鎖定 2026-07-09 上線設定）──────────────
+def test_death_cross_on_by_default():
+    # 現行預設 exit_on_death_cross=True：MA5(99) < MA20(100) → 出場
+    ex, reason = decide_exit(100, 105, 104, 99.0, 100.0, 5, cfg=cfg())
+    assert ex and "死亡交叉" in reason
+
+def test_max_hold_disabled_by_default():
+    # 現行預設 max_hold_days=0：抱再久也不因天數強制出場（趨勢還在就抱著）
+    ex, _ = decide_exit(100, 105, 104, 105.0, 100.0, 999, cfg=cfg())
+    assert not ex
+
+def test_wide_backstop_ignores_small_pullback_by_default():
+    # 現行預設寬 backstop [(0.50,0.25)]：峰值+20% 回落到 108 不出場（交給死亡交叉判趨勢）
+    ex, _ = decide_exit(100, 120, 108.0, 110.0, 105.0, 5, cfg=cfg())
+    assert not ex
+
+
+# ── 均線規則 ──────────────────────────────────────────────────────
 def test_ma5_exit_disabled_by_default():
     ex, _ = decide_exit(100, 105, 104, 105.0, 100.0, 5, cfg=cfg())
     assert not ex   # close < ma5 但規則已關
@@ -80,13 +99,13 @@ def test_death_cross_when_enabled():
     assert ex and "死亡交叉" in reason
 
 
-# ── 持有到期 ──────────────────────────────────────────────────────
-def test_max_hold_days():
-    ex, reason = decide_exit(100, 105, 104, None, None, 40, cfg=cfg())
+# ── 持有到期（現行預設關閉；用明確 max_hold_days 測機制）──────────────
+def test_max_hold_days_when_enabled():
+    ex, reason = decide_exit(100, 105, 104, None, None, 40, cfg=cfg(max_hold_days=40))
     assert ex and "到期" in reason
 
-def test_hold_not_expired():
-    ex, _ = decide_exit(100, 105, 104, None, None, 39, cfg=cfg())
+def test_hold_not_expired_when_enabled():
+    ex, _ = decide_exit(100, 105, 104, None, None, 39, cfg=cfg(max_hold_days=40))
     assert not ex
 
 
