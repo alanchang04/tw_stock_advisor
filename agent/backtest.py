@@ -391,23 +391,32 @@ def run_backtest(top_n=None, rebalance=5, cfg=None, data=None, quiet=False,
     bench = bench[base[common] > 0]
     # 大盤參考二：0050 實際同期報酬（用 split_adjust 還原分割，這才是一般人講的「大盤」）
     bench_0050 = None
+    nav_0050 = None
     if mf_sid in closes.columns:
         mkt_adj = split_adjust(closes[mf_sid])
         p0, p1 = mkt_adj.get(sim_dates[0]), mkt_adj.get(last)
         if p0 and p1 and p0 > 0:
             bench_0050 = p1 / p0 - 1
+            # 0050 買進持有的逐日 NAV（同本金），供風險調整後(Sharpe/回撤/Calmar)對比
+            nav_0050 = (mkt_adj.reindex(sim_dates).ffill() / p0) * cfg["capital"]
     nav = pd.Series({d: v for d, v in nav_curve}).sort_index()
+    m = perf_metrics(nav)
+    m0050 = perf_metrics(nav_0050) if nav_0050 is not None else None
     # 摘要指標掛在 df.attrs，供比較腳本程式化讀取（不必解析印出的文字）
     tdf.attrs.update({
-        "nav_total_ret": nav.iloc[-1] / cfg["capital"] - 1,
-        "nav_mdd": ((nav - nav.cummax()) / nav.cummax()).min(),
+        "nav_total_ret": m["total"], "nav_mdd": m["mdd"],
+        "sharpe": m["sharpe"], "ann_ret": m["ann_ret"], "ann_vol": m["ann_vol"], "calmar": m["calmar"],
         "bench_0050": bench_0050,
+        "sharpe_0050": m0050["sharpe"] if m0050 else None,
+        "mdd_0050": m0050["mdd"] if m0050 else None,
+        "calmar_0050": m0050["calmar"] if m0050 else None,
         "bench_eqw": bench.mean(),
         "net_win": net_win_rate(tdf),
         "start": sim_dates[0], "end": last,
     })
     if not quiet:
-        _report_roundtrip(tdf, bench, bench_0050, nav, cfg["capital"], sim_dates, top_n, rebalance)
+        _report_roundtrip(tdf, bench, bench_0050, nav, m, m0050, cfg["capital"],
+                          sim_dates, top_n, rebalance)
     return tdf
 
 
@@ -416,7 +425,31 @@ def net_win_rate(tdf) -> float:
     return float((nets > 0).mean())
 
 
-def _report_roundtrip(tdf, bench, bench_0050, nav, capital, sim_dates, top_n, rebalance):
+TRADING_DAYS = 252
+
+def perf_metrics(nav: pd.Series) -> dict:
+    """
+    從逐日 NAV/價格序列算風險調整後績效：總報酬、年化報酬、年化波動、
+    Sharpe（rf=0）、最大回撤、Calmar（年化報酬/|最大回撤|）。
+    2026-07-09 起把回測目標從「贏 0050 報酬」改為「風險調整後贏 0050」——
+    大多頭年不糾結拚報酬，而是追求貼近大盤報酬、但波動與回撤更小。
+    """
+    nav = nav.dropna()
+    if len(nav) < 3:
+        return dict(total=0, ann_ret=0, ann_vol=0, sharpe=0, mdd=0, calmar=0)
+    rets = nav.pct_change().dropna()
+    years = len(nav) / TRADING_DAYS
+    total = nav.iloc[-1] / nav.iloc[0] - 1
+    ann_ret = (nav.iloc[-1] / nav.iloc[0]) ** (1 / years) - 1 if years > 0 else 0.0
+    ann_vol = rets.std() * (TRADING_DAYS ** 0.5)
+    sharpe = (rets.mean() / rets.std()) * (TRADING_DAYS ** 0.5) if rets.std() > 0 else 0.0
+    mdd = ((nav - nav.cummax()) / nav.cummax()).min()
+    calmar = ann_ret / abs(mdd) if mdd < 0 else float("inf")
+    return dict(total=total, ann_ret=ann_ret, ann_vol=ann_vol,
+                sharpe=sharpe, mdd=mdd, calmar=calmar)
+
+
+def _report_roundtrip(tdf, bench, bench_0050, nav, m, m0050, capital, sim_dates, top_n, rebalance):
     rets = tdf["ret"]
     nets = tdf["net_ret"] if "net_ret" in tdf.columns else rets
     win = (rets > 0).mean()
@@ -427,9 +460,8 @@ def _report_roundtrip(tdf, bench, bench_0050, nav, capital, sim_dates, top_n, re
     profit_factor = gross_win / gross_loss if gross_loss > 0 else float("inf")
     sharpe_pt = nets.mean() / nets.std() if nets.std() > 0 else 0.0   # 每筆 Sharpe
 
-    # 真實資金曲線（受 max_open_positions 與每格等額資金限制，可與買進持有做同期間比較）
-    port_total_ret = nav.iloc[-1] / capital - 1
-    mdd = ((nav - nav.cummax()) / nav.cummax()).min() * 100   # 真實最大回撤（% of NAV，不會超過-100%）
+    def _cmp(a, b):   # 策略指標 vs 0050，標出誰較優
+        return "✅優於0050" if a >= b else "⚠️劣於0050"
 
     # 出場原因分布
     by_reason = tdf.groupby("reason")["ret"].agg(["count", "mean"]).sort_values("count", ascending=False)
@@ -450,13 +482,20 @@ def _report_roundtrip(tdf, bench, bench_0050, nav, capital, sim_dates, top_n, re
         f"  獲利因子：{profit_factor:.2f}   每筆Sharpe：{sharpe_pt:.2f}",
         f"  平均持有天數：{tdf['hold'].mean():.1f} 交易日",
         "",
-        "  【整個回測期間的資金成長（同一時間基準，才能公平跟大盤比較）】",
-        f"  策略總報酬（{capital:,.0f} 元本金，同時持倉上限受限，逐日試算 NAV）："
-        f"{port_total_ret*100:+.2f}%",
-        f"  策略最大回撤（NAV 相對前高，非逐筆加總）：{mdd:.1f}%",
-        f"  0050 同期實際報酬（已還原分割/併股，這才是一般講的「大盤」）："
-        f"{bench_0050*100:+.2f}%" if bench_0050 is not None else "  0050 同期實際報酬：無資料",
-        f"  策略總報酬 − 0050：{(port_total_ret - bench_0050)*100:+.2f}%" if bench_0050 is not None else "",
+        "  【風險調整後績效 vs 0050 —— 目標：貼近大盤報酬、但波動與回撤更小】",
+        f"  策略  ：總報酬 {m['total']*100:+.2f}%  年化 {m['ann_ret']*100:+.2f}%  "
+        f"年化波動 {m['ann_vol']*100:.1f}%  Sharpe {m['sharpe']:.2f}  最大回撤 {m['mdd']*100:.1f}%  Calmar {m['calmar']:.2f}",
+    ]
+    if m0050:
+        lines += [
+            f"  0050 ：總報酬 {bench_0050*100:+.2f}%  年化 {m0050['ann_ret']*100:+.2f}%  "
+            f"年化波動 {m0050['ann_vol']*100:.1f}%  Sharpe {m0050['sharpe']:.2f}  最大回撤 {m0050['mdd']*100:.1f}%  Calmar {m0050['calmar']:.2f}",
+            f"  → Sharpe {_cmp(m['sharpe'], m0050['sharpe'])}   "
+            f"最大回撤 {_cmp(m['mdd'], m0050['mdd'])}   Calmar {_cmp(m['calmar'], m0050['calmar'])}",
+        ]
+    else:
+        lines.append("  0050 ：無資料")
+    lines += [
         f"  （參考，非可投資組合）全樣本個股等權買進持有同期：{bench.mean()*100:+.2f}%"
         f"（中位數 {bench.median()*100:+.2f}%，易被少數飆股拉高平均，僅供對照）",
         "-" * 66,
