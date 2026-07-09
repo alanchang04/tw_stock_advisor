@@ -47,7 +47,10 @@ def net_return(entry_price: float, exit_price: float) -> float:
 
 
 # ── 載入資料（一次全載入記憶體，避免每個日期重複查 DB）───────────
-def _load() -> dict:
+def _load(parquet_dir: str | None = None) -> dict:
+    """parquet_dir 給定時改讀本機 parquet（跨週期歷史回測用，見 _load_parquet）。"""
+    if parquet_dir:
+        return _load_parquet(parquet_dir)
     with get_session() as s:
         prices = pd.DataFrame(
             s.execute(text("""
@@ -107,6 +110,91 @@ def _load() -> dict:
 
     return {"prices": prices, "tech": tech, "inst": inst,
             "imap": imap, "inds": inds, "rev_map": rev_map}
+
+
+# ── 從本機 parquet 載入（跨週期歷史回測；資料來源＝TWSE回補 或 匯入老師的歷史檔）──
+#   目錄下可放（皆選配，缺的優雅降級）：
+#     prices.parquet          必要：stock_id, trade_date, close, volume[, open/high/low, change_pct]
+#     institutional.parquet   選配：stock_id, trade_date, total_net, foreign_net, invest_net（單位：股）
+#     technical.parquet       選配：沒有就用 technical.calc_indicators 從 prices 現算
+#     stock_industry_map.parquet / industries.parquet / monthly_revenue.parquet  選配
+def _load_parquet(parquet_dir: str) -> dict:
+    import os
+    def _p(name):
+        path = os.path.join(parquet_dir, name)
+        return pd.read_parquet(path) if os.path.exists(path) else None
+
+    prices = _p("prices.parquet")
+    if prices is None or prices.empty:
+        raise FileNotFoundError(f"{parquet_dir} 缺 prices.parquet（回測至少需要股價）")
+    for c in ["close", "volume", "change_pct", "open", "high", "low"]:
+        if c in prices.columns:
+            prices[c] = pd.to_numeric(prices[c], errors="coerce")
+    prices["trade_date"] = pd.to_datetime(prices["trade_date"]).dt.date
+    prices = prices.sort_values(["stock_id", "trade_date"]).reset_index(drop=True)
+    if "change_pct" not in prices.columns:   # 沒給就從收盤自算（每檔各自 pct_change）
+        prices["change_pct"] = prices.groupby("stock_id")["close"].pct_change() * 100
+
+    inst = _p("institutional.parquet")
+    if inst is None:
+        inst = pd.DataFrame(columns=["stock_id", "trade_date", "total_net", "foreign_net", "invest_net"])
+    else:
+        for c in ["total_net", "foreign_net", "invest_net"]:
+            inst[c] = pd.to_numeric(inst[c], errors="coerce") if c in inst.columns else 0.0
+        inst["trade_date"] = pd.to_datetime(inst["trade_date"]).dt.date
+
+    tech = _p("technical.parquet")
+    if tech is None:
+        tech = _compute_tech_from_prices(prices)
+    else:
+        for c in ["ma5", "ma20", "ma60", "rsi14", "macd_hist", "signal_ma_cross", "signal_breakout"]:
+            if c in tech.columns:
+                tech[c] = pd.to_numeric(tech[c], errors="coerce")
+        tech["trade_date"] = pd.to_datetime(tech["trade_date"]).dt.date
+
+    imap = _p("stock_industry_map.parquet")
+    if imap is None:
+        imap = pd.DataFrame(columns=["stock_id", "industry_code"])
+    inds = _p("industries.parquet")
+    if inds is None:
+        inds = pd.DataFrame(columns=["industry_code", "name_zh"])
+    rev = _p("monthly_revenue.parquet")
+    rev_map = {}
+    if rev is not None and not rev.empty:
+        rev["yoy_pct"] = pd.to_numeric(rev["yoy_pct"], errors="coerce")
+        rev_map = {(r.stock_id, r.year_month): r.yoy_pct for r in rev.itertuples()}
+
+    logger.info(f"從 parquet 載入：股價 {len(prices)} 列、法人 {len(inst)} 列、"
+                f"技術指標 {len(tech)} 列（{'現算' if _p('technical.parquet') is None else '讀檔'}）")
+    return {"prices": prices, "tech": tech, "inst": inst,
+            "imap": imap, "inds": inds, "rev_map": rev_map}
+
+
+def _compute_tech_from_prices(prices: pd.DataFrame) -> pd.DataFrame:
+    """
+    沒有現成技術指標時，用 technical.calc_indicators（與正式 pipeline 同一份）從股價現算，
+    確保線上/DB回測/parquet回測三邊指標一致。只回傳回測用到的欄位。
+    """
+    from data_pipeline.analysis.technical import calc_indicators
+    need = ["ma5", "ma20", "ma60", "rsi14", "macd_hist", "signal_ma_cross", "signal_breakout"]
+    out = []
+    for sid, g in prices.groupby("stock_id"):
+        g = g.sort_values("trade_date").reset_index(drop=True)
+        if len(g) < 30:
+            continue
+        d = g[["trade_date"]].copy()
+        d["close"] = g["close"]
+        # calc_indicators 需要 OHLC；缺開高低就用收盤代（MA/RSI/MACD 只靠收盤，仍正確）
+        d["open"] = g["open"] if "open" in g.columns else g["close"]
+        d["high"] = g["high"] if "high" in g.columns else g["close"]
+        d["low"]  = g["low"]  if "low"  in g.columns else g["close"]
+        d = calc_indicators(d)
+        d["stock_id"] = sid
+        out.append(d[["stock_id", "trade_date"] + need])
+    tech = pd.concat(out, ignore_index=True) if out else \
+        pd.DataFrame(columns=["stock_id", "trade_date"] + need)
+    tech["trade_date"] = pd.to_datetime(tech["trade_date"]).dt.date
+    return tech
 
 
 def _available_rev_month(d) -> str:
@@ -253,7 +341,7 @@ def _candidates_asof(data, d, industry_codes, top_n=5, cfg=None):
 
 # ── 主回測：真實進出場（round-trip）─────────────────────────────
 def run_backtest(top_n=None, rebalance=5, cfg=None, data=None, quiet=False,
-                 start_date=None, end_date=None):
+                 start_date=None, end_date=None, parquet_dir=None):
     """
     模擬實際操作：再平衡日依評分進場，每日依 strategy 出場規則平倉，
     計算每筆完整交易(round-trip)的報酬、勝率、平均持有天數，並與買進持有比較。
@@ -262,13 +350,14 @@ def run_backtest(top_n=None, rebalance=5, cfg=None, data=None, quiet=False,
     data:  預載資料（_load() 的回傳）——多次回測共用，避免重複查 DB
     quiet: True 時不印報告，只回傳交易 DataFrame
     start_date/end_date: 限制回測區間（walk-forward 分段用；datetime.date）
+    parquet_dir: 給定時改讀本機 parquet 歷史資料（跨週期回測），不查 DB
     """
     cfg = cfg or STRATEGY
     top_n = top_n or cfg["pick_top_n"]
     if not quiet:
         logger.info("=== 回測開始（進場評分 + strategy 出場規則，不含 LLM）===")
     if data is None:
-        data = _load()
+        data = _load(parquet_dir=parquet_dir)
     closes = data["prices"].pivot_table(index="trade_date", columns="stock_id", values="close")
     closes = closes.where(closes > 0)   # close<=0 為資料瑕疵(停牌/無成交)，視為缺值
     data["_closes"] = closes            # 供 _candidates_asof 算 60 日動能
