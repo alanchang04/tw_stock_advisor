@@ -28,7 +28,7 @@ from database.connection import get_session
 from agent.stock_selector import (
     EXCLUDE_INDUSTRIES, MIN_RSI, MAX_RSI, MIN_CLOSE, MIN_VOLUME,
 )
-from agent.strategy import STRATEGY, score_candidates, decide_exit
+from agent.strategy import STRATEGY, score_candidates, decide_exit, split_adjust
 
 # ── 交易成本（台股現股）──────────────────────────────────────────
 # 2026-07-09：用使用者元大帳戶 4 筆真實成交手續費反推折數（見對話紀錄），
@@ -246,7 +246,10 @@ def run_backtest(top_n=None, rebalance=5, cfg=None, data=None, quiet=False):
     regime_bull = None
     mf_sid = cfg.get("market_filter_stock", "0050")
     if cfg.get("market_filter") and mf_sid in closes.columns:
-        mkt = closes[mf_sid]
+        # split_adjust：市場濾網代理股（預設0050）若曾分割/併股，原始收盤價會出現
+        # 單日假崩盤（見 2025-06-18 一分四實例），未還原會讓 MA60 誤判成連續數月
+        # 空頭，錯誤觸發死亡交叉出場保護（見對話紀錄的根因分析）。
+        mkt = split_adjust(closes[mf_sid])
         regime_bull = (mkt >= mkt.rolling(60, min_periods=30).mean()).fillna(True)
     bear_cfg = ({**cfg, "exit_on_death_cross": True}
                 if cfg.get("bear_reenable_death_cross") else cfg)
@@ -270,8 +273,13 @@ def run_backtest(top_n=None, rebalance=5, cfg=None, data=None, quiet=False):
         except KeyError:
             return None
 
-    open_pos = {}     # stock_id -> {entry_date, entry_price, peak}
+    max_open = cfg.get("max_open_positions", 10)
+    capital_per_slot = cfg["capital"] / max_open   # 假設每格等額資金（近似 suggest_shares 的風控上限）
+
+    open_pos = {}     # stock_id -> {entry_date, entry_price, peak, shares}
     trades = []       # 完整交易紀錄
+    cash = cfg["capital"]
+    nav_curve = []    # (date, cash+持股市值) —— 真實資金受限的權益曲線，供公平期間比較用
     for i, d in enumerate(sim_dates):
         bull = True if regime_bull is None else bool(regime_bull.get(d, True))
         day_cfg = cfg if bull else bear_cfg
@@ -292,19 +300,37 @@ def run_backtest(top_n=None, rebalance=5, cfg=None, data=None, quiet=False):
                                "ret": close / p["entry_price"] - 1,
                                "net_ret": net_return(p["entry_price"], close),
                                "hold": hold, "reason": reason})
+                cash += p["shares"] * close * (1 - FEE_RATE - TAX_RATE)
                 del open_pos[sid]
 
-        # 2) 再平衡日進場（未持有者才買；濾網設 block_entries 時空頭不開新倉）
+        # 2) 再平衡日進場（未持有者才買；濾網設 block_entries 時空頭不開新倉；
+        #    同時持倉數不得超過 max_open_positions —— 與 portfolio.record_entries()
+        #    的風控守門員一致，回測才是真的在模擬「max_open_positions=10」這條規則，
+        #    而不是無限制同時持倉）
         gi = pos_idx[d]
         entry_ok = bull or not cfg.get("market_filter_block_entries", False)
         if entry_ok and (gi - start_i) % rebalance == 0:
-            hot = _hot_sectors_asof(data, d, top_n=cfg["hot_sectors_top_n"])
-            for sid in _candidates_asof(data, d, hot, top_n=top_n, cfg=cfg):
-                if sid in open_pos:
-                    continue
-                price = val(closes, d, sid)
-                if price:
-                    open_pos[sid] = {"entry_date": d, "entry_price": price, "peak": price, "entry_i": i}
+            free_slots = max_open - len(open_pos)
+            if free_slots > 0:
+                hot = _hot_sectors_asof(data, d, top_n=cfg["hot_sectors_top_n"])
+                for sid in _candidates_asof(data, d, hot, top_n=top_n, cfg=cfg):
+                    if free_slots <= 0:
+                        break
+                    if sid in open_pos:
+                        continue
+                    price = val(closes, d, sid)
+                    if not price:
+                        continue
+                    shares = int(capital_per_slot // (price * (1 + FEE_RATE)))
+                    if shares <= 0:
+                        continue
+                    cash -= shares * price * (1 + FEE_RATE)
+                    open_pos[sid] = {"entry_date": d, "entry_price": price, "peak": price,
+                                      "entry_i": i, "shares": shares}
+                    free_slots -= 1
+
+        mkt_val = sum(p["shares"] * (val(closes, d, sid) or p["peak"]) for sid, p in open_pos.items())
+        nav_curve.append((d, cash + mkt_val))
 
     # 期末仍持有者，以最後一天收盤平倉計入
     last = sim_dates[-1]
@@ -322,30 +348,38 @@ def run_backtest(top_n=None, rebalance=5, cfg=None, data=None, quiet=False):
 
     tdf = pd.DataFrame(trades)
     if not quiet:
-        # 買進持有基準：同區間所有股票等權報酬
+        # 大盤參考一：同區間所有股票等權買進持有（僅供參考，非可投資組合，易被少數飆股拉高）
         base, fin = closes.loc[sim_dates[0]], closes.loc[last]
         common = base.dropna().index.intersection(fin.dropna().index)
         bench = (fin[common] / base[common] - 1)
         bench = bench[base[common] > 0]
-        _report_roundtrip(tdf, bench, sim_dates, top_n, rebalance)
+        # 大盤參考二：0050 實際同期報酬（用 split_adjust 還原分割，這才是一般人講的「大盤」）
+        bench_0050 = None
+        if mf_sid in closes.columns:
+            mkt_adj = split_adjust(closes[mf_sid])
+            p0, p1 = mkt_adj.get(sim_dates[0]), mkt_adj.get(last)
+            if p0 and p1 and p0 > 0:
+                bench_0050 = p1 / p0 - 1
+        nav = pd.Series({d: v for d, v in nav_curve}).sort_index()
+        _report_roundtrip(tdf, bench, bench_0050, nav, cfg["capital"], sim_dates, top_n, rebalance)
     return tdf
 
 
-def _report_roundtrip(tdf, bench, sim_dates, top_n, rebalance):
+def _report_roundtrip(tdf, bench, bench_0050, nav, capital, sim_dates, top_n, rebalance):
     rets = tdf["ret"]
     nets = tdf["net_ret"] if "net_ret" in tdf.columns else rets
     win = (rets > 0).mean()
     net_win = (nets > 0).mean()
 
-    # 進階指標（依出場日排序的逐筆權益曲線，等權重近似）
-    seq = tdf.sort_values("exit_date")["net_ret"] if "net_ret" in tdf.columns \
-        else tdf.sort_values("exit_date")["ret"]
-    equity = seq.cumsum()
-    mdd = (equity - equity.cummax()).min() * 100          # 最大回撤（百分點）
     gross_win  = nets[nets > 0].sum()
     gross_loss = abs(nets[nets <= 0].sum())
     profit_factor = gross_win / gross_loss if gross_loss > 0 else float("inf")
     sharpe_pt = nets.mean() / nets.std() if nets.std() > 0 else 0.0   # 每筆 Sharpe
+
+    # 真實資金曲線（受 max_open_positions 與每格等額資金限制，可與買進持有做同期間比較）
+    port_total_ret = nav.iloc[-1] / capital - 1
+    mdd = ((nav - nav.cummax()) / nav.cummax()).min() * 100   # 真實最大回撤（% of NAV，不會超過-100%）
+
     # 出場原因分布
     by_reason = tdf.groupby("reason")["ret"].agg(["count", "mean"]).sort_values("count", ascending=False)
     lines = [
@@ -353,16 +387,27 @@ def _report_roundtrip(tdf, bench, sim_dates, top_n, rebalance):
         "=" * 66,
         "  回測結果：實際進出場模擬（進場評分 + strategy 出場規則，不含 LLM）",
         "=" * 66,
-        f"  區間：{sim_dates[0]} ~ {sim_dates[-1]}（每 {rebalance} 交易日再平衡，每次最多 {top_n} 檔）",
+        f"  區間：{sim_dates[0]} ~ {sim_dates[-1]}（每 {rebalance} 交易日再平衡，每次最多 {top_n} 檔，"
+        f"同時持倉上限依 strategy.max_open_positions）",
         f"  完整交易數：{len(tdf)}",
+        "",
+        "  【單筆交易統計（僅供檢視個別買賣品質，時間基準是每筆平均持有天數，",
+        "    不可直接拿來跟下面的整期間報酬相減比較 —— 那是兩個不同時間長度的數字）】",
         f"  毛報酬：勝率 {win*100:.1f}%   平均 {rets.mean()*100:+.2f}%   中位數 {rets.median()*100:+.2f}%",
         f"  淨報酬：勝率 {net_win*100:.1f}%   平均 {nets.mean()*100:+.2f}%   （含手續費58折+證交稅，每筆約 -{(rets.mean()-nets.mean())*100:.2f}%）",
         f"  最佳：{rets.max()*100:+.1f}%   最差：{rets.min()*100:+.1f}%",
-        f"  獲利因子：{profit_factor:.2f}   每筆Sharpe：{sharpe_pt:.2f}   "
-        f"逐筆權益最大回撤：{mdd:.1f} 個百分點",
+        f"  獲利因子：{profit_factor:.2f}   每筆Sharpe：{sharpe_pt:.2f}",
         f"  平均持有天數：{tdf['hold'].mean():.1f} 交易日",
-        f"  大盤(等權買進持有)同期：{bench.mean()*100:+.2f}%",
-        f"  選股淨報酬 − 大盤：{(nets.mean()-bench.mean())*100:+.2f}%",
+        "",
+        "  【整個回測期間的資金成長（同一時間基準，才能公平跟大盤比較）】",
+        f"  策略總報酬（{capital:,.0f} 元本金，同時持倉上限受限，逐日試算 NAV）："
+        f"{port_total_ret*100:+.2f}%",
+        f"  策略最大回撤（NAV 相對前高，非逐筆加總）：{mdd:.1f}%",
+        f"  0050 同期實際報酬（已還原分割/併股，這才是一般講的「大盤」）："
+        f"{bench_0050*100:+.2f}%" if bench_0050 is not None else "  0050 同期實際報酬：無資料",
+        f"  策略總報酬 − 0050：{(port_total_ret - bench_0050)*100:+.2f}%" if bench_0050 is not None else "",
+        f"  （參考，非可投資組合）全樣本個股等權買進持有同期：{bench.mean()*100:+.2f}%"
+        f"（中位數 {bench.median()*100:+.2f}%，易被少數飆股拉高平均，僅供對照）",
         "-" * 66,
         "  出場原因分布（次數 / 該原因平均毛報酬）：",
     ]
@@ -374,7 +419,7 @@ def _report_roundtrip(tdf, bench, sim_dates, top_n, rebalance):
         "  調 agent/strategy.py 的參數後重跑此回測，即可比較買賣邏輯優劣。",
         "=" * 66,
     ]
-    print("\n".join(lines))
+    print("\n".join(l for l in lines if l))
     logger.info("回測完成")
 
 

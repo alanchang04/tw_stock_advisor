@@ -15,7 +15,7 @@ from sqlalchemy import text
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from database.connection import get_session
-from agent.strategy import STRATEGY, score_candidates
+from agent.strategy import STRATEGY, score_candidates, split_adjust
 
 
 # 排除非個股的產業類別（ETF、指數等）
@@ -36,25 +36,31 @@ def market_is_bull() -> bool:
     市場濾網：大盤代理（預設 0050）收盤 >= MA60 視為多頭。
     空頭時 daily_runner 不開新倉、出場加回死亡交叉（見 STRATEGY market_filter 區塊）。
     查無資料或未啟用時回傳 True（不阻擋）。
+
+    自行抓收盤序列並用 split_adjust() 還原後現算 MA60，不直接信任
+    technical_indicators.ma60——0050 這類 ETF 若曾分割/併股，原始收盤價會
+    出現單日假崩盤（見 2025-06-18 一分四實例），未還原的 MA60 會誤判成
+    連續數月空頭，錯誤觸發死亡交叉出場保護。
     """
     if not STRATEGY.get("market_filter"):
         return True
     sid = STRATEGY.get("market_filter_stock", "0050")
     try:
         with get_session() as s:
-            r = s.execute(text("""
-                SELECT p.close, t.ma60
-                FROM daily_prices p
-                JOIN technical_indicators t
-                  ON t.stock_id = p.stock_id AND t.trade_date = p.trade_date
-                WHERE p.stock_id = :sid AND t.ma60 IS NOT NULL
-                ORDER BY p.trade_date DESC LIMIT 1
-            """), {"sid": sid}).fetchone()
-        if r is None:
+            rows = s.execute(text("""
+                SELECT trade_date, close FROM daily_prices
+                WHERE stock_id = :sid AND close > 0
+                ORDER BY trade_date DESC LIMIT 90
+            """), {"sid": sid}).fetchall()
+        if len(rows) < 30:
             return True
-        bull = float(r[0]) >= float(r[1])
+        closes = pd.Series({r[0]: float(r[1]) for r in rows}).sort_index()
+        adj = split_adjust(closes)
+        ma60 = adj.rolling(60, min_periods=30).mean().iloc[-1]
+        last_close = adj.iloc[-1]
+        bull = last_close >= ma60
         if not bull:
-            logger.warning(f"市場濾網：{sid} 收盤 {float(r[0]):.2f} < MA60 {float(r[1]):.2f} → 空頭模式")
+            logger.warning(f"市場濾網：{sid} 還原後收盤 {last_close:.2f} < MA60 {ma60:.2f} → 空頭模式")
         return bull
     except Exception as e:
         logger.warning(f"市場濾網查詢失敗（視為多頭）: {e}")

@@ -92,6 +92,37 @@ STRATEGY = {
 
 
 # ══════════════════════════════════════════════════════════════════
+#  市場濾網用：股票分割/合併還原
+#  台股單日漲跌幅限制 ±10%，任何單日變動超過此值只可能是分割/減資等公司行動
+#  或資料錯誤，不可能是真實交易。market_filter_stock（預設0050）若曾分割，
+#  原始收盤價會出現假崩盤，汙染 MA60 導致誤判空頭（見 2025-06-18 0050 一分四實例）。
+#  這裡只還原「濾網代理股」自己的序列，不動 daily_prices 原始資料，也不影響
+#  一般個股的技術指標（那是更大範圍的資料品質工程，此處不處理）。
+# ══════════════════════════════════════════════════════════════════
+SPLIT_JUMP_THRESHOLD = 0.20   # 單日變動超過 20%（遠高於漲跌限制）視為分割/資料異常
+
+def split_adjust(closes: pd.Series) -> pd.Series:
+    """
+    依日期排序的收盤價序列，偵測單日 |漲跌幅| > SPLIT_JUMP_THRESHOLD 的斷點，
+    將斷點前的價格整批乘上調整係數，讓序列在分割前後可比（後復權）。
+    單一離群的一日錯誤（隔天就跳回）也會被同一機制吸收成一段極短的整段調整，
+    不影響鄰近正常區間。
+    """
+    s = closes.dropna().sort_index()
+    if len(s) < 2:
+        return closes
+    ratio = s / s.shift(1)
+    jumps = ratio[(ratio < 1 - SPLIT_JUMP_THRESHOLD) | (ratio > 1 + SPLIT_JUMP_THRESHOLD)]
+    if jumps.empty:
+        return closes
+    adj = pd.Series(1.0, index=s.index)
+    for jump_date, r in jumps.items():
+        adj.loc[:jump_date] *= r
+        adj.loc[jump_date] = 1.0   # 斷點當天本身已是新基準，不重複調整
+    return (closes * adj.reindex(closes.index).ffill().bfill()).where(closes.notna())
+
+
+# ══════════════════════════════════════════════════════════════════
 #  進場評分
 # ══════════════════════════════════════════════════════════════════
 def score_candidates(df: pd.DataFrame, cfg: dict = STRATEGY) -> pd.Series:
