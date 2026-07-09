@@ -28,7 +28,8 @@ from database.connection import get_session
 from agent.stock_selector import (
     EXCLUDE_INDUSTRIES, MIN_RSI, MAX_RSI, MIN_CLOSE, MIN_VOLUME,
 )
-from agent.strategy import STRATEGY, score_candidates, decide_exit, split_adjust
+from agent.strategy import (STRATEGY, score_candidates, decide_exit, split_adjust,
+                            compute_factor_matrices)
 
 # ── 交易成本（台股現股）──────────────────────────────────────────
 # 2026-07-09：用使用者元大帳戶 4 筆真實成交手續費反推折數（見對話紀錄），
@@ -122,46 +123,19 @@ def _normalize(s: pd.Series) -> pd.Series:
     return (s - s.min()) / rng if rng else pd.Series(0.5, index=s.index)
 
 
-def _consecutive_true(df_bool: pd.DataFrame) -> pd.DataFrame:
-    """逐欄計算「至當列為止連續 True 的天數」（向量化，供多頭排列/投信連買用）。"""
-    csum = df_bool.cumsum()
-    reset = csum.where(~df_bool).ffill().fillna(0)
-    return (csum - reset).where(df_bool, 0)
-
-
 # ── 趨勢/題材因子矩陣（一次算好，供每個再平衡日 O(1) 查表）──────────
-#   這些是 2026-07-09 選股重構新增的「可回測」因子：
-#   相對強度、多頭排列持續、投信連買——取代原本只認「今天剛發生訊號」的
-#   單日技術面 event flags（見 docs/TRADING_LOGIC.md 第十、十一節）。
-MIN_INVEST_STREAK_LOTS = 100   # 投信連買至少累計 100 張才算數（沿用 smart_money 的量體下限）
-
+#   2026-07-09 選股重構新增的「可回測」因子：相對強度、多頭排列持續、投信連買，
+#   取代原本只認「今天剛發生訊號」的單日技術面 event flags。
+#   實際計算在 strategy.compute_factor_matrices（回測與即時選股共用同一份）。
 def _precompute_factors(data: dict) -> None:
     closes = data["_closes"]
-    idx, cols = closes.index, closes.columns
     tech = data["tech"]
-    def _piv(v):   # 對齊到 closes 的 index/columns，避免三個 MA 欄位集不同無法比較
-        return tech.pivot_table(index="trade_date", columns="stock_id", values=v) \
-                   .reindex(index=idx, columns=cols)
-    ma5p, ma20p, ma60p = _piv("ma5"), _piv("ma20"), _piv("ma60")
-
-    # 相對強度：20 日報酬在「全市場當日」的百分位排名（0~1，越強越高）
-    ret20 = closes / closes.shift(20) - 1
-    data["_rs20"] = ret20.rank(axis=1, pct=True)
-
-    # 多頭排列持續天數：MA5>MA20>MA60 連續成立幾天（抓「已確認的強勢趨勢」，非今天剛交叉）
-    stack = ((ma5p > ma20p) & (ma20p > ma60p)).fillna(False)
-    data["_stack_days"] = _consecutive_true(stack)
-
-    # 投信連買：連續淨買超天數（需累計量體達門檻才算，濾掉一天只買 2~3 張的雜訊）
+    ma5p  = tech.pivot_table(index="trade_date", columns="stock_id", values="ma5")
+    ma20p = tech.pivot_table(index="trade_date", columns="stock_id", values="ma20")
+    ma60p = tech.pivot_table(index="trade_date", columns="stock_id", values="ma60")
     invest = data["inst"].pivot_table(index="trade_date", columns="stock_id", values="invest_net")
-    invest = invest.reindex(index=idx, columns=cols)
-    is_pos = invest > 0
-    streak = _consecutive_true(is_pos.fillna(False))
-    pos_only = invest.where(is_pos, 0.0)
-    csum = pos_only.cumsum()
-    reset_val = csum.where(~is_pos.fillna(False)).ffill().fillna(0.0)
-    streak_lots = ((csum - reset_val).where(is_pos, 0.0)) / 1000.0   # 股→張
-    data["_inv_streak"] = streak.where(streak_lots >= MIN_INVEST_STREAK_LOTS, 0)
+    data["_rs20"], data["_stack_days"], data["_inv_streak"] = \
+        compute_factor_matrices(closes, ma5p, ma20p, ma60p, invest)
 
 
 # ── 某日（含當天）為止的熱門族群 ─────────────────────────────────

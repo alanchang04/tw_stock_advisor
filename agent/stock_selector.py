@@ -15,7 +15,8 @@ from sqlalchemy import text
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from database.connection import get_session
-from agent.strategy import STRATEGY, score_candidates, split_adjust
+from agent.strategy import (STRATEGY, score_candidates, split_adjust,
+                            compute_factor_matrices)
 
 
 # 排除非個股的產業類別（ETF、指數等）
@@ -109,37 +110,84 @@ def get_hot_sectors(top_n: int = 5, min_stocks: int = 10) -> list[str]:
     return hot["industry_code"].tolist()
 
 
+def _live_factor_maps(cfg: dict) -> dict:
+    """
+    即時算出「今天」的趨勢/題材因子（相對強度 rs20、多頭排列持續 stack_days、
+    投信連買 invest_streak），回傳 {因子名: {stock_id: 值}}。與回測共用
+    strategy.compute_factor_matrices，確保線上=回測。載入近 70 個交易日即足夠
+    （rs20 需 21 天、stack/streak 有封頂，載多也只是取最後一列）。
+    """
+    with get_session() as session:
+        px = pd.DataFrame(session.execute(text("""
+            SELECT stock_id, trade_date, close FROM daily_prices
+            WHERE trade_date >= (SELECT MIN(trade_date) FROM (
+                SELECT DISTINCT trade_date FROM daily_prices ORDER BY trade_date DESC LIMIT 70) d)
+              AND close > 0
+        """)).fetchall(), columns=["stock_id", "trade_date", "close"])
+        tk = pd.DataFrame(session.execute(text("""
+            SELECT stock_id, trade_date, ma5, ma20, ma60 FROM technical_indicators
+            WHERE trade_date >= (SELECT MIN(trade_date) FROM (
+                SELECT DISTINCT trade_date FROM technical_indicators ORDER BY trade_date DESC LIMIT 70) d)
+        """)).fetchall(), columns=["stock_id", "trade_date", "ma5", "ma20", "ma60"])
+        it = pd.DataFrame(session.execute(text("""
+            SELECT stock_id, trade_date, invest_net FROM institutional_trading
+            WHERE trade_date >= (SELECT MIN(trade_date) FROM (
+                SELECT DISTINCT trade_date FROM institutional_trading ORDER BY trade_date DESC LIMIT 70) d)
+        """)).fetchall(), columns=["stock_id", "trade_date", "invest_net"])
+    if px.empty:
+        return {"rs20": {}, "stack_days": {}, "invest_streak": {}}
+    for d in (px, tk, it):
+        for c in d.columns:
+            if c not in ("stock_id", "trade_date"):
+                d[c] = pd.to_numeric(d[c], errors="coerce")
+    closes = px.pivot_table(index="trade_date", columns="stock_id", values="close").where(lambda x: x > 0)
+    ma5p  = tk.pivot_table(index="trade_date", columns="stock_id", values="ma5")
+    ma20p = tk.pivot_table(index="trade_date", columns="stock_id", values="ma20")
+    ma60p = tk.pivot_table(index="trade_date", columns="stock_id", values="ma60")
+    invest = it.pivot_table(index="trade_date", columns="stock_id", values="invest_net")
+    rs20, stack_days, inv_streak = compute_factor_matrices(closes, ma5p, ma20p, ma60p, invest)
+    last = closes.index.max()
+    return {
+        "rs20":          rs20.loc[last].to_dict() if last in rs20.index else {},
+        "stack_days":    stack_days.loc[last].to_dict() if last in stack_days.index else {},
+        "invest_streak": inv_streak.loc[last].to_dict() if last in inv_streak.index else {},
+    }
+
+
 def get_candidate_stocks(
     industry_codes: list[str],
     top_n: int = 20,
+    cfg: dict = None,
 ) -> pd.DataFrame:
     """
-    從熱門產業中篩選技術面 + 籌碼面正面的候選股票
+    篩選候選股票。cfg["use_hot_sector_gate"] 為 True 時只從熱門族群選（舊行為），
+    為 False 時全市場都是候選、讓相對強度/題材評分自己排序（2026-07-09 趨勢版選股）。
     """
-    if not industry_codes:
+    cfg = cfg or STRATEGY
+    use_gate = cfg.get("use_hot_sector_gate", True)
+    if use_gate and not industry_codes:
         return pd.DataFrame()
 
-    # 最近交易日
-    recent_date = date.today() - timedelta(days=5)
+    min_rsi = cfg.get("min_rsi", MIN_RSI)
+    max_rsi = cfg.get("max_rsi", MAX_RSI)
 
-    placeholders = ",".join([f"'{c}'" for c in industry_codes])
+    # 候選池：有加族群硬閘門就用 stock_industry_map 過濾，否則全市場（一檔取一個產業名顯示）
+    gate_clause = ""
+    if use_gate:
+        placeholders = ",".join([f"'{c}'" for c in industry_codes])
+        gate_clause = f"AND m.industry_code IN ({placeholders})"
 
     with get_session() as session:
         result = session.execute(text(f"""
-            SELECT
+            SELECT DISTINCT ON (s.stock_id)
                 s.stock_id,
                 s.stock_name,
                 i.name_zh        AS industry,
                 p.close,
                 p.change_pct,
                 p.volume,
-                t.ma5,
-                t.ma20,
-                t.ma60,
-                t.rsi14,
-                t.macd_hist,
-                t.signal_ma_cross,
-                t.signal_breakout,
+                t.ma5, t.ma20, t.ma60, t.rsi14, t.macd_hist,
+                t.signal_ma_cross, t.signal_breakout,
                 COALESCE(inst.total_net, 0)   AS inst_net,
                 COALESCE(inst.foreign_net, 0) AS foreign_net
             FROM stock_industry_map m
@@ -154,17 +202,17 @@ def get_candidate_stocks(
                 AND t.trade_date = p.trade_date
             LEFT JOIN institutional_trading inst ON inst.stock_id = m.stock_id
                 AND inst.trade_date = p.trade_date
-            WHERE m.industry_code IN ({placeholders})
-            AND p.close >= :min_close
+            WHERE p.close >= :min_close
             AND p.volume >= :min_volume
             AND t.rsi14 BETWEEN :min_rsi AND :max_rsi
             AND t.ma5 IS NOT NULL
             AND t.ma20 IS NOT NULL
+            {gate_clause}
         """), {
             "min_close":  MIN_CLOSE,
             "min_volume": MIN_VOLUME,
-            "min_rsi":    MIN_RSI,
-            "max_rsi":    MAX_RSI,
+            "min_rsi":    min_rsi,
+            "max_rsi":    max_rsi,
         })
         rows = result.fetchall()
         cols = list(result.keys())
@@ -174,6 +222,14 @@ def get_candidate_stocks(
         return pd.DataFrame()
 
     df = pd.DataFrame(rows, columns=cols)
+
+    # 趨勢/題材因子（相對強度/多頭排列持續/投信連買）——與回測共用同一份計算
+    try:
+        fmaps = _live_factor_maps(cfg)
+        for col in ("rs20", "stack_days", "invest_streak"):
+            df[col] = df["stock_id"].map(fmaps[col])
+    except Exception as e:
+        logger.warning(f"趨勢/題材因子計算失敗（略過此因子）: {e}")
 
     # 60 日動能：取 60 個交易日前的收盤，算區間報酬（候選池內相對排名進評分）
     try:
@@ -209,12 +265,12 @@ def get_candidate_stocks(
         logger.warning(f"月營收因子讀取失敗（略過）: {e}")
 
     # 綜合評分：統一使用 strategy.score_candidates（與回測共用同一份邏輯）
-    df["score"] = score_candidates(df)
+    df["score"] = score_candidates(df, cfg)
 
     df = df.sort_values("score", ascending=False)
     candidates = df.head(top_n).reset_index(drop=True)
 
-    logger.info(f"篩選出 {len(candidates)} 支候選股票")
+    logger.info(f"篩選出 {len(candidates)} 支候選股票（{'族群閘門' if use_gate else '全市場趨勢/題材'}）")
     return candidates
 
 

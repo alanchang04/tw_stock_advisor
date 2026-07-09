@@ -65,10 +65,14 @@ def run_daily_recommendation(with_entries: bool = True):
             with_entries = False
 
     if with_entries:
-        # Step 3: 取熱門產業 + 篩選候選股票
+        # Step 3: 篩選候選股票（趨勢版選股不用族群硬閘門；熱門族群仍供 LLM 參考）
         logger.info("Step 3 — 篩選候選股票")
+        from agent.strategy import STRATEGY as _ST
         hot_sectors = get_hot_sectors(top_n=5, min_stocks=10)
-        candidates = get_candidate_stocks(hot_sectors, top_n=20) if hot_sectors else None
+        if _ST.get("use_hot_sector_gate", True):
+            candidates = get_candidate_stocks(hot_sectors, top_n=20) if hot_sectors else None
+        else:
+            candidates = get_candidate_stocks(hot_sectors, top_n=20)
 
         if candidates is not None and not candidates.empty:
             logger.info("Step 4 — 呼叫 LLM 產生推薦")

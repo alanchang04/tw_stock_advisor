@@ -20,27 +20,29 @@ import pandas as pd
 # ══════════════════════════════════════════════════════════════════
 STRATEGY = {
     # ── 進場：候選池過濾 ──
-    "min_rsi": 40, "max_rsi": 75,
+    # 2026-07-09 選股重構（趨勢版）：RSI 上限放寬到 90（動能股最強時 RSI 常 >75，
+    # 舊上限反而在最強勢時把它踢出），且關掉熱門族群硬閘門讓全市場都是候選。
+    "min_rsi": 40, "max_rsi": 90,
     "min_close": 10, "min_volume": 500,    # 張
     "hot_sectors_top_n": 5, "sector_min_stocks": 10,
-    "use_hot_sector_gate": True,           # 舊行為：只從熱門前 N 族群選股（硬閘門）
+    "use_hot_sector_gate": False,          # False=全市場趨勢/題材選股（趨勢版，回測勝出）；True=舊的族群硬閘門
     "pick_top_n": 5,                        # 每次買進檔數
 
-    # ── 進場：評分權重 ──
-    "w_ma_cross":  2.0,    # 均線黃金交叉（單日事件旗標，選股重構後在新 cfg 降為 0）
-    "w_breakout":  2.0,    # 突破 20 日高（單日事件旗標，同上）
-    "w_macd_pos":  1.0,    # MACD 柱 > 0
-    "w_inst_buy":  1.5,    # 三大法人買超（當日）
+    # ── 進場：評分權重（2026-07-09 趨勢版；walk-forward 回測全期 +71.8% vs 舊版 +16.8%）──
+    # 核心＝趨勢/相對強度，題材（投信連買）為輔；技術面單日事件旗標降為 0（只用於進出場）。
+    "w_ma_cross":  0.0,    # 均線黃金交叉（單日事件旗標，選股重構後降為 0——只認「今天剛交叉」會漏掉整年強勢股）
+    "w_breakout":  0.0,    # 突破 20 日高（單日事件旗標，同上）
+    "w_macd_pos":  0.0,    # MACD 柱 > 0（單日狀態，降為 0）
+    "w_inst_buy":  0.0,    # 三大法人「當日」買超（雜訊大，改用下面的投信連買 w_invest_streak）
     "w_foreign_buy": 1.0,  # 外資買超
-    "w_rsi_sweet": 1.0,    # RSI 落在 50~65
-    "w_momentum":  2.0,    # 60日動能相對排名（0~1 百分位）——強者恆強因子
+    "w_rsi_sweet": 0.0,    # RSI 落在 50~65（與追強勢股矛盾，降為 0）
+    "w_momentum":  1.5,    # 60日動能相對排名（0~1 百分位）——強者恆強因子
     "w_rev_yoy":   1.0,    # 月營收年增 >0（FinLab 式營收動能，來源 MOPS）
     "w_rev_accel": 0.5,    # 月營收年增 >20%（高成長加碼）
-    # 2026-07-09 選股重構新增因子（STRATEGY 預設 0，不影響尚未升級的即時路徑；
-    # 由實驗用的 cfg_trend/cfg_flow 開啟，回測比較後再決定要不要寫進 STRATEGY）：
-    "w_rs":           0.0,  # 相對強度（20 日報酬全市場百分位）——趨勢核心，抓「強勢股」
-    "w_trend_stack":  0.0,  # 多頭排列 MA5>MA20>MA60 持續天數——抓「已確認的趨勢」非今天剛交叉
-    "w_invest_streak": 0.0, # 投信連續買超（含量體門檻）——「題材代理」，追大戶的錢
+    # 2026-07-09 選股重構新增的可回測因子（趨勢版核心）：
+    "w_rs":           3.0,  # 相對強度（20 日報酬全市場百分位）——趨勢核心，抓「強勢股」
+    "w_trend_stack":  2.0,  # 多頭排列 MA5>MA20>MA60 持續天數——抓「已確認的趨勢」非今天剛交叉
+    "w_invest_streak": 1.5, # 投信連續買超（含量體門檻）——「題材代理」，追大戶的錢
 
     # ── 市場濾網（regime filter）──
     # 大盤代理（0050 收盤 vs MA60）：空頭時 (a) 不開新倉 (b) 出場加回死亡交叉保護
@@ -136,6 +138,49 @@ def split_adjust(closes: pd.Series) -> pd.Series:
         adj.loc[:jump_date] *= r
         adj.loc[jump_date] = 1.0   # 斷點當天本身已是新基準，不重複調整
     return (closes * adj.reindex(closes.index).ffill().bfill()).where(closes.notna())
+
+
+# ══════════════════════════════════════════════════════════════════
+#  趨勢/題材因子（可回測）——回測與即時選股共用同一份計算，確保線上=回測
+#  輸入都是「日期 × 股票」的 pivot（index=日期、columns=股票代號）
+# ══════════════════════════════════════════════════════════════════
+MIN_INVEST_STREAK_LOTS = 100   # 投信連買至少累計 100 張才算數（沿用 smart_money 的量體下限）
+
+def _consecutive_true(df_bool: pd.DataFrame) -> pd.DataFrame:
+    """逐欄計算「至當列為止連續 True 的天數」（向量化，供多頭排列/投信連買用）。"""
+    csum = df_bool.cumsum()
+    reset = csum.where(~df_bool).ffill().fillna(0)
+    return (csum - reset).where(df_bool, 0)
+
+
+def compute_factor_matrices(closes, ma5p, ma20p, ma60p, invest):
+    """
+    回傳 (rs20, stack_days, inv_streak) 三個「日期 × 股票」矩陣：
+      rs20        — 20 日報酬在全市場當日的百分位（0~1，越強越高）
+      stack_days  — MA5>MA20>MA60 多頭排列連續成立天數
+      inv_streak  — 投信連續淨買超天數（需累計量體 ≥ MIN_INVEST_STREAK_LOTS 才算）
+    所有輸入對齊到 closes 的 index/columns。
+    """
+    idx, cols = closes.index, closes.columns
+    ma5p  = ma5p.reindex(index=idx, columns=cols)
+    ma20p = ma20p.reindex(index=idx, columns=cols)
+    ma60p = ma60p.reindex(index=idx, columns=cols)
+    invest = invest.reindex(index=idx, columns=cols)
+
+    ret20 = closes / closes.shift(20) - 1
+    rs20 = ret20.rank(axis=1, pct=True)
+
+    stack = ((ma5p > ma20p) & (ma20p > ma60p)).fillna(False)
+    stack_days = _consecutive_true(stack)
+
+    is_pos = invest > 0
+    streak = _consecutive_true(is_pos.fillna(False))
+    pos_only = invest.where(is_pos, 0.0)
+    csum = pos_only.cumsum()
+    reset_val = csum.where(~is_pos.fillna(False)).ffill().fillna(0.0)
+    streak_lots = ((csum - reset_val).where(is_pos, 0.0)) / 1000.0   # 股→張
+    inv_streak = streak.where(streak_lots >= MIN_INVEST_STREAK_LOTS, 0)
+    return rs20, stack_days, inv_streak
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -380,8 +425,9 @@ def decide_exit(
                     and vol >= avg * vol_ratio:
                 return True, f"長上引線爆量(上影{upper_wick/candle_range*100:.0f}%,量{vol/avg:.1f}x)"
 
-    # ── 12. 持有到期 ───────────────────────────────────────────
-    if holding_days >= cfg["max_hold_days"]:
-        return True, f"持有到期({cfg['max_hold_days']}日)"
+    # ── 12. 持有到期（max_hold_days 設 0 或 None → 關閉，讓趨勢股靠移動停利自然出場）──
+    mhd = cfg.get("max_hold_days")
+    if mhd and holding_days >= mhd:
+        return True, f"持有到期({mhd}日)"
 
     return False, None
