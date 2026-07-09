@@ -23,7 +23,7 @@ from sqlalchemy import text
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from database.connection import get_session
-from agent.strategy import decide_exit, STRATEGY
+from agent.strategy import decide_exit, active_trail_giveback, STRATEGY
 from agent.portfolio import _recent_rows, exit_cfg
 
 
@@ -124,11 +124,21 @@ def advise_manual_positions(target_date: date = None) -> str | None:
                           f"趨勢未壞（損益 {gain*100:+.1f}%）")
                 alerts.append(f"  {sid} {name}{tag}：{advice}")
             else:
-                # 3) 續抱：附距停損/停利
+                # 3) 續抱：附距停損/移動停利（固定停利已預設關閉，改用分級移動停利）
                 dist_sl = (close / (entry_price * (1 - STRATEGY["stop_loss"])) - 1) * 100
-                dist_tp = (entry_price * (1 + STRATEGY["take_profit"]) / close - 1) * 100
+                peak_gain = peak / entry_price - 1
+                giveback = active_trail_giveback(peak_gain, cfg)
+                if giveback is not None:
+                    trigger_price = peak * (1 - giveback)
+                    dist_trail = (close / trigger_price - 1) * 100
+                    tp_note = f"距移動停利 +{dist_trail:.1f}%（回落{giveback*100:.0f}%出場，峰值{peak:.2f}）"
+                else:
+                    tiers = cfg.get("trail_tiers") or [(cfg.get("trail_activate", 0.10), 0)]
+                    first_threshold = min(t[0] for t in tiers)
+                    dist_activate = (entry_price * (1 + first_threshold) / close - 1) * 100
+                    tp_note = f"距啟動移動停利 +{dist_activate:.1f}%"
                 advice = (f"✅ 續抱（損益 {gain*100:+.1f}%，"
-                          f"距停損 -{dist_sl:.1f}%，距停利 +{dist_tp:.1f}%）")
+                          f"距停損 -{dist_sl:.1f}%，{tp_note}）")
 
         with get_session() as s:
             s.execute(text("""

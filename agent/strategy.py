@@ -52,9 +52,19 @@ STRATEGY = {
 
     # ── 出場規則：基本 ──
     "stop_loss":      0.08,   # 自進場價跌 8% → 停損
-    "take_profit":    0.30,   # 獲利達 30% → 停利（2026-07 消融測試：25%→30% 平均淨 +2.67→+2.89%）
-    "trail_activate": 0.10,   # 漲超過 10% 後啟動移動停利
-    "trail_stop":     0.08,   # 從最高點回落 8% → 出場
+    "take_profit":    0.30,   # 固定停利門檻（僅 exit_fixed_take_profit=True 時生效，供消融對照用）
+    "exit_fixed_take_profit": False,
+    # 2026-07-09 使用者要求關閉：台股常見「噴出→整理→再噴出」（如南亞科/欣興同期
+    # +530~640%），固定停利到價就出場會錯過後面的大波段。改用下面的分級移動停利，
+    # 讓真正的大行情抱得住，同時獲利越大、保護的獲利也越多（回落容忍度隨峰值獲利放寬）。
+    "trail_activate": 0.10,   # 沿用：分級移動停利第一層的啟動門檻（trail_tiers 沒設定時的預設值）
+    "trail_stop":     0.08,   # 沿用：第一層的回落容忍度
+    "trail_tiers": [
+        (0.10, 0.08),   # 峰值獲利 ≥10% → 回落 8% 出場（原本行為，小賺先保護本金）
+        (0.40, 0.15),   # 峰值獲利 ≥40% → 回落 15%（波段整理常見拉回，別被洗出場）
+        (1.00, 0.20),   # 峰值獲利 ≥100% → 回落 20%
+        (2.00, 0.25),   # 峰值獲利 ≥200% → 回落 25%（飆股級別，留更大空間抱住整理）
+    ],
     "max_hold_days":  40,     # 持有超過 40 個交易日 → 到期出場
 
     # ── 出場規則：均線 ──
@@ -185,6 +195,19 @@ def format_size(shares: int) -> str:
 # ══════════════════════════════════════════════════════════════════
 #  出場輔助函式
 # ══════════════════════════════════════════════════════════════════
+def active_trail_giveback(peak_gain: float, cfg: dict = STRATEGY) -> float | None:
+    """
+    依「峰值獲利」查目前生效的移動停利回落容忍度（分級：獲利越大，容忍拉回越寬）。
+    peak_gain 未達最低一層門檻時回傳 None（移動停利尚未啟動）。
+    """
+    tiers = cfg.get("trail_tiers") or [(cfg.get("trail_activate", 0.10), cfg.get("trail_stop", 0.08))]
+    active = None
+    for threshold, giveback in sorted(tiers, key=lambda t: t[0]):
+        if peak_gain >= threshold:
+            active = giveback
+    return active
+
+
 def _find_swing_low(history: list[dict], window: int, lookback: int) -> float | None:
     """
     在 history（oldest→newest）中往回找最近一個「前波低點」樞紐。
@@ -242,14 +265,14 @@ def decide_exit(
 
     gain = (close / entry_price - 1) if entry_price else 0.0
 
-    # ── 2. 固定停利 ────────────────────────────────────────────
-    if gain >= cfg["take_profit"]:
+    # ── 2. 固定停利（預設關閉，見 STRATEGY["exit_fixed_take_profit"] 說明）────
+    if cfg.get("exit_fixed_take_profit") and gain >= cfg["take_profit"]:
         return True, f"停利(+{cfg['take_profit']*100:.0f}%)"
 
-    # ── 3. 移動停利 ────────────────────────────────────────────
+    # ── 3. 分級移動停利：峰值獲利越大，容忍的拉回越寬，才抱得住噴出後整理的大波段
     peak_gain = (peak_price / entry_price - 1) if entry_price else 0.0
-    if peak_gain >= cfg["trail_activate"] and peak_price and \
-            close <= peak_price * (1 - cfg["trail_stop"]):
+    giveback = active_trail_giveback(peak_gain, cfg)
+    if giveback is not None and peak_price and close <= peak_price * (1 - giveback):
         return True, "移動停利(回落)"
 
     # ── 4. KD 高檔死叉 + MACD 同步轉負 ───────────────────────
