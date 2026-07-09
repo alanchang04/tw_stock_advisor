@@ -23,18 +23,24 @@ STRATEGY = {
     "min_rsi": 40, "max_rsi": 75,
     "min_close": 10, "min_volume": 500,    # 張
     "hot_sectors_top_n": 5, "sector_min_stocks": 10,
+    "use_hot_sector_gate": True,           # 舊行為：只從熱門前 N 族群選股（硬閘門）
     "pick_top_n": 5,                        # 每次買進檔數
 
     # ── 進場：評分權重 ──
-    "w_ma_cross":  2.0,    # 均線黃金交叉
-    "w_breakout":  2.0,    # 突破 20 日高
+    "w_ma_cross":  2.0,    # 均線黃金交叉（單日事件旗標，選股重構後在新 cfg 降為 0）
+    "w_breakout":  2.0,    # 突破 20 日高（單日事件旗標，同上）
     "w_macd_pos":  1.0,    # MACD 柱 > 0
-    "w_inst_buy":  1.5,    # 三大法人買超
+    "w_inst_buy":  1.5,    # 三大法人買超（當日）
     "w_foreign_buy": 1.0,  # 外資買超
     "w_rsi_sweet": 1.0,    # RSI 落在 50~65
     "w_momentum":  2.0,    # 60日動能相對排名（0~1 百分位）——強者恆強因子
     "w_rev_yoy":   1.0,    # 月營收年增 >0（FinLab 式營收動能，來源 MOPS）
     "w_rev_accel": 0.5,    # 月營收年增 >20%（高成長加碼）
+    # 2026-07-09 選股重構新增因子（STRATEGY 預設 0，不影響尚未升級的即時路徑；
+    # 由實驗用的 cfg_trend/cfg_flow 開啟，回測比較後再決定要不要寫進 STRATEGY）：
+    "w_rs":           0.0,  # 相對強度（20 日報酬全市場百分位）——趨勢核心，抓「強勢股」
+    "w_trend_stack":  0.0,  # 多頭排列 MA5>MA20>MA60 持續天數——抓「已確認的趨勢」非今天剛交叉
+    "w_invest_streak": 0.0, # 投信連續買超（含量體門檻）——「題材代理」，追大戶的錢
 
     # ── 市場濾網（regime filter）──
     # 大盤代理（0050 收盤 vs MA60）：空頭時 (a) 不開新倉 (b) 出場加回死亡交叉保護
@@ -138,22 +144,44 @@ def split_adjust(closes: pd.Series) -> pd.Series:
 def score_candidates(df: pd.DataFrame, cfg: dict = STRATEGY) -> pd.Series:
     """
     輸入：含 signal_ma_cross, signal_breakout, macd_hist, inst_net,
-          foreign_net, rsi14 欄位的 DataFrame
-    輸出：每列的分數 Series
+          foreign_net, rsi14 欄位的 DataFrame（趨勢/題材因子 rs20/stack_days/
+          invest_streak 為選配，有欄位才計分）。
+    輸出：每列的分數 Series。
+
+    2026-07-09 選股重構：新增「趨勢」（相對強度 rs20、多頭排列持續 stack_days）
+    與「題材代理」（投信連買 invest_streak）三個可回測因子，用來取代原本主導
+    選股、卻只認「今天剛發生」的單日技術面 event flags（w_ma_cross/w_breakout）。
+    所有新因子與降權都由 cfg 權重控制，STRATEGY 預設維持舊值以免影響尚未升級的
+    即時路徑；實驗用的 cfg_trend/cfg_flow 才把新因子開起來、把 event flags 降為 0。
     """
     s = pd.Series(0.0, index=df.index)
-    s += df["signal_ma_cross"].clip(0, 1).astype(float) * cfg["w_ma_cross"]
-    s += df["signal_breakout"].clip(0, 1).astype(float) * cfg["w_breakout"]
-    s += (df["macd_hist"] > 0).astype(float) * cfg["w_macd_pos"]
-    s += (df["inst_net"] > 0).astype(float) * cfg["w_inst_buy"]
-    s += (df["foreign_net"] > 0).astype(float) * cfg["w_foreign_buy"]
-    s += ((df["rsi14"] >= 50) & (df["rsi14"] <= 65)).astype(float) * cfg["w_rsi_sweet"]
-    # 60 日動能：候選池內相對排名（0~1），有欄位才計（回測與正式選股都會提供）
+    # ── 技術面單日事件旗標（選股重構後在新 cfg 中降權為 0，只保留給進出場/舊設定）──
+    s += df["signal_ma_cross"].clip(0, 1).astype(float) * cfg.get("w_ma_cross", 0)
+    s += df["signal_breakout"].clip(0, 1).astype(float) * cfg.get("w_breakout", 0)
+    s += (df["macd_hist"] > 0).astype(float) * cfg.get("w_macd_pos", 0)
+    s += (df["inst_net"] > 0).astype(float) * cfg.get("w_inst_buy", 0)
+    s += (df["foreign_net"] > 0).astype(float) * cfg.get("w_foreign_buy", 0)
+    s += ((df["rsi14"] >= 50) & (df["rsi14"] <= 65)).astype(float) * cfg.get("w_rsi_sweet", 0)
+
+    # ── 趨勢：相對強度（20 日報酬全市場百分位，0~1，已預算好直接用）──
+    if "rs20" in df.columns and cfg.get("w_rs", 0) > 0:
+        rs = pd.to_numeric(df["rs20"], errors="coerce")
+        s += rs.fillna(0.0) * cfg["w_rs"]
+    # ── 趨勢：多頭排列持續天數（MA5>MA20>MA60 連續幾天，20 日封頂做 0~1 飽和）──
+    if "stack_days" in df.columns and cfg.get("w_trend_stack", 0) > 0:
+        sd = pd.to_numeric(df["stack_days"], errors="coerce").fillna(0)
+        s += (sd.clip(0, 20) / 20.0) * cfg["w_trend_stack"]
+    # ── 題材代理：投信連買（連續買超天數，已含量體門檻，5 日封頂做 0~1 飽和）──
+    if "invest_streak" in df.columns and cfg.get("w_invest_streak", 0) > 0:
+        st = pd.to_numeric(df["invest_streak"], errors="coerce").fillna(0)
+        s += (st.clip(0, 5) / 5.0) * cfg["w_invest_streak"]
+
+    # ── 60 日動能：候選池內相對排名（0~1），有欄位才計（回測與正式選股都會提供）──
     if "mom60" in df.columns and cfg.get("w_momentum", 0) > 0:
         mom = pd.to_numeric(df["mom60"], errors="coerce")
         if mom.notna().sum() >= 2:
             s += mom.rank(pct=True).fillna(0.5) * cfg["w_momentum"]
-    # 月營收年增（缺資料 = 0 分，不懲罰）
+    # ── 月營收年增（缺資料 = 0 分，不懲罰）──
     if "rev_yoy" in df.columns:
         yoy = pd.to_numeric(df["rev_yoy"], errors="coerce")
         s += (yoy > 0).fillna(False).astype(float) * cfg.get("w_rev_yoy", 0)
