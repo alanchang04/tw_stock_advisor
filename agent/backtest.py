@@ -38,6 +38,14 @@ from agent.strategy import (STRATEGY, score_candidates, decide_exit, split_adjus
 FEE_RATE = 0.001425 * 0.58   # 券商手續費 14.25bp × 58折（買賣各收一次，實測反推）
 TAX_RATE = 0.003             # 證交稅 30bp（僅賣出時收，政府統一費率與券商無關）
 
+# ── 成交假設（2026-07-09 階段0 修正）────────────────────────────
+# 舊版用「決策當日收盤價」成交，但 pipeline 是收盤後（20:00~22:30）才算出訊號，
+# 那個收盤價早已成交完畢、根本買不到——這不是前視偏誤（訊號只用已知資料），
+# 而是「無法實現的成交價假設」。改為：今日收盤決定 → 隔日開盤成交。
+# SLIPPAGE 為單邊滑價假設（開盤是一天波動最大的時段；中小型動能股實際更差），
+# 待階段3 用實盤成交回報校準。可用 run_backtest(slippage=) 做敏感度測試。
+SLIPPAGE = 0.001             # 單邊 10bp
+
 
 def net_return(entry_price: float, exit_price: float) -> float:
     """一買一賣扣除手續費+證交稅後的淨報酬。"""
@@ -54,10 +62,10 @@ def _load(parquet_dir: str | None = None) -> dict:
     with get_session() as s:
         prices = pd.DataFrame(
             s.execute(text("""
-                SELECT stock_id, trade_date, close, volume, change_pct
+                SELECT stock_id, trade_date, open, close, volume, change_pct
                 FROM daily_prices
             """)).fetchall(),
-            columns=["stock_id", "trade_date", "close", "volume", "change_pct"],
+            columns=["stock_id", "trade_date", "open", "close", "volume", "change_pct"],
         )
         tech = pd.DataFrame(
             s.execute(text("""
@@ -96,7 +104,7 @@ def _load(parquet_dir: str | None = None) -> dict:
 
     # 型別整理：DB 的 NUMERIC → float
     for df, cols in [
-        (prices, ["close", "volume", "change_pct"]),
+        (prices, ["open", "close", "volume", "change_pct"]),
         (tech, ["ma5", "ma20", "ma60", "rsi14", "macd_hist", "signal_ma_cross", "signal_breakout"]),
         (inst, ["total_net", "foreign_net", "invest_net"]),
     ]:
@@ -341,7 +349,7 @@ def _candidates_asof(data, d, industry_codes, top_n=5, cfg=None):
 
 # ── 主回測：真實進出場（round-trip）─────────────────────────────
 def run_backtest(top_n=None, rebalance=5, cfg=None, data=None, quiet=False,
-                 start_date=None, end_date=None, parquet_dir=None):
+                 start_date=None, end_date=None, parquet_dir=None, slippage=SLIPPAGE):
     """
     模擬實際操作：再平衡日依評分進場，每日依 strategy 出場規則平倉，
     計算每筆完整交易(round-trip)的報酬、勝率、平均持有天數，並與買進持有比較。
@@ -351,6 +359,9 @@ def run_backtest(top_n=None, rebalance=5, cfg=None, data=None, quiet=False,
     quiet: True 時不印報告，只回傳交易 DataFrame
     start_date/end_date: 限制回測區間（walk-forward 分段用；datetime.date）
     parquet_dir: 給定時改讀本機 parquet 歷史資料（跨週期回測），不查 DB
+    slippage: 單邊滑價假設（預設 SLIPPAGE）；成交價＝隔日開盤 ×(1±slippage)
+
+    成交時序：今日收盤算訊號 → 隔日開盤成交（pipeline 收盤後才跑，當日收盤價買不到）。
     """
     cfg = cfg or STRATEGY
     top_n = top_n or cfg["pick_top_n"]
@@ -375,6 +386,10 @@ def run_backtest(top_n=None, rebalance=5, cfg=None, data=None, quiet=False,
         regime_bull = (mkt >= mkt.rolling(60, min_periods=30).mean()).fillna(True)
     bear_cfg = ({**cfg, "exit_on_death_cross": True}
                 if cfg.get("bear_reenable_death_cross") else cfg)
+
+    # 隔日開盤成交用的開盤價矩陣（對齊 closes 的 index/columns）
+    opens = data["prices"].pivot_table(index="trade_date", columns="stock_id", values="open")
+    opens = opens.where(opens > 0).reindex(index=closes.index, columns=closes.columns)
 
     tech = data["tech"]
     ma5p = tech.pivot_table(index="trade_date", columns="stock_id", values="ma5")
@@ -405,69 +420,91 @@ def run_backtest(top_n=None, rebalance=5, cfg=None, data=None, quiet=False,
     trades = []       # 完整交易紀錄
     cash = cfg["capital"]
     nav_curve = []    # (date, cash+持股市值) —— 真實資金受限的權益曲線，供公平期間比較用
+    # 掛單簿：今日收盤決定 → 隔日開盤成交（真實可執行的時序，見 SLIPPAGE 上方說明）
+    pending_entries: list[str] = []
+    pending_exits: list[tuple[str, str]] = []   # (stock_id, 出場原因)
+
+    def _record_exit(sid, p, fill, d_exit, i_exit, reason):
+        hold = i_exit - p["entry_i"]
+        trades.append({"stock_id": sid, "entry_date": p["entry_date"], "exit_date": d_exit,
+                       "ret": fill / p["entry_price"] - 1,
+                       "net_ret": net_return(p["entry_price"], fill),
+                       "hold": hold, "reason": reason})
+
     for i, d in enumerate(sim_dates):
         bull = True if regime_bull is None else bool(regime_bull.get(d, True))
         day_cfg = cfg if bull else bear_cfg
 
-        # 1) 先處理出場
-        for sid in list(open_pos.keys()):
+        # 1) 執行昨日決定的出場 —— 今日開盤價成交（扣單邊滑價）
+        unfilled_exits = []
+        for sid, reason in pending_exits:
+            p = open_pos.get(sid)
+            if p is None:
+                continue
+            op = val(opens, d, sid)
+            if op is None:            # 停牌/無開盤 → 明日再試
+                unfilled_exits.append((sid, reason))
+                continue
+            fill = op * (1 - slippage)
+            _record_exit(sid, p, fill, d, i, reason)
+            cash += p["shares"] * fill * (1 - FEE_RATE - TAX_RATE)
+            del open_pos[sid]
+        pending_exits = unfilled_exits
+
+        # 2) 執行昨日決定的進場 —— 今日開盤價成交（加單邊滑價）；未成交即取消不追價
+        for sid in pending_entries:
+            if len(open_pos) >= max_open or sid in open_pos:
+                continue
+            op = val(opens, d, sid)
+            if not op:
+                continue
+            fill = op * (1 + slippage)
+            shares = int(capital_per_slot // (fill * (1 + FEE_RATE)))
+            if shares <= 0 or cash < shares * fill * (1 + FEE_RATE):
+                continue
+            cash -= shares * fill * (1 + FEE_RATE)
+            open_pos[sid] = {"entry_date": d, "entry_price": fill, "peak": fill,
+                             "entry_i": i, "shares": shares}
+        pending_entries = []
+
+        # 3) 依今日收盤評估出場規則 → 掛到明日開盤成交
+        for sid, p in open_pos.items():
             close = val(closes, d, sid)
             if close is None:
                 continue
-            p = open_pos[sid]
             p["peak"] = max(p["peak"], close)
-            hold = i - p["entry_i"]
             ex, reason = decide_exit(p["entry_price"], p["peak"], close,
-                                     val(ma5p, d, sid), val(ma20p, d, sid), hold,
+                                     val(ma5p, d, sid), val(ma20p, d, sid), i - p["entry_i"],
                                      cfg=day_cfg)
-            if ex:
-                trades.append({"stock_id": sid, "entry_date": p["entry_date"], "exit_date": d,
-                               "ret": close / p["entry_price"] - 1,
-                               "net_ret": net_return(p["entry_price"], close),
-                               "hold": hold, "reason": reason})
-                cash += p["shares"] * close * (1 - FEE_RATE - TAX_RATE)
-                del open_pos[sid]
+            if ex and not any(s == sid for s, _ in pending_exits):
+                pending_exits.append((sid, reason))
 
-        # 2) 再平衡日進場（未持有者才買；濾網設 block_entries 時空頭不開新倉；
-        #    同時持倉數不得超過 max_open_positions —— 與 portfolio.record_entries()
-        #    的風控守門員一致，回測才是真的在模擬「max_open_positions=10」這條規則，
-        #    而不是無限制同時持倉）
+        # 4) 再平衡日：依今日收盤評分選股 → 掛到明日開盤進場
+        #    （持倉上限與 portfolio.record_entries() 的風控守門員一致）
         gi = pos_idx[d]
         entry_ok = bull or not cfg.get("market_filter_block_entries", False)
         if entry_ok and (gi - start_i) % rebalance == 0:
-            free_slots = max_open - len(open_pos)
+            free_slots = max_open - len(open_pos) - len(pending_entries) + len(pending_exits)
             if free_slots > 0:
                 hot = (_hot_sectors_asof(data, d, top_n=cfg["hot_sectors_top_n"])
                        if cfg.get("use_hot_sector_gate", True) else None)
                 for sid in _candidates_asof(data, d, hot, top_n=top_n, cfg=cfg):
                     if free_slots <= 0:
                         break
-                    if sid in open_pos:
+                    if sid in open_pos or sid in pending_entries:
                         continue
-                    price = val(closes, d, sid)
-                    if not price:
-                        continue
-                    shares = int(capital_per_slot // (price * (1 + FEE_RATE)))
-                    if shares <= 0:
-                        continue
-                    cash -= shares * price * (1 + FEE_RATE)
-                    open_pos[sid] = {"entry_date": d, "entry_price": price, "peak": price,
-                                      "entry_i": i, "shares": shares}
+                    pending_entries.append(sid)
                     free_slots -= 1
 
         mkt_val = sum(p["shares"] * (val(closes, d, sid) or p["peak"]) for sid, p in open_pos.items())
         nav_curve.append((d, cash + mkt_val))
 
-    # 期末仍持有者，以最後一天收盤平倉計入
+    # 期末仍持有者，以最後一天收盤平倉計入（無隔日開盤可用）
     last = sim_dates[-1]
     for sid, p in open_pos.items():
         close = val(closes, last, sid)
         if close:
-            hold = len(sim_dates) - 1 - p["entry_i"]
-            trades.append({"stock_id": sid, "entry_date": p["entry_date"], "exit_date": last,
-                           "ret": close / p["entry_price"] - 1,
-                           "net_ret": net_return(p["entry_price"], close),
-                           "hold": hold, "reason": "回測結束平倉"})
+            _record_exit(sid, p, close * (1 - slippage), last, len(sim_dates) - 1, "回測結束平倉")
 
     if not trades:
         logger.error("回測期間沒有任何交易"); return
@@ -594,7 +631,8 @@ def _report_roundtrip(tdf, bench, bench_0050, nav, m, m0050, capital, sim_dates,
         lines.append(f"    {reason:<16} {int(row['count']):>3} 筆   {row['mean']*100:+.2f}%")
     lines += [
         "-" * 66,
-        "  註：收盤價成交、未計滑價；淨報酬含手續費(買賣)與證交稅(賣出)。",
+        f"  註：今日收盤算訊號 → 隔日開盤成交（單邊滑價 {SLIPPAGE*100:.2f}%）；",
+        "      淨報酬另含手續費(買賣)與證交稅(賣出)。滑價為假設值，待實盤成交回報校準。",
         "  調 agent/strategy.py 的參數後重跑此回測，即可比較買賣邏輯優劣。",
         "=" * 66,
     ]
