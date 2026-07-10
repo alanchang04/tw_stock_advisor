@@ -29,29 +29,9 @@ from agent.stock_selector import (
     EXCLUDE_INDUSTRIES, MIN_RSI, MAX_RSI, MIN_CLOSE, MIN_VOLUME,
 )
 from agent.strategy import (STRATEGY, score_candidates, decide_exit, split_adjust,
-                            compute_factor_matrices)
-
-# ── 交易成本（台股現股）──────────────────────────────────────────
-# 2026-07-09：用使用者元大帳戶 4 筆真實成交手續費反推折數（見對話紀錄），
-# 58% 完美吻合全部 4 筆（含捨去與四捨五入兩種進位假設皆成立）；
-# 原本假設的 6折(60%) 在四捨五入規則下有 2 筆對不上，已修正為實測值。
-FEE_RATE = 0.001425 * 0.58   # 券商手續費 14.25bp × 58折（買賣各收一次，實測反推）
-TAX_RATE = 0.003             # 證交稅 30bp（僅賣出時收，政府統一費率與券商無關）
-
-# ── 成交假設（2026-07-09 階段0 修正）────────────────────────────
-# 舊版用「決策當日收盤價」成交，但 pipeline 是收盤後（20:00~22:30）才算出訊號，
-# 那個收盤價早已成交完畢、根本買不到——這不是前視偏誤（訊號只用已知資料），
-# 而是「無法實現的成交價假設」。改為：今日收盤決定 → 隔日開盤成交。
-# SLIPPAGE 為單邊滑價假設（開盤是一天波動最大的時段；中小型動能股實際更差），
-# 待階段3 用實盤成交回報校準。可用 run_backtest(slippage=) 做敏感度測試。
-SLIPPAGE = 0.001             # 單邊 10bp
-
-
-def net_return(entry_price: float, exit_price: float) -> float:
-    """一買一賣扣除手續費+證交稅後的淨報酬。"""
-    cost_in  = entry_price * (1 + FEE_RATE)
-    cash_out = exit_price * (1 - FEE_RATE - TAX_RATE)
-    return cash_out / cost_in - 1
+                            compute_factor_matrices,
+                            # 交易成本/成交假設：單一事實來源在 strategy.py（回測與即時帳本共用）
+                            FEE_RATE, TAX_RATE, SLIPPAGE, net_return)
 
 
 # ── 載入資料（一次全載入記憶體，避免每個日期重複查 DB）───────────

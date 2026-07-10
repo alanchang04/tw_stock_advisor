@@ -109,6 +109,34 @@ STRATEGY = {
 
 
 # ══════════════════════════════════════════════════════════════════
+#  交易成本與成交假設（回測與即時紙上帳本共用，單一事實來源）
+#
+#  成交時序：pipeline 於收盤後 20:00~22:30 才跑，當日收盤價早已成交完畢、買不到。
+#  故一律「今日收盤算訊號 → 隔日開盤成交」，買 ×(1+SLIPPAGE)、賣 ×(1−SLIPPAGE)。
+#  SLIPPAGE 目前是「假設」不是「量測」——待階段3 用實盤成交回報校準
+#  （回測敏感度：每 10bp 滑價約吃掉 3~4 個百分點總報酬）。
+# ══════════════════════════════════════════════════════════════════
+FEE_RATE = 0.001425 * 0.58   # 券商手續費 14.25bp × 58折（買賣各收一次，用實測成交反推）
+TAX_RATE = 0.003             # 證交稅 30bp（僅賣出時收）
+SLIPPAGE = 0.001             # 單邊滑價假設 10bp
+
+
+def net_return(entry_price: float, exit_price: float) -> float:
+    """一買一賣扣掉手續費+證交稅後的淨報酬（entry/exit 皆為已含滑價的成交價）。"""
+    cost_in  = entry_price * (1 + FEE_RATE)
+    cash_out = exit_price * (1 - FEE_RATE - TAX_RATE)
+    return cash_out / cost_in - 1
+
+
+def buy_fill(open_price: float, slippage: float = SLIPPAGE) -> float:
+    return open_price * (1 + slippage)
+
+
+def sell_fill(open_price: float, slippage: float = SLIPPAGE) -> float:
+    return open_price * (1 - slippage)
+
+
+# ══════════════════════════════════════════════════════════════════
 #  市場濾網用：股票分割/合併還原
 #  台股單日漲跌幅限制 ±10%，任何單日變動超過此值只可能是分割/減資等公司行動
 #  或資料錯誤，不可能是真實交易。market_filter_stock（預設0050）若曾分割，
