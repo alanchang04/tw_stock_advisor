@@ -26,8 +26,8 @@ from agent.llm_advisor import (
     save_recommendations,
     format_report,
 )
-from agent.portfolio import (fill_pending_orders, queue_exits, queue_entries,
-                            format_positions_report)
+from agent.portfolio import format_positions_report
+from agent.broker import get_broker
 
 
 def _latest_trade_date():
@@ -50,14 +50,17 @@ def run_daily_recommendation(with_entries: bool = True):
     logger.info("Step 1 — 計算族群輪動熱度")
     run_sector_momentum()
 
-    # Step 1.5: 先用今日開盤價成交昨日掛的委託（階段0b：掛單→隔日開盤成交）
-    logger.info("Step 1.5 — 以今日開盤價成交昨日掛單")
-    filled = fill_pending_orders(eval_date)
+    # 交易層：預設 PaperBroker（紙上模擬，行為同現況）；BROKER=shioaji 可換券商
+    broker = get_broker()
+
+    # Step 1.5: 先把已成交的委託回帳（paper: 昨日掛單於今開盤成交）
+    logger.info(f"Step 1.5 — 回帳已成交委託（broker={broker.name}）")
+    filled = broker.sync(eval_date)
 
     # Step 2: 出場檢查（先做，且不依賴 LLM —— 確保賣出提醒一定會發）
     #         只掛「明日開盤賣出」委託，不當場平倉
     logger.info("Step 2 — 檢查持有部位出場訊號（掛明日賣單）")
-    exits = queue_exits(eval_date)
+    exits = broker.submit_exits(eval_date)
 
     result, opened = {}, []
 
@@ -89,7 +92,7 @@ def run_daily_recommendation(with_entries: bool = True):
                 save_recommendations(result)
                 picks = [{"stock_id": r["stock_id"], "reason": r.get("reason", "")}
                          for r in result.get("recommendations", [])]
-                opened = queue_entries(picks, eval_date)
+                opened = broker.submit_entries(picks, eval_date)
             else:
                 logger.error("LLM 未回傳有效結果，僅輸出出場提醒")
         else:
