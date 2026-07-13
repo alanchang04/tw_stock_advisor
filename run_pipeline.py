@@ -210,29 +210,41 @@ def mode_pipeline(source: str = "openapi", with_entries: bool = True, review: bo
         return
 
     logger.info("########## 每日完整流程開始 ##########")
+    from agent import exec_log
+    exec_log.start_run()   # 決策軌跡：本次 run 開始（含 180 天輪替清理）
     try:
-        if source == "openapi":
-            from data_pipeline.fetchers.twse_fetcher import backfill
-            backfill()                   # 1. 自動補齊 DB 最後一天 ~ 今天
-        else:
-            mode_daily(source="finmind")
-        run_technical_analysis(recent_days=5)     # 2. 技術指標（增量：只寫最近 5 天，日常更新夠用）
-        info = mode_market_signals()              # 3. ETF換股 + 新聞 + YouTube + 彙整 + 聰明資金
+        with exec_log.stage("data_ingest") as rec:
+            if source == "openapi":
+                from data_pipeline.fetchers.twse_fetcher import backfill
+                backfill()                   # 1. 自動補齊 DB 最後一天 ~ 今天
+            else:
+                mode_daily(source="finmind")
+            run_technical_analysis(recent_days=5)     # 2. 技術指標（增量：只寫最近 5 天，日常更新夠用）
+            rec.summary = f"補資料(source={source}) + 技術指標增量(近5日)"
+        with exec_log.stage("market_intel") as rec:
+            info = mode_market_signals()              # 3. ETF換股 + 新聞 + YouTube + 彙整 + 聰明資金
+            rec.summary = ("市場情報：" + "、".join(k for k in ("news", "youtube", "etf",
+                           "smart_money", "digest") if info.get(k)) if any(
+                           info.get(k) for k in ("news", "youtube", "etf", "smart_money",
+                           "digest")) else "市場情報：本次無新內容")
         result = run_daily_recommendation(with_entries=with_entries)  # 4. 出場檢查(+進場推薦)
         msg = result.get("report_text") if result else None
 
         # 5. 我的持倉建議 + 追蹤清單買點（只建議，不影響主流程）
         manual_msg = wl_msg = None
-        try:
-            from agent.manual_advisor import advise_manual_positions
-            manual_msg = advise_manual_positions()
-        except Exception as e:
-            logger.error(f"手動持倉建議失敗: {e}")
-        try:
-            from data_pipeline.analysis.watchlist_advisor import evaluate_watchlist
-            wl_msg = evaluate_watchlist()
-        except Exception as e:
-            logger.error(f"追蹤清單判斷失敗: {e}")
+        with exec_log.stage("advisors") as rec:
+            try:
+                from agent.manual_advisor import advise_manual_positions
+                manual_msg = advise_manual_positions()
+            except Exception as e:
+                logger.error(f"手動持倉建議失敗: {e}")
+            try:
+                from data_pipeline.analysis.watchlist_advisor import evaluate_watchlist
+                wl_msg = evaluate_watchlist()
+            except Exception as e:
+                logger.error(f"追蹤清單判斷失敗: {e}")
+            rec.summary = (f"手動持倉提醒{'有' if manual_msg else '無'}、"
+                           f"追蹤清單提醒{'有' if wl_msg else '無'}")
 
         # 組報告：每段用分隔線隔開，只塞「有內容」的區塊——避免每天固定一大串
         # 空段落/低信號清單洗版；詳細清單留給 /smartmoney /etf /sector 隨時查
@@ -251,18 +263,22 @@ def mode_pipeline(source: str = "openapi", with_entries: bool = True, review: bo
         if review:
             msg = (msg or "") + DIVIDER + _weekly_review_text()
         msg = (msg or "") + "\n\n📋 更多細節：/digest /smartmoney /etf /sector /recommend"
-        notify_success(msg)
+        with exec_log.stage("notify") as rec:
+            notify_success(msg)
 
-        # 每日彙整用「獨立訊息」推播（內容較長，併進主報告會被 4000 字上限截斷）
-        if info.get("digest"):
-            from agent.notifier import send_telegram
-            send_telegram(f"📋 {info['digest_date']} 市場情報每日彙整\n\n{info['digest']}")
+            # 每日彙整用「獨立訊息」推播（內容較長，併進主報告會被 4000 字上限截斷）
+            if info.get("digest"):
+                from agent.notifier import send_telegram
+                send_telegram(f"📋 {info['digest_date']} 市場情報每日彙整\n\n{info['digest']}")
+            rec.summary = f"Telegram 推播完成（主報告 {len(msg or '')} 字）"
 
         logger.info("########## 每日完整流程結束 ##########")
     except Exception as e:
         logger.exception("每日完整流程失敗")
         notify_failure("每日流程", str(e))
         raise
+    finally:
+        exec_log.end_run()
 
 
 def mode_auto(source: str = "openapi"):

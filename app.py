@@ -6,6 +6,7 @@ app.py — 台股顧問系統 Streamlit 網頁介面
 或雙擊 run_app.bat
 """
 import sys, os
+import json
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from datetime import date, timedelta
@@ -56,7 +57,7 @@ USER = st.session_state.auth_user   # {user_id, username, display_name, role}
 
 st.sidebar.title("📈 台股顧問")
 _pages = ["📊 首頁", "📦 持倉追蹤", "🔖 追蹤清單", "🔥 族群輪動", "🏦 法人動向",
-          "📉 個股走勢", "🔄 歷史績效", "📰 市場情報", "🧠 聰明資金"]
+          "📉 個股走勢", "🔄 歷史績效", "📰 市場情報", "🧠 聰明資金", "🔍 決策軌跡"]
 if USER["role"] == "admin":
     _pages.append("👤 帳號管理")
 page = st.sidebar.radio("導覽", _pages)
@@ -1450,6 +1451,105 @@ elif page == "🔥 族群輪動":
                                   "成交量": "{:,d}"}, na_rep="—"),
                 use_container_width=True, hide_index=True,
             )
+
+
+# ══════════════════════════════════════════════════════════════════
+#  Page：決策軌跡（execution log —— AI 為什麼選這檔 + 20 分鐘花在哪）
+#  規格：docs/SPEC_PIPELINE_IMPROVEMENTS.md Phase A
+# ══════════════════════════════════════════════════════════════════
+elif page == "🔍 決策軌跡":
+    st.title("🔍 決策軌跡")
+    st.caption("每次 pipeline 的完整決策過程：資料 → 因子篩選 → 多空辯論 → 裁決 → 風控 → 委託。"
+               "每段附耗時與 LLM 用量；保留 180 天自動輪替。")
+
+    _STAGE_LABEL = {
+        "data_ingest":     "📥 資料補齊＋技術指標",
+        "quality_gate":    "🧪 資料品質檢查",
+        "market_intel":    "📰 市場情報（新聞/YT/ETF/聰明資金）",
+        "sector_momentum": "🔥 族群輪動熱度",
+        "fills":           "✅ 開盤成交回帳（昨日掛單）",
+        "orders_exits":    "🔔 出場檢查 → 掛賣單",
+        "risk_gate":       "🛡️ 風控閘門（市場濾網/部位上限）",
+        "factor_screen":   "🎯 因子篩選（為什麼是這些候選）",
+        "debate_bull":     "🐂 多方研究員",
+        "debate_bear":     "🐻 空方研究員",
+        "judge":           "⚖️ 首席投資長裁決",
+        "orders_entries":  "🛒 掛買單（明日開盤）",
+        "advisors":        "📦 手動持倉＋追蹤清單建議",
+        "notify":          "📨 Telegram 推播",
+    }
+
+    with get_session() as _s:
+        _runs = pd.read_sql(text("""
+            SELECT run_id, MIN(started_at) AS run_start,
+                   SUM(duration_ms) AS total_ms,
+                   SUM(model_calls) AS llm_calls,
+                   SUM(tokens_in) AS tin, SUM(tokens_out) AS tout,
+                   COUNT(*) FILTER (WHERE status = 'failed') AS failed
+            FROM execution_log
+            GROUP BY run_id ORDER BY run_start DESC LIMIT 30
+        """), _s.bind)
+
+    if _runs.empty:
+        st.info("還沒有決策軌跡紀錄——下一次 pipeline 執行後就會出現。")
+        st.stop()
+
+    _runs["label"] = _runs.apply(
+        lambda r: f"{pd.Timestamp(r['run_start']).tz_convert('Asia/Taipei'):%Y-%m-%d %H:%M}"
+                  f"（{(r['total_ms'] or 0)/60000:.1f} 分鐘"
+                  + (f"，⚠️{int(r['failed'])} 段失敗" if r["failed"] else "") + "）",
+        axis=1)
+    _sel = st.selectbox("選擇一次執行", _runs.index,
+                        format_func=lambda i: _runs.loc[i, "label"])
+    _run = _runs.loc[_sel]
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("總耗時", f"{(_run['total_ms'] or 0)/60000:.1f} 分")
+    c2.metric("LLM 呼叫", int(_run["llm_calls"] or 0))
+    c3.metric("Tokens (in/out)", f"{int(_run['tin'] or 0):,} / {int(_run['tout'] or 0):,}")
+    c4.metric("失敗段", int(_run["failed"] or 0))
+
+    with get_session() as _s:
+        _stages = pd.read_sql(text("""
+            SELECT stage, seq, started_at, duration_ms, model_calls,
+                   tokens_in, tokens_out, sources, summary, payload, status, error_msg
+            FROM execution_log WHERE run_id = :rid ORDER BY seq
+        """), _s.bind, params={"rid": _run["run_id"]})
+
+    # 耗時分布一眼看（回答「20 分鐘花在哪」）
+    _tdf = _stages[["stage", "duration_ms"]].copy()
+    _tdf["秒"] = (_tdf["duration_ms"] / 1000).round(1)
+    _tdf["階段"] = _tdf["stage"].map(lambda x: _STAGE_LABEL.get(x, x))
+    st.bar_chart(_tdf.set_index("階段")["秒"], horizontal=True)
+
+    st.markdown("---")
+    for _, _row in _stages.iterrows():
+        _icon = "❌" if _row["status"] == "failed" else "✅"
+        _dur = f"{(_row['duration_ms'] or 0)/1000:.1f}s"
+        _llm = f"｜LLM×{int(_row['model_calls'])}" if _row["model_calls"] else ""
+        _title = f"{_icon} {_STAGE_LABEL.get(_row['stage'], _row['stage'])}（{_dur}{_llm}）"
+        with st.expander(_title, expanded=False):
+            if _row["summary"]:
+                st.markdown(f"**{_row['summary']}**")
+            if _row["error_msg"]:
+                st.error(_row["error_msg"])
+            if _row["sources"]:
+                _src = _row["sources"] if isinstance(_row["sources"], list) else json.loads(_row["sources"])
+                st.caption("資料來源：" + "、".join(
+                    f"{x.get('source', '?')}（信心 {x.get('confidence', '—')}）" for x in _src))
+            _pl = _row["payload"]
+            if _pl is not None:
+                if isinstance(_pl, str):
+                    _pl = json.loads(_pl)
+                # 辯論/裁決全文用文字呈現，結構化資料用 json/table
+                if isinstance(_pl, dict) and "text" in _pl and len(_pl) == 1:
+                    st.text(_pl["text"])
+                elif isinstance(_pl, dict) and "top_candidates" in _pl:
+                    st.caption(f"熱門族群：{'、'.join(_pl.get('hot_sectors') or [])}")
+                    st.dataframe(pd.DataFrame(_pl["top_candidates"]),
+                                 use_container_width=True, hide_index=True)
+                else:
+                    st.json(_pl, expanded=False)
 
 
 # ══════════════════════════════════════════════════════════════════

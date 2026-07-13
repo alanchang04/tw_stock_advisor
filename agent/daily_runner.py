@@ -28,6 +28,7 @@ from agent.llm_advisor import (
 )
 from agent.portfolio import format_positions_report
 from agent.broker import get_broker
+from agent import exec_log
 
 
 def _latest_trade_date():
@@ -48,51 +49,87 @@ def run_daily_recommendation(with_entries: bool = True):
 
     # Step 1: 更新族群輪動熱度
     logger.info("Step 1 — 計算族群輪動熱度")
-    run_sector_momentum()
+    with exec_log.stage("sector_momentum") as rec:
+        run_sector_momentum()
+        rec.summary = "官方54類族群5日動能已更新（熱門排名供參考，趨勢版選股不設硬閘門）"
 
     # 交易層：預設 PaperBroker（紙上模擬，行為同現況）；BROKER=shioaji 可換券商
     broker = get_broker()
 
     # Step 1.5: 先把已成交的委託回帳（paper: 昨日掛單於今開盤成交）
     logger.info(f"Step 1.5 — 回帳已成交委託（broker={broker.name}）")
-    filled = broker.sync(eval_date)
+    with exec_log.stage("fills") as rec:
+        filled = broker.sync(eval_date)
+        rec.summary = (f"broker={broker.name}：開盤成交 買{len(filled.get('entries', []))} "
+                       f"賣{len(filled.get('exits', []))}")
+        rec.payload = filled if (filled.get("entries") or filled.get("exits")) else None
 
     # Step 2: 出場檢查（先做，且不依賴 LLM —— 確保賣出提醒一定會發）
     #         只掛「明日開盤賣出」委託，不當場平倉
     logger.info("Step 2 — 檢查持有部位出場訊號（掛明日賣單）")
-    exits = broker.submit_exits(eval_date)
+    with exec_log.stage("orders_exits") as rec:
+        exits = broker.submit_exits(eval_date)
+        rec.summary = (f"掛出明日開盤賣單 {len(exits)} 檔"
+                       + ("：" + ", ".join(f"{e['stock_id']}({e['reason']})" for e in exits)
+                          if exits else "（全部續抱）"))
+        rec.payload = {"exits": exits} if exits else None
 
     result, opened = {}, []
 
     # 市場濾網：僅在 market_filter_block_entries=True 時空頭不開新倉
     # （預設 False：空頭只加回死亡交叉出場保護，見 portfolio.exit_cfg）
     from agent.strategy import STRATEGY as _S
-    if with_entries and _S.get("market_filter_block_entries"):
-        from agent.stock_selector import market_is_bull
-        if not market_is_bull():
-            logger.warning("市場濾網觸發（空頭）：今日不開新倉")
-            with_entries = False
+    with exec_log.stage("risk_gate") as rec:
+        blocked = False
+        if with_entries and _S.get("market_filter_block_entries"):
+            from agent.stock_selector import market_is_bull
+            if not market_is_bull():
+                logger.warning("市場濾網觸發（空頭）：今日不開新倉")
+                with_entries = False
+                blocked = True
+        rec.summary = ("空頭濾網擋下新倉" if blocked else
+                       f"進場{'開' if with_entries else '關(週末模式)'}；"
+                       f"部位上限 {_S.get('max_open_positions', 10)} 檔")
+        rec.payload = {"with_entries": with_entries, "blocked_by_market_filter": blocked,
+                       "market_filter_block_entries": _S.get("market_filter_block_entries", False)}
 
     if with_entries:
         # Step 3: 篩選候選股票（趨勢版選股不用族群硬閘門；熱門族群仍供 LLM 參考）
         logger.info("Step 3 — 篩選候選股票")
         from agent.strategy import STRATEGY as _ST
-        hot_sectors = get_hot_sectors(top_n=5, min_stocks=10)
-        if _ST.get("use_hot_sector_gate", True):
-            candidates = get_candidate_stocks(hot_sectors, top_n=20) if hot_sectors else None
-        else:
-            candidates = get_candidate_stocks(hot_sectors, top_n=20)
+        with exec_log.stage("factor_screen") as rec:
+            hot_sectors = get_hot_sectors(top_n=5, min_stocks=10)
+            if _ST.get("use_hot_sector_gate", True):
+                candidates = get_candidate_stocks(hot_sectors, top_n=20) if hot_sectors else None
+            else:
+                candidates = get_candidate_stocks(hot_sectors, top_n=20)
+            n = 0 if candidates is None else len(candidates)
+            rec.summary = f"熱門族群 {len(hot_sectors or [])} 個；評分後取前 {n} 檔進辯論"
+            if candidates is not None and not candidates.empty:
+                # payload 紀律：只存前 20 檔的因子明細（不存全市場），控制在 ~5KB
+                keep = [c for c in ["stock_id", "stock_name", "industry", "close", "score",
+                                    "rs20", "stack_days", "invest_streak", "mom60",
+                                    "rev_yoy", "rsi14", "inst_net", "foreign_net"]
+                        if c in candidates.columns]
+                rec.payload = {"hot_sectors": hot_sectors,
+                               "top_candidates": candidates[keep].head(20).to_dict("records")}
 
         if candidates is not None and not candidates.empty:
             logger.info("Step 4 — 呼叫 LLM 產生推薦")
             candidates_text = format_candidates_for_llm(candidates)
             hot_sector_names = candidates["industry"].unique().tolist()
+            # debate_bull / debate_bear / judge 三段在 llm_advisor 內部各自記錄
             result = generate_recommendations(candidates_text, hot_sector_names)
             if result:
                 save_recommendations(result)
                 picks = [{"stock_id": r["stock_id"], "reason": r.get("reason", "")}
                          for r in result.get("recommendations", [])]
-                opened = broker.submit_entries(picks, eval_date)
+                with exec_log.stage("orders_entries") as rec:
+                    opened = broker.submit_entries(picks, eval_date)
+                    rec.summary = (f"掛出明日開盤買單 {len(opened)} 檔"
+                                   + ("：" + ", ".join(o["stock_id"] for o in opened)
+                                      if opened else "（名額已滿或均已持有）"))
+                    rec.payload = {"picks": picks, "queued": opened} if picks else None
             else:
                 logger.error("LLM 未回傳有效結果，僅輸出出場提醒")
         else:
