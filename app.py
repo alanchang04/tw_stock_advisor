@@ -1516,40 +1516,223 @@ elif page == "🔍 決策軌跡":
             FROM execution_log WHERE run_id = :rid ORDER BY seq
         """), _s.bind, params={"rid": _run["run_id"]})
 
-    # 耗時分布一眼看（回答「20 分鐘花在哪」）
-    _tdf = _stages[["stage", "duration_ms"]].copy()
-    _tdf["秒"] = (_tdf["duration_ms"] / 1000).round(1)
-    _tdf["階段"] = _tdf["stage"].map(lambda x: _STAGE_LABEL.get(x, x))
-    st.bar_chart(_tdf.set_index("階段")["秒"], horizontal=True)
+    # ── 卡片樣式（狀態色一律搭配圖示與文字標籤，不單靠顏色傳達）────────
+    st.markdown("""
+    <style>
+    .dt-card{background:rgba(128,138,160,.08);border:1px solid rgba(128,138,160,.22);
+      border-radius:10px;padding:.65rem .8rem;margin-bottom:.55rem;font-size:.85rem;line-height:1.5}
+    .dt-ok{border-left:4px solid #34a06b}
+    .dt-warn{border-left:4px solid #d9a441}
+    .dt-bad{border-left:4px solid #d05252}
+    .dt-info{border-left:4px solid #5b84d6}
+    .dt-head{font-weight:700;margin-bottom:.3rem;display:flex;justify-content:space-between;gap:.5rem;align-items:baseline}
+    .dt-chip{display:inline-block;padding:.02rem .5rem;border-radius:99px;font-size:.72rem;
+      background:rgba(91,132,214,.16);border:1px solid rgba(91,132,214,.4);margin:0 .18rem .18rem 0}
+    .dt-chip.g{background:rgba(52,160,107,.14);border-color:rgba(52,160,107,.45)}
+    .dt-chip.o{background:rgba(217,164,65,.14);border-color:rgba(217,164,65,.5)}
+    .dt-num{font-size:.72rem;opacity:.65;white-space:nowrap}
+    .dt-scroll{max-height:460px;overflow-y:auto;white-space:pre-wrap}
+    .dt-col-title{font-weight:800;font-size:.95rem;margin:.15rem 0 .5rem 0}
+    .dt-badge{background:rgba(91,132,214,.3);border-radius:6px;padding:0 .4rem;font-size:.72rem;font-weight:700}
+    .dt-verdict{background:rgba(52,160,107,.10);border:1px solid rgba(52,160,107,.45);
+      border-radius:12px;padding:.8rem .9rem;margin-bottom:.6rem;font-size:.9rem;line-height:1.55}
+    </style>""", unsafe_allow_html=True)
 
-    st.markdown("---")
-    for _, _row in _stages.iterrows():
-        _icon = "❌" if _row["status"] == "failed" else "✅"
-        _dur = f"{(_row['duration_ms'] or 0)/1000:.1f}s"
-        _llm = f"｜LLM×{int(_row['model_calls'])}" if _row["model_calls"] else ""
-        _title = f"{_icon} {_STAGE_LABEL.get(_row['stage'], _row['stage'])}（{_dur}{_llm}）"
-        with st.expander(_title, expanded=False):
-            if _row["summary"]:
-                st.markdown(f"**{_row['summary']}**")
-            if _row["error_msg"]:
-                st.error(_row["error_msg"])
-            if _row["sources"]:
-                _src = _row["sources"] if isinstance(_row["sources"], list) else json.loads(_row["sources"])
-                st.caption("資料來源：" + "、".join(
-                    f"{x.get('source', '?')}（信心 {x.get('confidence', '—')}）" for x in _src))
-            _pl = _row["payload"]
-            if _pl is not None:
-                if isinstance(_pl, str):
-                    _pl = json.loads(_pl)
-                # 辯論/裁決全文用文字呈現，結構化資料用 json/table
-                if isinstance(_pl, dict) and "text" in _pl and len(_pl) == 1:
-                    st.text(_pl["text"])
-                elif isinstance(_pl, dict) and "top_candidates" in _pl:
-                    st.caption(f"熱門族群：{'、'.join(_pl.get('hot_sectors') or [])}")
-                    st.dataframe(pd.DataFrame(_pl["top_candidates"]),
-                                 use_container_width=True, hide_index=True)
+    import html as _htmlmod
+
+    def _esc(t):
+        return _htmlmod.escape(str(t)).replace("\n", "<br>")
+
+    def _i(v):
+        return 0 if v is None or pd.isna(v) else int(v)
+
+    def _stage_row(name):
+        _r = _stages[_stages["stage"] == name]
+        if _r.empty:
+            return None, {}
+        _row2 = _r.iloc[0]
+        _pl2 = _row2["payload"]
+        if isinstance(_pl2, str):
+            try:
+                _pl2 = json.loads(_pl2)
+            except Exception:
+                _pl2 = {}
+        return _row2, (_pl2 or {})
+
+    def _llm_meta(_row2):
+        if _row2 is None or not _i(_row2["model_calls"]):
+            return ""
+        return (f"<span class='dt-num'>詞元 {_i(_row2['tokens_in']):,}+{_i(_row2['tokens_out']):,}"
+                f" ｜ {_i(_row2['duration_ms'])/1000:.1f}s</span>")
+
+    def _card(cls, icon, title, body_html, meta=""):
+        return (f"<div class='dt-card {cls}'><div class='dt-head'>"
+                f"<span>{icon} {title}</span>{meta}</div>{body_html}</div>")
+
+    def _status_card(name, icon, title):
+        _row2, _ = _stage_row(name)
+        if _row2 is None:
+            return _card("dt-warn", "⏭️", title, "<i>本次未執行此段</i>")
+        if _row2["status"] == "failed":
+            return _card("dt-bad", "❌", f"{title}（失敗）", _esc(_row2["error_msg"] or "失敗"))
+        return _card("dt-ok", icon, title, _esc(_row2["summary"] or "完成"),
+                     f"<span class='dt-num'>{_i(_row2['duration_ms'])/1000:.1f}s</span>")
+
+    tab_flow, tab_eng = st.tabs(["🧭 決策流程", "🛠 工程視圖（逐段耗時／原始紀錄）"])
+
+    # ═══ 決策流程：資料與候選 → 多空辯論 → 首席裁決 → 結論與行動 ═══
+    with tab_flow:
+        colA, colB, colC, colD = st.columns([1.0, 1.3, 1.3, 1.05], gap="medium")
+
+        # ── 01 資料與候選 ──────────────────────────────────────────
+        with colA:
+            st.markdown("<div class='dt-col-title'>📥 資料與候選 <span class='dt-badge'>01</span></div>",
+                        unsafe_allow_html=True)
+            st.markdown(_status_card("data_ingest", "📦", "資料補齊＋技術指標"), unsafe_allow_html=True)
+            st.markdown(_status_card("market_intel", "📰", "市場情報"), unsafe_allow_html=True)
+            _row_fs, _pl_fs = _stage_row("factor_screen")
+            if _row_fs is None:
+                st.markdown(_card("dt-warn", "⏭️", "因子篩選",
+                                  "<i>本次未進行選股（週末模式或流程未達此段）</i>"),
+                            unsafe_allow_html=True)
+            else:
+                _hot = "".join(f"<span class='dt-chip'>{_esc(h)}</span>"
+                               for h in (_pl_fs.get("hot_sectors") or []))
+                st.markdown(_card("dt-ok", "🎯", "因子篩選",
+                                  _esc(_row_fs["summary"] or "") + (f"<br>{_hot}" if _hot else ""),
+                                  f"<span class='dt-num'>{_i(_row_fs['duration_ms'])/1000:.1f}s</span>"),
+                            unsafe_allow_html=True)
+                for _c in (_pl_fs.get("top_candidates") or [])[:8]:
+                    _chips = []
+                    if _c.get("rs20") is not None:
+                        _chips.append(f"<span class='dt-chip g'>RS {float(_c['rs20'])*100:.0f} 百分位</span>")
+                    if _c.get("stack_days"):
+                        _chips.append(f"<span class='dt-chip'>多頭排列 {float(_c['stack_days']):.0f} 日</span>")
+                    if _c.get("rev_yoy") is not None:
+                        _chips.append(f"<span class='dt-chip'>營收 {float(_c['rev_yoy']):+.0f}%</span>")
+                    if _c.get("invest_streak"):
+                        _chips.append(f"<span class='dt-chip'>投信連買 {float(_c['invest_streak']):.0f} 日</span>")
+                    st.markdown(_card("dt-info", "",
+                                      f"{_esc(_c.get('stock_id'))} {_esc(_c.get('stock_name') or '')}",
+                                      "".join(_chips),
+                                      f"<span class='dt-badge'>{float(_c.get('score') or 0):.2f} 分</span>"),
+                                unsafe_allow_html=True)
+                st.caption("※ 各資料來源的信心分數將於資料品質層（Phase B）上線後顯示於本欄")
+
+        # ── 02 多空辯論 ────────────────────────────────────────────
+        with colB:
+            st.markdown("<div class='dt-col-title'>🥊 多空辯論 <span class='dt-badge'>02</span></div>",
+                        unsafe_allow_html=True)
+            for _nm, _ic2, _ttl, _cls2 in [("debate_bull", "🐂", "多方研究員", "dt-ok"),
+                                           ("debate_bear", "🐻", "空方研究員", "dt-bad")]:
+                _r2, _p2 = _stage_row(_nm)
+                if _r2 is None:
+                    st.markdown(_card("dt-warn", "⏭️", _ttl, "<i>流程未達此段</i>"),
+                                unsafe_allow_html=True)
+                    continue
+                _body = (f"<div class='dt-scroll'>{_esc(_p2.get('text'))}</div>" if _p2.get("text")
+                         else "<i>本段無輸出（呼叫失敗，裁決退化為單次模式）</i>")
+                st.markdown(_card(_cls2, _ic2, _ttl, _body, _llm_meta(_r2)), unsafe_allow_html=True)
+
+        # ── 03 首席裁決 ────────────────────────────────────────────
+        with colC:
+            st.markdown("<div class='dt-col-title'>⚖️ 首席裁決 <span class='dt-badge'>03</span></div>",
+                        unsafe_allow_html=True)
+            _rj, _pj = _stage_row("judge")
+            if _rj is None:
+                st.markdown(_card("dt-warn", "⏭️", "裁決", "<i>流程未達此段</i>"), unsafe_allow_html=True)
+            else:
+                _mode = "已權衡多空辯論" if _pj.get("debate_used") else "單次模式（辯論失敗退化）"
+                st.markdown(_card("dt-ok" if _pj.get("debate_used") else "dt-warn", "⚖️",
+                                  f"裁決（{_mode}）", _esc(_rj["summary"] or ""), _llm_meta(_rj)),
+                            unsafe_allow_html=True)
+                for _rc in ((_pj.get("result") or {}).get("recommendations") or []):
+                    _sig = "".join(f"<span class='dt-chip g'>{_esc(s2)}</span>"
+                                   for s2 in (_rc.get("key_signals") or []))
+                    _risk = (f"<div><span class='dt-chip o'>⚠ {_esc(_rc.get('risk_note'))}</span></div>"
+                             if _rc.get("risk_note") else "")
+                    st.markdown(_card("dt-info", f"#{_rc.get('rank', '?')}",
+                                      f"{_esc(_rc.get('stock_id'))} {_esc(_rc.get('stock_name') or '')}",
+                                      _sig + f"<div>{_esc(_rc.get('reason') or '')}</div>" + _risk),
+                                unsafe_allow_html=True)
+
+        # ── 04 結論與行動 ──────────────────────────────────────────
+        with colD:
+            st.markdown("<div class='dt-col-title'>📨 結論與行動 <span class='dt-badge'>04</span></div>",
+                        unsafe_allow_html=True)
+            _rj2, _pj2 = _stage_row("judge")
+            _ms = (_pj2.get("result") or {}).get("market_summary") if _rj2 is not None else None
+            if _ms:
+                st.markdown(f"<div class='dt-verdict'>🧭 <b>市場判讀</b><br>{_esc(_ms)}</div>",
+                            unsafe_allow_html=True)
+            _re2, _pe2 = _stage_row("orders_entries")
+            if _re2 is not None:
+                _q = _pe2.get("queued") or []
+                _body = ("<br>".join(
+                    f"🛒 {_esc(q.get('stock_id'))}（訊號價 {float(q.get('signal_price') or 0):.2f}，"
+                    f"實際以明日開盤價成交）" for q in _q)
+                    if _q else _esc(_re2["summary"] or "無新買單"))
+                st.markdown(_card("dt-ok" if _q else "dt-warn", "🛒", "明日開盤買單", _body),
+                            unsafe_allow_html=True)
+            _rx, _px2 = _stage_row("orders_exits")
+            if _rx is not None:
+                _xs = _px2.get("exits") or []
+                if _xs:
+                    _body = "<br>".join(
+                        f"🔔 {_esc(x.get('stock_id'))} {_esc(x.get('stock_name') or '')}"
+                        f"（{float(x.get('return_pct') or 0):+.1f}%，{_esc(x.get('reason') or '')}）"
+                        for x in _xs)
+                    st.markdown(_card("dt-warn", "🔔", f"明日開盤賣單 {len(_xs)} 檔", _body),
+                                unsafe_allow_html=True)
                 else:
-                    st.json(_pl, expanded=False)
+                    st.markdown(_card("dt-ok", "🔔", "出場檢查", "全部續抱，無賣單"),
+                                unsafe_allow_html=True)
+            _rf, _pf = _stage_row("fills")
+            if _rf is not None and (_pf.get("entries") or _pf.get("exits")):
+                _lines = [f"賣出 {_esc(e2.get('stock_id'))} @ {float(e2.get('exit_price') or 0):.2f}"
+                          f"（淨 {float(e2.get('net_return_pct') or 0):+.1f}%）"
+                          for e2 in (_pf.get("exits") or [])]
+                _lines += [f"買進 {_esc(e2.get('stock_id'))} @ {float(e2.get('entry_price') or 0):.2f}"
+                           for e2 in (_pf.get("entries") or [])]
+                st.markdown(_card("dt-ok", "✅", "今日開盤已成交（昨日掛單）", "<br>".join(_lines)),
+                            unsafe_allow_html=True)
+            st.markdown(_status_card("risk_gate", "🛡️", "風控閘門"), unsafe_allow_html=True)
+
+    # ═══ 工程視圖：逐段耗時 + 原始紀錄（回答「20 分鐘花在哪」）═══
+    with tab_eng:
+        _tdf = _stages[["stage", "duration_ms"]].copy()
+        _tdf["秒"] = (_tdf["duration_ms"] / 1000).round(1)
+        _tdf["階段"] = _tdf["stage"].map(lambda x: _STAGE_LABEL.get(x, x))
+        st.bar_chart(_tdf.set_index("階段")["秒"], horizontal=True)
+
+        st.markdown("---")
+        for _, _row in _stages.iterrows():
+            _icon = "❌" if _row["status"] == "failed" else "✅"
+            _dur = f"{(_row['duration_ms'] or 0)/1000:.1f}s"
+            _llm = f"｜LLM×{_i(_row['model_calls'])}" if _i(_row["model_calls"]) else ""
+            _title = f"{_icon} {_STAGE_LABEL.get(_row['stage'], _row['stage'])}（{_dur}{_llm}）"
+            with st.expander(_title, expanded=False):
+                if _row["summary"]:
+                    st.markdown(f"**{_row['summary']}**")
+                if _row["error_msg"]:
+                    st.error(_row["error_msg"])
+                if _row["sources"]:
+                    _src = _row["sources"] if isinstance(_row["sources"], list) else json.loads(_row["sources"])
+                    st.caption("資料來源：" + "、".join(
+                        f"{x.get('source', '?')}（信心 {x.get('confidence', '—')}）" for x in _src))
+                _pl = _row["payload"]
+                if _pl is not None:
+                    if isinstance(_pl, str):
+                        _pl = json.loads(_pl)
+                    # 辯論/裁決全文用文字呈現，結構化資料用 json/table
+                    if isinstance(_pl, dict) and "text" in _pl and len(_pl) == 1:
+                        st.text(_pl["text"])
+                    elif isinstance(_pl, dict) and "top_candidates" in _pl:
+                        st.caption(f"熱門族群：{'、'.join(_pl.get('hot_sectors') or [])}")
+                        st.dataframe(pd.DataFrame(_pl["top_candidates"]),
+                                     use_container_width=True, hide_index=True)
+                    else:
+                        st.json(_pl, expanded=False)
 
 
 # ══════════════════════════════════════════════════════════════════
