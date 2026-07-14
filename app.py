@@ -1590,6 +1590,29 @@ elif page == "🔍 決策軌跡":
                         unsafe_allow_html=True)
             st.markdown(_status_card("data_ingest", "📦", "資料補齊＋技術指標"), unsafe_allow_html=True)
             st.markdown(_status_card("market_intel", "📰", "市場情報"), unsafe_allow_html=True)
+
+            # Phase B 資料品質層：規則驗證器 + 來源信心分數
+            _rq, _pq = _stage_row("quality_gate")
+            if _rq is not None:
+                _srcs_q = (_rq["sources"] if isinstance(_rq["sources"], list)
+                          else json.loads(_rq["sources"])) if _rq["sources"] is not None else []
+                _chips_q = "".join(
+                    f"<span class='dt-chip {'g' if s.get('confidence', 1) >= 0.8 else 'o'}'>"
+                    f"{_esc(s.get('source'))} 信心 {s.get('confidence')}</span>"
+                    for s in _srcs_q)
+                _discs = (_pq.get("discrepancies") or [])
+                _body_q = _esc(_rq["summary"] or "") + (f"<br>{_chips_q}" if _chips_q else "")
+                for _d in _discs:
+                    _body_q += (f"<div class='dt-num'>⚠ {_esc(_d.get('check_name'))}"
+                               f"（{_esc(_d.get('stock_id') or '整體')}）："
+                               f"預期{_esc(_d.get('expected'))}，實際{_esc(_d.get('actual'))}"
+                               f"<br>　{_esc(_d.get('note'))}</div>")
+                st.markdown(_card("dt-bad" if any(d.get("severity") == "error" for d in _discs)
+                                  else ("dt-warn" if _discs else "dt-ok"),
+                                  "🧪", "資料品質檢查", _body_q,
+                                  f"<span class='dt-num'>{_i(_rq['duration_ms'])/1000:.1f}s</span>"),
+                            unsafe_allow_html=True)
+
             _row_fs, _pl_fs = _stage_row("factor_screen")
             if _row_fs is None:
                 st.markdown(_card("dt-warn", "⏭️", "因子篩選",
@@ -1617,7 +1640,7 @@ elif page == "🔍 決策軌跡":
                                       "".join(_chips),
                                       f"<span class='dt-badge'>{float(_c.get('score') or 0):.2f} 分</span>"),
                                 unsafe_allow_html=True)
-                st.caption("※ 各資料來源的信心分數將於資料品質層（Phase B）上線後顯示於本欄")
+                st.caption("※ 來源信心分數見上方「資料品質檢查」卡；固定公式(1-近30日觸發次數/10)，非學習模型")
 
         # ── 02 多空辯論（結構化優先，散文 fallback）────────────────
         with colB:

@@ -230,6 +230,16 @@ def mode_pipeline(source: str = "openapi", with_entries: bool = True, review: bo
                 mode_daily(source="finmind")
             run_technical_analysis(recent_days=5)     # 2. 技術指標（增量：只寫最近 5 天，日常更新夠用）
             rec.summary = f"補資料(source={source}) + 技術指標增量(近5日)"
+        with exec_log.stage("quality_gate") as rec:
+            # Phase B：規則驗證器（單日斷點/法人落後/筆數異常）+ 來源信心分數
+            from agent.quality_gate import run_quality_checks, source_scorecard
+            discs = run_quality_checks()
+            scorecard = source_scorecard()
+            rec.sources = [{"source": src, "confidence": conf} for src, conf in scorecard.items()]
+            rec.summary = (f"觸發 {len(discs)} 項資料異常：" +
+                           "、".join(f"{d['check_name']}({d.get('stock_id') or '整體'})" for d in discs)
+                           if discs else "資料品質正常，無異常觸發")
+            rec.payload = {"discrepancies": discs} if discs else None
         with exec_log.stage("market_intel") as rec:
             info = mode_market_signals()              # 3. ETF換股 + 新聞 + YouTube + 彙整 + 聰明資金
             rec.summary = ("市場情報：" + "、".join(k for k in ("news", "youtube", "etf",
