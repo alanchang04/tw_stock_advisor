@@ -209,9 +209,18 @@ def mode_pipeline(source: str = "openapi", with_entries: bool = True, review: bo
         notify_failure("資料庫連線", "無法連接資料庫（請確認 Docker 是否啟動）")
         return
 
+    # P0-1 互斥鎖（SPEC_REASONING_LAYER）：防兩個 pipeline 併發寫同一 DB
+    # （2026-07-13 排程與手動並發：候選法人被讀成全0、daily_recommendations 交錯9列）
+    from agent.pipeline_lock import acquire_pipeline_lock, release_pipeline_lock
+    _lock_id = acquire_pipeline_lock(holder=f"mode_pipeline source={source}")
+    if _lock_id is None:
+        logger.warning("另一個 pipeline 執行中，本次跳過（避免並發污染）")
+        return
+
     logger.info("########## 每日完整流程開始 ##########")
     from agent import exec_log
     exec_log.start_run()   # 決策軌跡：本次 run 開始（含 180 天輪替清理）
+    _ok = False
     try:
         with exec_log.stage("data_ingest") as rec:
             if source == "openapi":
@@ -273,12 +282,14 @@ def mode_pipeline(source: str = "openapi", with_entries: bool = True, review: bo
             rec.summary = f"Telegram 推播完成（主報告 {len(msg or '')} 字）"
 
         logger.info("########## 每日完整流程結束 ##########")
+        _ok = True
     except Exception as e:
         logger.exception("每日完整流程失敗")
         notify_failure("每日流程", str(e))
         raise
     finally:
         exec_log.end_run()
+        release_pipeline_lock(_lock_id, success=_ok)
 
 
 def mode_auto(source: str = "openapi"):

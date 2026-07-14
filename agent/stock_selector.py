@@ -270,30 +270,122 @@ def get_candidate_stocks(
     df = df.sort_values("score", ascending=False)
     candidates = df.head(top_n).reset_index(drop=True)
 
+    # P0-3 資料一致性檢查（SPEC_REASONING_LAYER）：法人資料日期必須跟上股價最新日，
+    # 且候選不得全為 0（2026-07-13 並發事故：另一 pipeline backfill 途中讀到全 0，
+    # 空方據此寫出「所有候選皆無法人支撐」的錯誤強論斷）。異常時標註而非默默餵 0。
+    inst_ok = True
+    try:
+        with get_session() as session:
+            pmax, imax = session.execute(text(
+                "SELECT (SELECT MAX(trade_date) FROM daily_prices),"
+                "       (SELECT MAX(trade_date) FROM institutional_trading)")).fetchone()
+        inst_ok = (imax == pmax)
+    except Exception as e:
+        logger.warning(f"法人資料一致性檢查失敗（視為正常）: {e}")
+    all_zero = bool(len(candidates) >= 5
+                    and (pd.to_numeric(candidates["inst_net"], errors="coerce").fillna(0) == 0).all()
+                    and (pd.to_numeric(candidates["foreign_net"], errors="coerce").fillna(0) == 0).all())
+    candidates.attrs["inst_data_ok"] = inst_ok and not all_zero
+    if not candidates.attrs["inst_data_ok"]:
+        logger.warning("⚠️ quality gate：法人資料缺失/落後（日期未跟上或候選全0），"
+                       "將在給 LLM 的資料中明確標註，禁止拿 0 當論證依據")
+
     logger.info(f"篩選出 {len(candidates)} 支候選股票（{'族群閘門' if use_gate else '全市場趨勢/題材'}）")
     return candidates
 
 
-def format_candidates_for_llm(df: pd.DataFrame) -> str:
+def _recent_news_map(stock_ids: list[str], days: int = 30, per_stock: int = 3) -> dict:
+    """近 N 日與各候選股相關的新聞/YT 標題（market_signals.related_stocks 陣列匹配）。
+    題材證據餵給辯論用（SPEC_REASONING_LAYER 2.1）；查詢失敗回空 dict 不擋流程。"""
+    try:
+        with get_session() as s:
+            rows = s.execute(text("""
+                SELECT related_stocks, title, signal_date FROM market_signals
+                WHERE signal_type IN ('news', 'youtube')
+                  AND related_stocks IS NOT NULL
+                  AND signal_date >= CURRENT_DATE - CAST(:d AS int)
+                ORDER BY signal_date DESC
+            """), {"d": days}).fetchall()
+    except Exception as e:
+        logger.warning(f"相關新聞查詢失敗（辯論將沒有題材證據）: {e}")
+        return {}
+    m: dict[str, list[str]] = {}
+    sidset = set(stock_ids)
+    for rel, title, d in rows:
+        for sid in (rel or []):
+            if sid in sidset and len(m.setdefault(sid, [])) < per_stock:
+                m[sid].append(f"{d}《{title}》")
+    return m
+
+
+def format_candidates_for_llm(df: pd.DataFrame, news_map: dict | None = None) -> str:
     """
-    把候選股票資料格式化成給 LLM 分析的文字
+    把候選股票資料格式化成給 LLM 分析的文字。
+
+    2026-07-13 重寫（SPEC_REASONING_LAYER 2.1 + P0-2/P0-3）：
+      - 加入真正選中這些股票的趨勢/題材因子（RS20/多頭排列/動能/營收YoY/投信連買）
+        ——舊版只給當日快照，辯論者只能複述漲幅與 RSI，論證薄弱是必然
+      - 法人買賣超 DB 單位是「股」，÷1000 轉張再給 LLM（舊版股當張印，1000×高估）
+      - 法人資料缺失/落後時明確標註，禁止 LLM 拿 0 當「無法人支撐」的論證依據
+      - 附近 30 日相關新聞標題（題材證據）；news_map 可注入（測試用），None 則自查
     """
     if df.empty:
         return ""
 
-    lines = ["以下是今日候選股票資料，請根據這些資料推薦最值得關注的 5 支股票：\n"]
+    inst_ok = df.attrs.get("inst_data_ok", True)
+    if news_map is None:
+        news_map = _recent_news_map(df["stock_id"].tolist())
+
+    def _f(v):
+        try:
+            return None if v is None or pd.isna(v) else float(v)
+        except (TypeError, ValueError):
+            return None
+
+    lines = ["以下是今日候選股票資料（依綜合評分排序）。"]
+    if not inst_ok:
+        lines.append("⚠️ 注意：今日法人買賣超資料缺失或尚未更新，下列法人數字不可作為論證依據。")
+    lines.append("")
 
     for _, row in df.iterrows():
-        ma_cross = {1: "黃金交叉", -1: "死亡交叉", 0: "無"}.get(int(row.get("signal_ma_cross", 0)), "無")
-        breakout = {1: "突破壓力", -1: "跌破支撐", 0: "無"}.get(int(row.get("signal_breakout", 0)), "無")
+        ma_cross = {1: "黃金交叉", -1: "死亡交叉", 0: "無"}.get(int(row.get("signal_ma_cross") or 0), "無")
+        breakout = {1: "突破壓力", -1: "跌破支撐", 0: "無"}.get(int(row.get("signal_breakout") or 0), "無")
+        blk = [f"【{row['stock_id']} {row['stock_name']}】產業：{row['industry']}",
+               f"  收盤：{_f(row.get('close')) or 0:.1f}｜當日漲跌：{_f(row.get('change_pct')) or 0:+.2f}%"
+               f"｜RSI：{_f(row.get('rsi14')) or 0:.1f}｜MACD柱：{'正' if (_f(row.get('macd_hist')) or 0) > 0 else '負'}"]
 
-        lines.append(
-            f"【{row['stock_id']} {row['stock_name']}】產業：{row['industry']}\n"
-            f"  股價：{row['close']:.1f} | 漲跌：{row.get('change_pct', 0):.2f}%\n"
-            f"  MA5：{row.get('ma5', 'N/A')} | MA20：{row.get('ma20', 'N/A')} | MA60：{row.get('ma60', 'N/A')}\n"
-            f"  RSI：{row.get('rsi14', 0):.1f} | MACD柱：{'正' if row.get('macd_hist', 0) > 0 else '負'}\n"
-            f"  均線訊號：{ma_cross} | 突破訊號：{breakout}\n"
-            f"  三大法人淨買超：{int(row.get('inst_net', 0))}張 | 外資：{int(row.get('foreign_net', 0))}張\n"
-        )
+        trend = []
+        rs = _f(row.get("rs20"))
+        if rs is not None:
+            trend.append(f"相對強度 RS20 全市場第 {rs*100:.0f} 百分位")
+        sd = _f(row.get("stack_days"))
+        if sd:
+            trend.append(f"多頭排列(MA5>20>60)連續 {sd:.0f} 日")
+        mom = _f(row.get("mom60"))
+        if mom is not None:
+            trend.append(f"60日動能 {mom*100:+.0f}%")
+        if trend:
+            blk.append("  趨勢結構：" + "｜".join(trend))
+
+        yoy = _f(row.get("rev_yoy"))
+        if yoy is not None:
+            blk.append(f"  基本面：月營收年增 {yoy:+.1f}%")
+
+        if inst_ok:
+            inst_lots = (_f(row.get("inst_net")) or 0) / 1000     # DB 單位是股 → 張
+            frn_lots = (_f(row.get("foreign_net")) or 0) / 1000
+            chips = [f"三大法人 {inst_lots:+,.0f} 張", f"外資 {frn_lots:+,.0f} 張"]
+            ivs = _f(row.get("invest_streak"))
+            if ivs:
+                chips.append(f"投信連買 {ivs:.0f} 日")
+            blk.append("  籌碼：" + "｜".join(chips))
+        else:
+            blk.append("  籌碼：法人資料缺失（今日尚未更新），不可據此論證")
+
+        blk.append(f"  單日技術訊號（僅供進出場時機參考）：均線 {ma_cross}｜突破 {breakout}")
+
+        for t in (news_map or {}).get(str(row["stock_id"]), []):
+            blk.append(f"  題材：{t}")
+        lines.append("\n".join(blk) + "\n")
 
     return "\n".join(lines)

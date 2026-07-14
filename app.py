@@ -1619,20 +1619,57 @@ elif page == "🔍 決策軌跡":
                                 unsafe_allow_html=True)
                 st.caption("※ 各資料來源的信心分數將於資料品質層（Phase B）上線後顯示於本欄")
 
-        # ── 02 多空辯論 ────────────────────────────────────────────
+        # ── 02 多空辯論（結構化優先，散文 fallback）────────────────
         with colB:
             st.markdown("<div class='dt-col-title'>🥊 多空辯論 <span class='dt-badge'>02</span></div>",
                         unsafe_allow_html=True)
-            for _nm, _ic2, _ttl, _cls2 in [("debate_bull", "🐂", "多方研究員", "dt-ok"),
-                                           ("debate_bear", "🐻", "空方研究員", "dt-bad")]:
-                _r2, _p2 = _stage_row(_nm)
-                if _r2 is None:
-                    st.markdown(_card("dt-warn", "⏭️", _ttl, "<i>流程未達此段</i>"),
-                                unsafe_allow_html=True)
-                    continue
-                _body = (f"<div class='dt-scroll'>{_esc(_p2.get('text'))}</div>" if _p2.get("text")
-                         else "<i>本段無輸出（呼叫失敗，裁決退化為單次模式）</i>")
-                st.markdown(_card(_cls2, _ic2, _ttl, _body, _llm_meta(_r2)), unsafe_allow_html=True)
+            _rb, _pb = _stage_row("debate_bull")
+            if _rb is None:
+                st.markdown(_card("dt-warn", "⏭️", "多方研究員", "<i>流程未達此段</i>"),
+                            unsafe_allow_html=True)
+            else:
+                _parsed = _pb.get("parsed")
+                if _parsed and _parsed.get("picks"):
+                    _segs = []
+                    for _p3 in _parsed["picks"]:
+                        _ev = "".join(f"<span class='dt-chip g'>{_esc(e3)}</span>"
+                                      for e3 in (_p3.get("evidence_fields") or []))
+                        _pre = (f"<div class='dt-num'>自辯：{_esc(_p3.get('preempt_rebuttal'))}</div>"
+                                if _p3.get("preempt_rebuttal") else "")
+                        _segs.append(f"<div style='margin-bottom:.55rem'>"
+                                     f"<b>{_esc(_p3.get('stock_id'))} {_esc(_p3.get('stock_name') or '')}</b>"
+                                     f"<div>{_esc(_p3.get('thesis') or '')}</div>{_ev}{_pre}</div>")
+                    _body = f"<div class='dt-scroll'>{''.join(_segs)}</div>"
+                elif _pb.get("text"):
+                    _body = f"<div class='dt-scroll'>{_esc(_pb.get('text'))}</div>"
+                else:
+                    _body = "<i>本段無輸出（呼叫失敗，裁決退化為單次模式）</i>"
+                st.markdown(_card("dt-ok", "🐂", "多方研究員", _body, _llm_meta(_rb)),
+                            unsafe_allow_html=True)
+            _rr, _pr = _stage_row("debate_bear")
+            if _rr is None:
+                st.markdown(_card("dt-warn", "⏭️", "空方研究員", "<i>流程未達此段</i>"),
+                            unsafe_allow_html=True)
+            else:
+                _parsed = _pr.get("parsed")
+                if _parsed and "vetoes" in _parsed:
+                    _segs = []
+                    for _v3 in _parsed.get("vetoes") or []:
+                        _sev = _v3.get("severity")
+                        _chip = ("<span class='dt-chip o'>🚫 VETO</span>" if _sev == "veto"
+                                 else "<span class='dt-chip'>⚠ 提醒</span>")
+                        _segs.append(f"<div style='margin-bottom:.55rem'>{_chip} "
+                                     f"<b>{_esc(_v3.get('stock_id'))} {_esc(_v3.get('stock_name') or '')}</b>"
+                                     f"<div>{_esc(_v3.get('reason') or '')}</div></div>")
+                    for _mc in _parsed.get("market_concerns") or []:
+                        _segs.append(f"<div class='dt-num'>整體：{_esc(_mc)}</div>")
+                    _body = f"<div class='dt-scroll'>{''.join(_segs) or '<i>空方無異議</i>'}</div>"
+                elif _pr.get("text"):
+                    _body = f"<div class='dt-scroll'>{_esc(_pr.get('text'))}</div>"
+                else:
+                    _body = "<i>本段無輸出（呼叫失敗，裁決退化為單次模式）</i>"
+                st.markdown(_card("dt-bad", "🐻", "空方研究員", _body, _llm_meta(_rr)),
+                            unsafe_allow_html=True)
 
         # ── 03 首席裁決 ────────────────────────────────────────────
         with colC:
@@ -1646,14 +1683,32 @@ elif page == "🔍 決策軌跡":
                 st.markdown(_card("dt-ok" if _pj.get("debate_used") else "dt-warn", "⚖️",
                                   f"裁決（{_mode}）", _esc(_rj["summary"] or ""), _llm_meta(_rj)),
                             unsafe_allow_html=True)
+                _ga = _pj.get("guardrail_actions") or []
+                if _ga:
+                    _body = "<br>".join(f"{'🚫' if a.get('action') == '剔除' else '↪️'} "
+                                        f"{_esc(a.get('action'))} {_esc(a.get('stock_id'))}：{_esc(a.get('why'))}"
+                                        for a in _ga)
+                    st.markdown(_card("dt-bad", "🛡️", "裁決問責 guardrail（程式攔截，非 LLM）", _body),
+                                unsafe_allow_html=True)
                 for _rc in ((_pj.get("result") or {}).get("recommendations") or []):
                     _sig = "".join(f"<span class='dt-chip g'>{_esc(s2)}</span>"
                                    for s2 in (_rc.get("key_signals") or []))
                     _risk = (f"<div><span class='dt-chip o'>⚠ {_esc(_rc.get('risk_note'))}</span></div>"
                              if _rc.get("risk_note") else "")
+                    # 裁決問責：對空方異議的逐條回應（接受/駁回+理由）
+                    _oas = ""
+                    for _oa in (_rc.get("objections_addressed") or []):
+                        if not (_oa.get("objection") or _oa.get("rebuttal")):
+                            continue
+                        if _oa.get("verdict") == "駁回":
+                            _oas += (f"<div class='dt-num'>🗡 空方：{_esc(_oa.get('objection'))}<br>"
+                                     f"↩️ <b>駁回</b>：{_esc(_oa.get('rebuttal'))}</div>")
+                        else:
+                            _oas += (f"<div class='dt-num'>🗡 空方：{_esc(_oa.get('objection'))}"
+                                     f"　→ ✅ 接受</div>")
                     st.markdown(_card("dt-info", f"#{_rc.get('rank', '?')}",
                                       f"{_esc(_rc.get('stock_id'))} {_esc(_rc.get('stock_name') or '')}",
-                                      _sig + f"<div>{_esc(_rc.get('reason') or '')}</div>" + _risk),
+                                      _sig + f"<div>{_esc(_rc.get('reason') or '')}</div>" + _risk + _oas),
                                 unsafe_allow_html=True)
 
         # ── 04 結論與行動 ──────────────────────────────────────────
