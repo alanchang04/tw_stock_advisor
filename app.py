@@ -56,7 +56,7 @@ if st.session_state.auth_user is None:
 USER = st.session_state.auth_user   # {user_id, username, display_name, role}
 
 st.sidebar.title("📈 台股顧問")
-_pages = ["📊 首頁", "📦 持倉追蹤", "🔖 追蹤清單", "🔥 族群輪動", "🏦 法人動向",
+_pages = ["📊 首頁", "📦 持倉追蹤", "🔖 追蹤清單", "🔎 個股分析", "🔥 族群輪動", "🏦 法人動向",
           "📉 個股走勢", "🔄 歷史績效", "📰 市場情報", "🧠 聰明資金", "🔍 決策軌跡"]
 if USER["role"] == "admin":
     _pages.append("👤 帳號管理")
@@ -365,6 +365,47 @@ def load_daily_digest(days: int = 5) -> tuple[date, str] | None:
         return (row[0], row[1]) if row else None
     except Exception:
         return None
+
+
+# ══════════════════════════════════════════════════════════════════
+#  決策軌跡卡片元件（共用：決策軌跡頁 + 個股分析頁）
+#  狀態色一律搭配圖示與文字標籤，不單靠顏色傳達
+# ══════════════════════════════════════════════════════════════════
+import html as _htmlmod
+
+_DT_CSS = """
+<style>
+.dt-card{background:rgba(128,138,160,.08);border:1px solid rgba(128,138,160,.22);
+  border-radius:10px;padding:.65rem .8rem;margin-bottom:.55rem;font-size:.85rem;line-height:1.5}
+.dt-ok{border-left:4px solid #34a06b}
+.dt-warn{border-left:4px solid #d9a441}
+.dt-bad{border-left:4px solid #d05252}
+.dt-info{border-left:4px solid #5b84d6}
+.dt-head{font-weight:700;margin-bottom:.3rem;display:flex;justify-content:space-between;gap:.5rem;align-items:baseline}
+.dt-chip{display:inline-block;padding:.02rem .5rem;border-radius:99px;font-size:.72rem;
+  background:rgba(91,132,214,.16);border:1px solid rgba(91,132,214,.4);margin:0 .18rem .18rem 0}
+.dt-chip.g{background:rgba(52,160,107,.14);border-color:rgba(52,160,107,.45)}
+.dt-chip.o{background:rgba(217,164,65,.14);border-color:rgba(217,164,65,.5)}
+.dt-num{font-size:.72rem;opacity:.65;white-space:nowrap}
+.dt-scroll{max-height:460px;overflow-y:auto;white-space:pre-wrap}
+.dt-col-title{font-weight:800;font-size:.95rem;margin:.15rem 0 .5rem 0}
+.dt-badge{background:rgba(91,132,214,.3);border-radius:6px;padding:0 .4rem;font-size:.72rem;font-weight:700}
+.dt-verdict{background:rgba(52,160,107,.10);border:1px solid rgba(52,160,107,.45);
+  border-radius:12px;padding:.8rem .9rem;margin-bottom:.6rem;font-size:.9rem;line-height:1.55}
+</style>"""
+
+
+def _dt_esc(t):
+    return _htmlmod.escape(str(t)).replace("\n", "<br>")
+
+
+def _dt_i(v):
+    return 0 if v is None or pd.isna(v) else int(v)
+
+
+def _dt_card(cls, icon, title, body_html, meta=""):
+    return (f"<div class='dt-card {cls}'><div class='dt-head'>"
+            f"<span>{icon} {title}</span>{meta}</div>{body_html}</div>")
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -1370,6 +1411,156 @@ elif page == "🔖 追蹤清單":
 
 
 # ══════════════════════════════════════════════════════════════════
+#  Page：個股分析（隨選、透明分段——決策軌跡概念用在單一股票查詢）
+# ══════════════════════════════════════════════════════════════════
+elif page == "🔎 個股分析":
+    st.title("🔎 個股分析")
+    st.caption("輸入一檔股票，逐段收集大盤位階、投信外資買賣超、相關新聞，"
+               "最後由 AI 綜合判讀——過程透明，比照決策軌跡的分段概念，"
+               "看得到每個結論引用了哪些具體數據。")
+
+    with get_session() as _s:
+        _wl_options = pd.read_sql(text("""
+            SELECT DISTINCT i.stock_id, st.stock_name
+            FROM watchlist_items i
+            JOIN watchlists w ON w.list_id = i.list_id AND w.user_id = :uid
+            JOIN stocks st ON st.stock_id = i.stock_id
+            ORDER BY i.stock_id
+        """), _s.bind, params={"uid": USER["user_id"]})
+
+    ic1, ic2, ic3 = st.columns([1.2, 2, 1])
+    _wl_pick = ic2.selectbox(
+        "從追蹤清單挑選（或直接在左邊輸入代號）",
+        [""] + [f"{r.stock_id} {r.stock_name}" for r in _wl_options.itertuples()],
+    )
+    _default_sid = _wl_pick.split()[0] if _wl_pick else ""
+    sa_sid = ic1.text_input("股票代號", value=_default_sid, placeholder="2330")
+    sa_go = ic3.button("🔍 開始分析", use_container_width=True)
+
+    if sa_go and sa_sid.strip():
+        with st.spinner(f"分析 {sa_sid.strip()} 中（背景資料 + AI 綜合判讀，約 10~20 秒）…"):
+            from agent.stock_analysis import analyze_stock
+            st.session_state["sa_result"] = analyze_stock(sa_sid.strip())
+            st.session_state["sa_sid"] = sa_sid.strip()
+
+    _result = st.session_state.get("sa_result")
+    if _result is None:
+        st.info("輸入股票代號並按「開始分析」")
+        st.stop()
+    if not _result["stages"].get("stock_context") or _result["stages"]["stock_context"]["summary"].startswith("查無"):
+        st.error(_result["stages"]["stock_context"]["summary"])
+        st.stop()
+
+    st.markdown(_DT_CSS, unsafe_allow_html=True)
+    _st = _result["stages"]
+
+    def _sa_stage(name):
+        s = _st.get(name)
+        return (s or {}).get("payload") or {}, (s or {}).get("summary") or ""
+
+    def _sa_meta(name):
+        s = _st.get(name) or {}
+        if not s.get("model_calls"):
+            return ""
+        return (f"<span class='dt-num'>詞元 {s.get('tokens_in', 0):,}+{s.get('tokens_out', 0):,}</span>")
+
+    colA, colB, colC, colD = st.columns([1.05, 1.15, 1.1, 1.3], gap="medium")
+
+    # ── 01 股票背景 ──────────────────────────────────────────────
+    with colA:
+        st.markdown("<div class='dt-col-title'>📊 股票背景 <span class='dt-badge'>01</span></div>",
+                    unsafe_allow_html=True)
+        _pl, _sum = _sa_stage("stock_context")
+        basic, trend, rev_yoy = _pl.get("basic", {}), _pl.get("trend", {}), _pl.get("rev_yoy")
+        _chips = []
+        if trend.get("rs20") is not None:
+            _chips.append(f"<span class='dt-chip g'>RS {trend['rs20']*100:.0f} 百分位</span>")
+        if trend.get("stack_days"):
+            _chips.append(f"<span class='dt-chip'>多頭排列 {trend['stack_days']:.0f} 日</span>")
+        if rev_yoy is not None:
+            _chips.append(f"<span class='dt-chip'>營收 {rev_yoy:+.0f}%</span>")
+        _body = (f"收盤 {basic.get('close')}　{basic.get('change_pct') or 0:+.2f}%<br>"
+                 f"RSI {basic.get('rsi14') or 0:.1f}｜MACD柱"
+                 f"{'正' if (basic.get('macd_hist') or 0) > 0 else '負'}<br>"
+                 + "".join(_chips))
+        st.markdown(_dt_card("dt-ok", "📦", f"{basic.get('stock_name','')}（{basic.get('industry','')}）",
+                             _body), unsafe_allow_html=True)
+
+    # ── 02 大盤與籌碼 ────────────────────────────────────────────
+    with colB:
+        st.markdown("<div class='dt-col-title'>🌐 大盤與籌碼 <span class='dt-badge'>02</span></div>",
+                    unsafe_allow_html=True)
+        _pl_r, _ = _sa_stage("market_regime")
+        _regime_ok = _pl_r.get("ok")
+        _body_r = (f"{_pl_r.get('stock_id')} {_pl_r.get('close', 0):.2f} vs MA60 {_pl_r.get('ma60', 0):.2f}"
+                   if _regime_ok else "查無資料，保守視為多頭")
+        st.markdown(_dt_card("dt-ok" if _pl_r.get("bull") else "dt-bad",
+                             "🐂" if _pl_r.get("bull") else "🐻",
+                             f"大盤{'多頭' if _pl_r.get('bull') else '空頭'}", _body_r),
+                    unsafe_allow_html=True)
+
+        _pl_i, _ = _sa_stage("institutional_flow")
+        if _pl_i.get("ok"):
+            _body_i = (f"投信連買 <b>{_pl_i['invest_streak_days']}</b> 日"
+                       f"（累計 {_pl_i['invest_streak_lots']:+.0f} 張）<br>"
+                       f"外資連買 <b>{_pl_i['foreign_streak_days']}</b> 日"
+                       f"（累計 {_pl_i['foreign_streak_lots']:+.0f} 張）"
+                       f"<div class='dt-num'>最新資料日 {_pl_i.get('latest_date')}</div>")
+            st.markdown(_dt_card("dt-info", "🏦", "投信/外資買賣超", _body_i), unsafe_allow_html=True)
+        else:
+            st.markdown(_dt_card("dt-warn", "🏦", "投信/外資買賣超", "<i>查無法人買賣超資料</i>"),
+                        unsafe_allow_html=True)
+
+    # ── 03 相關新聞 ──────────────────────────────────────────────
+    with colC:
+        st.markdown("<div class='dt-col-title'>📰 相關新聞 <span class='dt-badge'>03</span></div>",
+                    unsafe_allow_html=True)
+        _pl_n, _ = _sa_stage("news_context")
+        _news = _pl_n.get("news") or []
+        if _news:
+            for n in _news:
+                _sent = {"positive": "dt-ok", "negative": "dt-bad"}.get(n.get("sentiment"), "dt-info")
+                _link = f"<a href='{n['url']}' target='_blank'>原文</a>" if n.get("url") else ""
+                st.markdown(_dt_card(_sent, "📰", str(n.get("date")),
+                                     f"{_dt_esc(n.get('title'))}<br>{_link}"),
+                            unsafe_allow_html=True)
+        else:
+            st.markdown(_dt_card("dt-warn", "📰", "相關新聞", "<i>近30日查無相關報導</i>"),
+                        unsafe_allow_html=True)
+
+    # ── 04 AI 綜合判讀 ───────────────────────────────────────────
+    with colD:
+        st.markdown("<div class='dt-col-title'>🤖 AI 綜合判讀 <span class='dt-badge'>04</span></div>",
+                    unsafe_allow_html=True)
+        _pl_s, _ = _sa_stage("synthesis")
+        _parsed = _pl_s.get("parsed")
+        if not _parsed:
+            st.markdown(_dt_card("dt-bad", "❌", "AI 綜合判讀失敗",
+                                 "本次 LLM 輸出無法解析，上面幾段資料仍完整可參考"),
+                        unsafe_allow_html=True)
+        else:
+            _verdict_icon = {"positive": "🟢", "neutral": "🟡", "negative": "🔴"}.get(_parsed.get("verdict"), "🟡")
+            st.markdown(f"<div class='dt-verdict'>{_verdict_icon} <b>{_dt_esc(_parsed.get('verdict'))}</b>"
+                        f"　{_dt_esc(_parsed.get('verdict_reason'))}<br>"
+                        f"{_dt_esc(_parsed.get('summary'))}</div>", unsafe_allow_html=True)
+            for p in _parsed.get("bull_points") or []:
+                _ev = "".join(f"<span class='dt-chip g'>{_dt_esc(e)}</span>" for e in (p.get("evidence_fields") or []))
+                st.markdown(_dt_card("dt-ok", "🐂", "多方論點", f"{_dt_esc(p.get('point'))}<br>{_ev}"),
+                            unsafe_allow_html=True)
+            for p in _parsed.get("bear_points") or []:
+                _ev = "".join(f"<span class='dt-chip o'>{_dt_esc(e)}</span>" for e in (p.get("evidence_fields") or []))
+                st.markdown(_dt_card("dt-bad", "🐻", "空方論點", f"{_dt_esc(p.get('point'))}<br>{_ev}"),
+                            unsafe_allow_html=True)
+            _gaps = _parsed.get("data_gaps") or []
+            if _gaps:
+                st.markdown(_dt_card("dt-warn", "⚠️", "資料缺口",
+                                     "<br>".join(_dt_esc(g) for g in _gaps)),
+                            unsafe_allow_html=True)
+        st.caption(_sa_meta("synthesis") or "")
+        st.caption(f"run_id: {_result['run_id'][:8]}…（完整紀錄可查 execution_log，kind=stock_analysis）")
+
+
+# ══════════════════════════════════════════════════════════════════
 #  Page 9：族群輪動（細分族群 + 龍頭股）
 # ══════════════════════════════════════════════════════════════════
 elif page == "🔥 族群輪動":
@@ -1487,6 +1678,7 @@ elif page == "🔍 決策軌跡":
                    SUM(tokens_in) AS tin, SUM(tokens_out) AS tout,
                    COUNT(*) FILTER (WHERE status = 'failed') AS failed
             FROM execution_log
+            WHERE kind = 'pipeline'
             GROUP BY run_id ORDER BY run_start DESC LIMIT 30
         """), _s.bind)
 

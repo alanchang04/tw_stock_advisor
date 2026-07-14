@@ -32,19 +32,17 @@ MIN_CLOSE  = STRATEGY["min_close"]
 MIN_VOLUME = STRATEGY["min_volume"]
 
 
-def market_is_bull() -> bool:
+def market_regime_detail() -> dict:
     """
-    市場濾網：大盤代理（預設 0050）收盤 >= MA60 視為多頭。
-    空頭時 daily_runner 不開新倉、出場加回死亡交叉（見 STRATEGY market_filter 區塊）。
-    查無資料或未啟用時回傳 True（不阻擋）。
+    市場濾網明細：大盤代理（預設 0050）還原後收盤 vs MA60，回傳
+    {"bull": bool, "stock_id": str, "close": float|None, "ma60": float|None, "ok": bool}。
+    ok=False 代表查無資料/查詢失敗（此時 bull 保守回傳 True，不阻擋）。
 
     自行抓收盤序列並用 split_adjust() 還原後現算 MA60，不直接信任
     technical_indicators.ma60——0050 這類 ETF 若曾分割/併股，原始收盤價會
     出現單日假崩盤（見 2025-06-18 一分四實例），未還原的 MA60 會誤判成
     連續數月空頭，錯誤觸發死亡交叉出場保護。
     """
-    if not STRATEGY.get("market_filter"):
-        return True
     sid = STRATEGY.get("market_filter_stock", "0050")
     try:
         with get_session() as s:
@@ -54,18 +52,29 @@ def market_is_bull() -> bool:
                 ORDER BY trade_date DESC LIMIT 90
             """), {"sid": sid}).fetchall()
         if len(rows) < 30:
-            return True
+            return {"bull": True, "stock_id": sid, "close": None, "ma60": None, "ok": False}
         closes = pd.Series({r[0]: float(r[1]) for r in rows}).sort_index()
         adj = split_adjust(closes)
-        ma60 = adj.rolling(60, min_periods=30).mean().iloc[-1]
-        last_close = adj.iloc[-1]
+        ma60 = float(adj.rolling(60, min_periods=30).mean().iloc[-1])
+        last_close = float(adj.iloc[-1])
         bull = last_close >= ma60
         if not bull:
             logger.warning(f"市場濾網：{sid} 還原後收盤 {last_close:.2f} < MA60 {ma60:.2f} → 空頭模式")
-        return bull
+        return {"bull": bull, "stock_id": sid, "close": last_close, "ma60": ma60, "ok": True}
     except Exception as e:
         logger.warning(f"市場濾網查詢失敗（視為多頭）: {e}")
+        return {"bull": True, "stock_id": sid, "close": None, "ma60": None, "ok": False}
+
+
+def market_is_bull() -> bool:
+    """
+    市場濾網：大盤代理 收盤 >= MA60 視為多頭。
+    空頭時 daily_runner 不開新倉、出場加回死亡交叉（見 STRATEGY market_filter 區塊）。
+    查無資料或未啟用時回傳 True（不阻擋）。細節數字見 market_regime_detail()。
+    """
+    if not STRATEGY.get("market_filter"):
         return True
+    return market_regime_detail()["bull"]
 
 
 def get_hot_sectors(top_n: int = 5, min_stocks: int = 10) -> list[str]:

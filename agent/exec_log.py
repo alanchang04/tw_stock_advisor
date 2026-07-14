@@ -45,7 +45,7 @@ _current: "ExecRun | None" = None
 
 
 def ensure_execution_log_table():
-    """冪等建表（migration 15 同內容，現有 DB 自動補上）。"""
+    """冪等建表（migration 15+18 同內容，現有 DB 自動補上）。"""
     with get_session() as s:
         s.execute(text("""
             CREATE TABLE IF NOT EXISTS execution_log (
@@ -66,8 +66,11 @@ def ensure_execution_log_table():
                 error_msg   TEXT
             )
         """))
+        # kind 區分「每日 pipeline」vs「個股分析」等一次性查詢（migration 18）
+        s.execute(text("ALTER TABLE execution_log ADD COLUMN IF NOT EXISTS kind VARCHAR(20) NOT NULL DEFAULT 'pipeline'"))
         s.execute(text("CREATE INDEX IF NOT EXISTS idx_execution_log_run ON execution_log (run_id, seq)"))
         s.execute(text("CREATE INDEX IF NOT EXISTS idx_execution_log_time ON execution_log (started_at)"))
+        s.execute(text("CREATE INDEX IF NOT EXISTS idx_execution_log_kind ON execution_log (kind, started_at)"))
 
 
 def _truncate_payload(payload) -> str | None:
@@ -114,8 +117,9 @@ class StageRec:
 
 
 class ExecRun:
-    def __init__(self):
+    def __init__(self, kind: str = "pipeline"):
         self.run_id = str(uuid.uuid4())
+        self.kind = kind
         self.seq = 0
 
     @contextmanager
@@ -136,13 +140,13 @@ class ExecRun:
                 with get_session() as s:
                     s.execute(text("""
                         INSERT INTO execution_log
-                            (run_id, stage, seq, started_at, finished_at, duration_ms,
+                            (run_id, kind, stage, seq, started_at, finished_at, duration_ms,
                              model_calls, tokens_in, tokens_out, sources, summary, payload,
                              status, error_msg)
-                        VALUES (:rid, :st, :seq, :t0, :t1, :ms, :mc, :ti, :to,
+                        VALUES (:rid, :kind, :st, :seq, :t0, :t1, :ms, :mc, :ti, :to,
                                 CAST(:src AS JSONB), :sum, CAST(:pl AS JSONB), :status, :err)
                     """), {
-                        "rid": self.run_id, "st": name, "seq": seq,
+                        "rid": self.run_id, "kind": self.kind, "st": name, "seq": seq,
                         "t0": started, "t1": finished,
                         "ms": int((finished - started).total_seconds() * 1000),
                         "mc": rec.model_calls, "ti": rec.tokens_in, "to": rec.tokens_out,
@@ -155,8 +159,12 @@ class ExecRun:
                 logger.warning(f"execution_log 寫入失敗（不影響流程）: {e}")
 
 
-def start_run() -> ExecRun | None:
-    """pipeline 入口呼叫。建表＋清舊資料＋開新 run。失敗回 None（全程降級為 no-op）。"""
+def start_run(kind: str = "pipeline") -> ExecRun | None:
+    """
+    開新 run。建表＋清舊資料＋開新 run。失敗回 None（全程降級為 no-op）。
+    kind："pipeline"＝每日排程（預設，決策軌跡頁的 run 列表只顯示這個）；
+         "stock_analysis"＝個股隨選分析（可能一天觸發多次，不進 pipeline 列表）。
+    """
     global _current
     try:
         ensure_execution_log_table()
@@ -164,8 +172,8 @@ def start_run() -> ExecRun | None:
             s.execute(text(
                 f"DELETE FROM execution_log WHERE started_at < now() - interval '{EXEC_LOG_RETENTION_DAYS} days'"
             ))
-        _current = ExecRun()
-        logger.info(f"決策軌跡 run_id={_current.run_id[:8]}…（保留 {EXEC_LOG_RETENTION_DAYS} 天）")
+        _current = ExecRun(kind=kind)
+        logger.info(f"決策軌跡 run_id={_current.run_id[:8]}…（kind={kind}，保留 {EXEC_LOG_RETENTION_DAYS} 天）")
         return _current
     except Exception as e:
         logger.warning(f"execution_log 初始化失敗（本次不記錄決策軌跡）: {e}")
