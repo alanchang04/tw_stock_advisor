@@ -30,6 +30,8 @@ MIN_RSI    = STRATEGY["min_rsi"]
 MAX_RSI    = STRATEGY["max_rsi"]
 MIN_CLOSE  = STRATEGY["min_close"]
 MIN_VOLUME = STRATEGY["min_volume"]
+MIN_TURNOVER_AVG5 = STRATEGY["min_turnover_avg5"]
+TURNOVER_AVG_DAYS = STRATEGY["turnover_avg_days"]
 
 
 def market_regime_detail() -> dict:
@@ -186,8 +188,21 @@ def get_candidate_stocks(
         placeholders = ",".join([f"'{c}'" for c in industry_codes])
         gate_clause = f"AND m.industry_code IN ({placeholders})"
 
+    min_turnover = cfg.get("min_turnover_avg5", MIN_TURNOVER_AVG5)
+    turnover_days = cfg.get("turnover_avg_days", TURNOVER_AVG_DAYS)
+
     with get_session() as session:
         result = session.execute(text(f"""
+            WITH recent_dates AS (
+                SELECT DISTINCT trade_date FROM daily_prices
+                ORDER BY trade_date DESC LIMIT :turnover_days
+            ),
+            avg_turnover AS (
+                SELECT stock_id, AVG(turnover) AS avg_turnover
+                FROM daily_prices
+                WHERE trade_date IN (SELECT trade_date FROM recent_dates)
+                GROUP BY stock_id
+            )
             SELECT DISTINCT ON (s.stock_id)
                 s.stock_id,
                 s.stock_name,
@@ -209,10 +224,12 @@ def get_candidate_stocks(
                 )
             JOIN technical_indicators t ON t.stock_id = m.stock_id
                 AND t.trade_date = p.trade_date
+            JOIN avg_turnover at ON at.stock_id = m.stock_id
             LEFT JOIN institutional_trading inst ON inst.stock_id = m.stock_id
                 AND inst.trade_date = p.trade_date
             WHERE p.close >= :min_close
             AND p.volume >= :min_volume
+            AND at.avg_turnover >= :min_turnover
             AND t.rsi14 BETWEEN :min_rsi AND :max_rsi
             AND t.ma5 IS NOT NULL
             AND t.ma20 IS NOT NULL
@@ -220,6 +237,8 @@ def get_candidate_stocks(
         """), {
             "min_close":  MIN_CLOSE,
             "min_volume": MIN_VOLUME,
+            "min_turnover": min_turnover,
+            "turnover_days": turnover_days,
             "min_rsi":    min_rsi,
             "max_rsi":    max_rsi,
         })

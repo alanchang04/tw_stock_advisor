@@ -105,6 +105,14 @@ def _run_debate(candidates_text: str, hot_sectors: list[str]) -> tuple[dict, dic
     多空辯論（SPEC_REASONING_LAYER 2.2：結構化 JSON 契約，取代散文）。
     回傳 (bull_pack, bear_pack)，各為 {"raw": 原文|None, "data": 解析後dict|None}。
     JSON 解析失敗時 data=None、raw 保留 → 裁決退化為舊的散文模式（優雅降級）。
+
+    SPEC_STRATEGY_MIDCAP §3 決策3（2026-07-15）：候選池已縮到中型流動性股+成交金額門檻，
+    暫採方案A（維持現有單輪、20檔一次的結構，不逐檔多輪辯論）——先觀察中型池+新聞真的
+    有料之後的辯論品質，成本也低（Gemini 免費版每日每專案僅20次呼叫，逐檔多輪會爆量）。
+    保留方案B（TradingAgents 式：粗選~8檔 → 逐檔多輪來回、空方回應多方再駁）的概念：
+    若之後要拉高辯論強度，改法是把這個函式拆成「單股辯論」+ 外層迴圈跑候選池，每輪把
+    對方上一輪發言餵回去要求正面回應，直到雙方沒有新論點或達到輪數上限；需要付費 key
+    或換一個沒有每日20次硬限制的模型才能承受呼叫量。
     """
     from agent import exec_log
     bull_pack = {"raw": None, "data": None}

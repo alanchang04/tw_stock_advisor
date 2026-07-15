@@ -27,6 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from database.connection import get_session
 from agent.stock_selector import (
     EXCLUDE_INDUSTRIES, MIN_RSI, MAX_RSI, MIN_CLOSE, MIN_VOLUME,
+    MIN_TURNOVER_AVG5, TURNOVER_AVG_DAYS,
 )
 from agent.strategy import (STRATEGY, score_candidates, decide_exit, split_adjust,
                             compute_factor_matrices,
@@ -42,10 +43,10 @@ def _load(parquet_dir: str | None = None) -> dict:
     with get_session() as s:
         prices = pd.DataFrame(
             s.execute(text("""
-                SELECT stock_id, trade_date, open, close, volume, change_pct
+                SELECT stock_id, trade_date, open, close, volume, turnover, change_pct
                 FROM daily_prices
             """)).fetchall(),
-            columns=["stock_id", "trade_date", "open", "close", "volume", "change_pct"],
+            columns=["stock_id", "trade_date", "open", "close", "volume", "turnover", "change_pct"],
         )
         tech = pd.DataFrame(
             s.execute(text("""
@@ -84,7 +85,7 @@ def _load(parquet_dir: str | None = None) -> dict:
 
     # 型別整理：DB 的 NUMERIC → float
     for df, cols in [
-        (prices, ["open", "close", "volume", "change_pct"]),
+        (prices, ["open", "close", "volume", "turnover", "change_pct"]),
         (tech, ["ma5", "ma20", "ma60", "rsi14", "macd_hist", "signal_ma_cross", "signal_breakout"]),
         (inst, ["total_net", "foreign_net", "invest_net"]),
     ]:
@@ -115,13 +116,17 @@ def _load_parquet(parquet_dir: str) -> dict:
     prices = _p("prices.parquet")
     if prices is None or prices.empty:
         raise FileNotFoundError(f"{parquet_dir} 缺 prices.parquet（回測至少需要股價）")
-    for c in ["close", "volume", "change_pct", "open", "high", "low"]:
+    for c in ["close", "volume", "turnover", "change_pct", "open", "high", "low"]:
         if c in prices.columns:
             prices[c] = pd.to_numeric(prices[c], errors="coerce")
     prices["trade_date"] = pd.to_datetime(prices["trade_date"]).dt.date
     prices = prices.sort_values(["stock_id", "trade_date"]).reset_index(drop=True)
     if "change_pct" not in prices.columns:   # 沒給就從收盤自算（每檔各自 pct_change）
         prices["change_pct"] = prices.groupby("stock_id")["close"].pct_change() * 100
+    if "turnover" not in prices.columns:
+        # 舊資料（如老師的歷史檔）可能沒有成交金額欄位——優雅降級，流動性門檻在
+        # _candidates_asof 會偵測全 NaN 並自動跳過該篩選，不擋整個回測。
+        prices["turnover"] = pd.NA
 
     inst = _p("institutional.parquet")
     if inst is None:
@@ -294,12 +299,25 @@ def _candidates_asof(data, d, industry_codes, top_n=5, cfg=None):
 
     # 流動性/RSI 初篩（RSI 上限由 cfg 控制：動能策略放寬到 ~90，才不會在最強勢時被踢出）
     max_rsi = cfg.get("max_rsi", MAX_RSI)
-    df = df[(df["close"] >= MIN_CLOSE) & (df["volume"] >= MIN_VOLUME)
+    min_close = cfg.get("min_close", MIN_CLOSE)
+    min_volume = cfg.get("min_volume", MIN_VOLUME)
+    df = df[(df["close"] >= min_close) & (df["volume"] >= min_volume)
             & (df["rsi14"] >= cfg.get("min_rsi", MIN_RSI)) & (df["rsi14"] <= max_rsi)
             & df["ma5"].notna() & df["ma20"].notna()]
     if df.empty:
         return []
     df = df.copy()
+
+    # 成交金額（流動性/抗操控）門檻：舊資料（無 turnover 欄位，如老師歷史檔）全 NaN 時優雅跳過。
+    avg_to = data.get("_avg_turnover")
+    if avg_to is not None and d in avg_to.index:
+        to_row = avg_to.loc[d]
+        if to_row.notna().any():
+            min_turnover = cfg.get("min_turnover_avg5", MIN_TURNOVER_AVG5)
+            df["_avg_turnover"] = df["stock_id"].map(to_row)
+            df = df[df["_avg_turnover"] >= min_turnover]
+            if df.empty:
+                return []
 
     # 60 日動能（用預先建好的 closes pivot；與正式選股的 mom60 對應）
     piv = data.get("_closes")
@@ -354,6 +372,11 @@ def run_backtest(top_n=None, rebalance=5, cfg=None, data=None, quiet=False,
     data["_closes"] = closes            # 供 _candidates_asof 算 60 日動能
     if "_rs20" not in data:             # 趨勢/題材因子矩陣（相對強度/多頭排列/投信連買）
         _precompute_factors(data)
+    if "_avg_turnover" not in data:     # 近N日均成交金額（流動性/抗操控門檻，SPEC_STRATEGY_MIDCAP）
+        turnover_piv = data["prices"].pivot_table(index="trade_date", columns="stock_id", values="turnover")
+        turnover_piv = turnover_piv.reindex(index=closes.index, columns=closes.columns)
+        days = cfg.get("turnover_avg_days", TURNOVER_AVG_DAYS)
+        data["_avg_turnover"] = turnover_piv.rolling(days, min_periods=1).mean()
 
     # 市場濾網：大盤代理收盤 vs 其 60 日均線（逐日 bull/bear）
     regime_bull = None

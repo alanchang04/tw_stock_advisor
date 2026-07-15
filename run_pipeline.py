@@ -50,6 +50,12 @@ def mode_market_signals() -> dict:
         logger.error(f"月營收擷取失敗: {e}")
 
     try:
+        from data_pipeline.fetchers.financials_fetcher import run_financials_fetch
+        run_financials_fetch()
+    except Exception as e:
+        logger.error(f"季度財報擷取失敗: {e}")
+
+    try:
         from data_pipeline.fetchers.etf_fetcher import run_etf_tracking, format_etf_changes_report
         changes = run_etf_tracking()
         info["etf"] = format_etf_changes_report(changes)
