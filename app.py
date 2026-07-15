@@ -56,7 +56,7 @@ if st.session_state.auth_user is None:
 USER = st.session_state.auth_user   # {user_id, username, display_name, role}
 
 st.sidebar.title("📈 台股顧問")
-_pages = ["📊 首頁", "📦 持倉追蹤", "🔖 追蹤清單", "🔎 個股分析", "🔥 族群輪動", "🏦 法人動向",
+_pages = ["📊 首頁", "📦 持倉追蹤", "🔖 追蹤清單", "🔎 個股分析", "🎯 練習軌", "🔥 族群輪動", "🏦 法人動向",
           "📉 個股走勢", "🔄 歷史績效", "📰 市場情報", "🧠 聰明資金", "🔍 決策軌跡"]
 if USER["role"] == "admin":
     _pages.append("👤 帳號管理")
@@ -1558,6 +1558,53 @@ elif page == "🔎 個股分析":
                             unsafe_allow_html=True)
         st.caption(_sa_meta("synthesis") or "")
         st.caption(f"run_id: {_result['run_id'][:8]}…（完整紀錄可查 execution_log，kind=stock_analysis）")
+
+
+# ══════════════════════════════════════════════════════════════════
+#  Page 8.5：練習軌——每日 20 盲盒（純量化，不進 LLM）
+# ══════════════════════════════════════════════════════════════════
+elif page == "🎯 練習軌":
+    st.title("🎯 練習軌：每日 20 盲盒")
+    st.caption("純量化篩選，完全不經過 LLM——用來練「波段操作、40%勝率也能小賠大賺」的量化心態，"
+               "不是給你抄的答案。建議流程：只看代號進 TradingView，只開 20MA 和成交量，"
+               "隱藏新聞與籌碼，自己找「20MA上方橫盤5-10天、今天帶量紅K突破箱型」的股票；"
+               "停損守突破K棒低點或月線（取低者）、停利沿20MA抱到跌破。")
+
+    from agent.stock_selector import get_practice_candidates
+    if st.button("🔄 重新整理今日清單", use_container_width=False):
+        st.session_state.pop("practice_candidates", None)
+    if "practice_candidates" not in st.session_state:
+        with st.spinner("篩選中…"):
+            st.session_state["practice_candidates"] = get_practice_candidates(top_n=20)
+    _pc = st.session_state["practice_candidates"]
+
+    if _pc is None or _pc.empty:
+        st.warning("今日無符合門檻的候選股票（收盤≥15元、近5日均成交金額≥2億、站上月線）。")
+        st.stop()
+
+    _show = _pc.copy()
+    _show.insert(0, "排名", range(1, len(_show) + 1))
+    _show["投信連買(日)"] = _show.get("invest_streak", 0).fillna(0).astype(int)
+    _show["多頭排列(日)"] = _show.get("stack_days", 0).fillna(0).astype(int)
+    _show["月營收年增%"] = _show.get("rev_yoy").round(1)
+    _cols = ["排名", "stock_id", "stock_name", "industry", "close",
+             "投信連買(日)", "多頭排列(日)", "月營收年增%", "score"]
+    _cols = [c for c in _cols if c in _show.columns]
+    st.dataframe(
+        _show[_cols].rename(columns={"stock_id": "代號", "stock_name": "名稱",
+                                     "industry": "產業", "close": "收盤", "score": "量化分數"}),
+        use_container_width=True, hide_index=True,
+    )
+
+    _hard = _pc.attrs.get("hard_excluded") or []
+    if _hard:
+        with st.expander(f"⚠️ {len(_hard)} 檔被硬否決規則排除（乖離月線過遠 / 帶量長上引線）"):
+            for h in _hard:
+                st.caption(f"{h['stock_id']} {h['stock_name']}：{h['hard_veto_reason']}")
+
+    st.caption("硬門檻：收盤≥15元、近5日均成交金額≥2億/日、站上月線(MA20)、RSI 45~88。"
+               "評分只看三個純量化因子：投信連買×2.5、多頭排列天數×1.5、月營收年增>20%×2.0——"
+               "跟 AI 軌（決策軌跡頁）用不同權重，兩軌互不影響。")
 
 
 # ══════════════════════════════════════════════════════════════════

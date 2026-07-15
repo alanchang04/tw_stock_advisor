@@ -95,6 +95,19 @@ def _open_price(session, stock_id: str, on_date: date) -> float | None:
     return float(r[0]) if r else None
 
 
+def _avg_volume_before(session, stock_id: str, on_date: date, days: int = 5) -> float | None:
+    """on_date（不含）以前近 days 個交易日均量——成交量天花板用（2026-07-15），
+    刻意不含當天，避免掛單成交日本身的量把基準拉低（例如剛好也是鎖死日）。"""
+    r = session.execute(text("""
+        SELECT AVG(volume) FROM (
+            SELECT volume FROM daily_prices
+            WHERE stock_id = :sid AND trade_date < :d AND volume IS NOT NULL
+            ORDER BY trade_date DESC LIMIT :n
+        ) t
+    """), {"sid": stock_id, "d": on_date, "n": days}).scalar()
+    return float(r) if r else None
+
+
 def open_positions() -> list[dict]:
     """AI 部位（source='ai'）——排除手動倉！手動倉只建議不自動平倉，
     若不過濾，queue_exits 會把使用者的真實持股掛單自動平倉。"""
@@ -284,9 +297,10 @@ def fill_pending_orders(on_date: date) -> dict:
                 WHERE id = :i
             """), {"d": on_date, "px": round(fill, 2), "i": oid})
             held.add(sid)
+            avg_vol = _avg_volume_before(s, sid, on_date, STRATEGY.get("liquidity_avg_days", 5))
             filled_entries.append({"stock_id": sid, "stock_name": name, "entry_price": fill,
                                    "signal_price": float(sig_px) if sig_px else None,
-                                   "shares": suggest_shares(fill), "reason": reason})
+                                   "shares": suggest_shares(fill, avg_volume=avg_vol), "reason": reason})
 
     if filled_entries or filled_exits:
         logger.info(f"✅ 開盤成交：買進 {len(filled_entries)} 檔、賣出 {len(filled_exits)} 檔")

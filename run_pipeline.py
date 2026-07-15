@@ -255,6 +255,28 @@ def mode_pipeline(source: str = "openapi", with_entries: bool = True, review: bo
         result = run_daily_recommendation(with_entries=with_entries)  # 4. 出場檢查(+進場推薦)
         msg = result.get("report_text") if result else None
 
+        # 4.5 練習軌：每日20盲盒（純量化不進LLM，跟AI軌完全獨立），獨立訊息推播
+        practice_msg = None
+        if with_entries:
+            with exec_log.stage("practice_track") as rec:
+                try:
+                    from agent.stock_selector import get_practice_candidates
+                    pc = get_practice_candidates(top_n=20)
+                    if pc is not None and not pc.empty:
+                        lines = [f"🎯 練習軌：今日 20 盲盒（{date.today()}，純量化不含LLM/新聞）"]
+                        for i, r in enumerate(pc.itertuples(), 1):
+                            lines.append(f"  {i}. {r.stock_id} {r.stock_name}（{r.industry}）"
+                                        f" 收盤{r.close:.1f}")
+                        lines.append("\n只看代號進TradingView，開20MA+成交量，自己找突破箱型的進出場點。")
+                        hard = pc.attrs.get("hard_excluded") or []
+                        if hard:
+                            lines.append(f"（另有 {len(hard)} 檔因乖離月線過遠/帶量長上引線被規則排除）")
+                        practice_msg = "\n".join(lines)
+                    rec.summary = f"篩出 {0 if pc is None else len(pc)} 檔"
+                except Exception as e:
+                    logger.error(f"練習軌篩選失敗: {e}")
+                    rec.summary = f"失敗：{e}"
+
         # 5. 我的持倉建議 + 追蹤清單買點（只建議，不影響主流程）
         manual_msg = wl_msg = None
         with exec_log.stage("advisors") as rec:
@@ -295,6 +317,9 @@ def mode_pipeline(source: str = "openapi", with_entries: bool = True, review: bo
             if info.get("digest"):
                 from agent.notifier import send_telegram
                 send_telegram(f"📋 {info['digest_date']} 市場情報每日彙整\n\n{info['digest']}")
+            if practice_msg:
+                from agent.notifier import send_telegram
+                send_telegram(practice_msg)
             rec.summary = f"Telegram 推播完成（主報告 {len(msg or '')} 字）"
 
         logger.info("########## 每日完整流程結束 ##########")

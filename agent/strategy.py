@@ -107,6 +107,44 @@ STRATEGY = {
     "upper_wick_ratio":   0.6,    # 上引線 ≥ 振幅 60%
     "high_volume_ratio":  2.5,    # 成交量 ≥ 均量 2.5 倍
     "volume_avg_days":    20,     # 均量計算天數（由 portfolio 傳入）
+
+    # ── 成交量天花板（2026-07-15 人類交易員練習軌規格）──
+    # 單筆成交張數不得超過近5日均量的一定比例，避免回測/實盤買到「市場承載不了」的量，
+    # 30萬小資金規模下通常不會真的卡到，但這是資金規模放大後的護欄，也讓回測誠實。
+    "max_pct_of_avg_volume": 0.01,   # 單筆 ≤ 近5日均量 1%
+    "liquidity_avg_days":    5,
+
+    # ── 跌停鎖死模擬（回測用；即時 PaperBroker 靠開盤價存在與否已隱含近似判斷）──
+    "limit_down_pct":       -0.095,  # 開盤跌幅 ≤ -9.5% 視為疑似跌停
+    "limit_lock_vol_ratio":  0.10,   # 且當日量 < 近5日均量的10% → 判定鎖死無法成交
+
+    # ── 空方硬否決規則（2026-07-15，程式層級強制，不經 LLM 裁量）──
+    # 「無條件」的意思是：候選股一旦觸發，直接在進辯論前就被排除，LLM 連看都看不到，
+    # 不像一般 VETO 還能被裁決引用數據駁回——避免重演空方JSON截斷讓guardrail失效的教訓
+    # （不能只信任 LLM 自己遵守 System Prompt 裡的規則）。
+    "hard_veto_deviation_pct": 15.0,  # 乖離 MA20 超過 ±15%
+    "hard_veto_upper_wick":    True,  # 帶量長上引線（沿用 exit_upper_wick 同組門檻）
+}
+
+
+# ══════════════════════════════════════════════════════════════════
+#  人類交易員練習軌（2026-07-15）：純量化、不進 LLM，每日輸出前 20 檔給使用者
+#  自己用純線圖（20MA+成交量，不看新聞籌碼）練手動判斷進出場。
+#  跟 AI 軌（STRATEGY）完全獨立、互不影響——只是共用同一套候選篩選/評分機制，
+#  換一份權重與門檻。目的：讓使用者對「波段操作40%勝率、小賠大賺」的量化心態
+#  建立信心，而不是用 AI 軌的即時損益去驗證這個理論（AI 軌樣本太少、雜訊太多）。
+# ══════════════════════════════════════════════════════════════════
+PRACTICE_CFG = {
+    **STRATEGY,
+    # 評分只看三個純量化因子（籌碼優勢、趨勢優勢、基本面優勢），技術面/動能/題材全關閉
+    "w_ma_cross": 0.0, "w_breakout": 0.0, "w_macd_pos": 0.0, "w_inst_buy": 0.0,
+    "w_foreign_buy": 0.0, "w_rsi_sweet": 0.0, "w_momentum": 0.0, "w_rev_yoy": 0.0,
+    "w_rs": 0.0,
+    "w_trend_stack":   1.5,   # 多頭排列天數（趨勢優勢）
+    "w_invest_streak": 2.5,   # 投信連續買超（籌碼優勢）
+    "w_rev_accel":     2.0,   # 月營收年增 >20%（基本面優勢）
+    "above_ma20_only": True,  # 硬門檻：股價必須站上月線
+    "pick_top_n": 20,
 }
 
 
@@ -120,7 +158,7 @@ STRATEGY = {
 # ══════════════════════════════════════════════════════════════════
 FEE_RATE = 0.001425 * 0.58   # 券商手續費 14.25bp × 58折（買賣各收一次，用實測成交反推）
 TAX_RATE = 0.003             # 證交稅 30bp（僅賣出時收）
-SLIPPAGE = 0.001             # 單邊滑價假設 10bp
+SLIPPAGE = 0.003             # 單邊滑價假設 30bp（2026-07-15 從10bp調保守；回測/PaperBroker共用同一常數）
 
 
 def net_return(entry_price: float, exit_price: float) -> float:
@@ -264,14 +302,66 @@ def score_candidates(df: pd.DataFrame, cfg: dict = STRATEGY) -> pd.Series:
 
 
 # ══════════════════════════════════════════════════════════════════
+#  空方硬否決規則（2026-07-15，程式層級強制，見 STRATEGY 上方註解）
+#  純函式，在候選股進辯論「之前」跑，被判定的股票直接排除、LLM 不會看到，
+#  不透過 guardrail 的「駁回」機制（那個給裁決反駁空間，這裡不給——「無條件」）。
+# ══════════════════════════════════════════════════════════════════
+def compute_hard_vetoes(df: pd.DataFrame, cfg: dict = STRATEGY) -> pd.DataFrame:
+    """
+    輸入：候選 DataFrame，需含 stock_id, close, ma20 欄位；
+          open/high/low/volume/avg_volume 缺的話該項規則自動跳過（不誤判）。
+    回傳：只含被觸發列的子集 DataFrame，多兩欄 hard_veto_reason（str）。
+    """
+    if df.empty:
+        return df.iloc[0:0]
+
+    triggered = pd.Series(False, index=df.index)
+    reasons = pd.Series([""] * len(df), index=df.index)
+
+    dev_limit = cfg.get("hard_veto_deviation_pct", 15.0)
+    if "ma20" in df.columns and "close" in df.columns:
+        close = pd.to_numeric(df["close"], errors="coerce")
+        ma20 = pd.to_numeric(df["ma20"], errors="coerce")
+        dev = ((close - ma20) / ma20 * 100).where(ma20 > 0)
+        hit = dev.abs() > dev_limit
+        triggered |= hit.fillna(False)
+        reasons = reasons.where(~hit.fillna(False), reasons + f"乖離月線{dev_limit:.0f}%以上；")
+
+    if cfg.get("hard_veto_upper_wick") and all(
+            c in df.columns for c in ("open", "high", "low", "close", "volume", "avg_volume")):
+        o = pd.to_numeric(df["open"], errors="coerce")
+        h = pd.to_numeric(df["high"], errors="coerce")
+        l = pd.to_numeric(df["low"], errors="coerce")
+        c = pd.to_numeric(df["close"], errors="coerce")
+        vol = pd.to_numeric(df["volume"], errors="coerce")
+        avg = pd.to_numeric(df["avg_volume"], errors="coerce")
+        body_top = pd.concat([o, c], axis=1).max(axis=1)
+        upper_wick = h - body_top
+        candle_range = (h - l).where(lambda x: x > 0)
+        wick_ratio = upper_wick / candle_range
+        wick_hit = ((wick_ratio >= cfg.get("upper_wick_ratio", 0.6))
+                    & (vol >= avg * cfg.get("high_volume_ratio", 2.5))
+                    & (avg > 0)).fillna(False)
+        triggered |= wick_hit
+        reasons = reasons.where(~wick_hit, reasons + "帶量長上引線（疑似高檔出貨）；")
+
+    out = df[triggered].copy()
+    out["hard_veto_reason"] = reasons[triggered]
+    return out
+
+
+# ══════════════════════════════════════════════════════════════════
 #  資金管理：建議張數
 # ══════════════════════════════════════════════════════════════════
-def suggest_shares(price: float, cfg: dict = STRATEGY) -> int:
+def suggest_shares(price: float, cfg: dict = STRATEGY, avg_volume: float | None = None) -> int:
     """
     1% 風險法則（股為單位，支援零股）：
       單筆最大虧損 = capital × risk_per_trade；停損打到每股虧 price × stop_loss
       → 建議股數 = 風險額度 ÷ 每股風險。
     另設集中度天花板：單一部位市值 ≤ 資金 ÷ pick_top_n。
+    avg_volume 有給（近N日均量，股為單位）時，再加一道流動性天花板：單筆
+    ≤ 均量 × max_pct_of_avg_volume（2026-07-15，避免買到市場承載不了的量；
+    30萬小資金規模下通常不會真的卡到，是給未來資金放大用的護欄）。
     """
     if not price or price <= 0:
         return 0
@@ -279,7 +369,10 @@ def suggest_shares(price: float, cfg: dict = STRATEGY) -> int:
     shares_by_risk  = risk_budget / (price * cfg["stop_loss"])
     cap_value       = cfg["capital"] / max(cfg.get("pick_top_n", 5), 1)
     shares_by_cap   = cap_value / price
-    return max(math.floor(min(shares_by_risk, shares_by_cap)), 0)
+    candidates      = [shares_by_risk, shares_by_cap]
+    if avg_volume:
+        candidates.append(avg_volume * cfg.get("max_pct_of_avg_volume", 0.01))
+    return max(math.floor(min(candidates)), 0)
 
 
 def format_size(shares: int) -> str:

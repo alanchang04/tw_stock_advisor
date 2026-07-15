@@ -345,6 +345,22 @@ def _candidates_asof(data, d, industry_codes, top_n=5, cfg=None):
     return df.sort_values("score", ascending=False).head(top_n)["stock_id"].tolist()
 
 
+def is_limit_locked(change_pct: float | None, volume: float | None,
+                    avg_volume: float | None, cfg: dict = STRATEGY) -> bool:
+    """
+    跌停鎖死模擬（2026-07-15）：開盤跌幅≤門檻且量遠低於近5日均量 → 判定無法成交
+    （真實市場跌停鎖死時排隊賣不掉，回測若照樣強制成交會低估回撤/高估可實現報酬）。
+    change_pct 為百分比數值（如 -9.6 代表跌9.6%），純函式方便單獨測試。
+    """
+    limit_down_pct = cfg.get("limit_down_pct", -0.095)
+    lock_vol_ratio = cfg.get("limit_lock_vol_ratio", 0.10)
+    if change_pct is None or change_pct / 100 > limit_down_pct:
+        return False
+    if volume is None or not avg_volume:
+        return False
+    return volume < avg_volume * lock_vol_ratio
+
+
 # ── 主回測：真實進出場（round-trip）─────────────────────────────
 def run_backtest(top_n=None, rebalance=5, cfg=None, data=None, quiet=False,
                  start_date=None, end_date=None, parquet_dir=None, slippage=SLIPPAGE):
@@ -377,6 +393,15 @@ def run_backtest(top_n=None, rebalance=5, cfg=None, data=None, quiet=False,
         turnover_piv = turnover_piv.reindex(index=closes.index, columns=closes.columns)
         days = cfg.get("turnover_avg_days", TURNOVER_AVG_DAYS)
         data["_avg_turnover"] = turnover_piv.rolling(days, min_periods=1).mean()
+    if "_volume" not in data:           # 跌停鎖死偵測 + 成交量天花板（2026-07-15 人類練習軌規格）
+        vol_piv = data["prices"].pivot_table(index="trade_date", columns="stock_id", values="volume")
+        vol_piv = vol_piv.reindex(index=closes.index, columns=closes.columns)
+        data["_volume"] = vol_piv
+        chg_piv = data["prices"].pivot_table(index="trade_date", columns="stock_id", values="change_pct")
+        data["_change_pct"] = chg_piv.reindex(index=closes.index, columns=closes.columns)
+        liq_days = cfg.get("liquidity_avg_days", 5)
+        # shift(1)：baseline 用「當天以前」的量，避免鎖死當天的量把自己的基準拉低
+        data["_avg_volume_liq"] = vol_piv.shift(1).rolling(liq_days, min_periods=1).mean()
 
     # 市場濾網：大盤代理收盤 vs 其 60 日均線（逐日 bull/bear）
     regime_bull = None
@@ -416,6 +441,10 @@ def run_backtest(top_n=None, rebalance=5, cfg=None, data=None, quiet=False,
         except KeyError:
             return None
 
+    def _limit_locked(d, sid) -> bool:
+        return is_limit_locked(val(data["_change_pct"], d, sid), val(data["_volume"], d, sid),
+                               val(data["_avg_volume_liq"], d, sid), cfg)
+
     max_open = cfg.get("max_open_positions", 10)
     capital_per_slot = cfg["capital"] / max_open   # 假設每格等額資金（近似 suggest_shares 的風控上限）
 
@@ -445,7 +474,7 @@ def run_backtest(top_n=None, rebalance=5, cfg=None, data=None, quiet=False,
             if p is None:
                 continue
             op = val(opens, d, sid)
-            if op is None:            # 停牌/無開盤 → 明日再試
+            if op is None or _limit_locked(d, sid):   # 停牌/無開盤，或跌停鎖死賣不掉 → 明日再試
                 unfilled_exits.append((sid, reason))
                 continue
             fill = op * (1 - slippage)
@@ -459,10 +488,14 @@ def run_backtest(top_n=None, rebalance=5, cfg=None, data=None, quiet=False,
             if len(open_pos) >= max_open or sid in open_pos:
                 continue
             op = val(opens, d, sid)
-            if not op:
+            if not op or _limit_locked(d, sid):       # 跌停鎖死同樣沒有真實對手盤成交
                 continue
             fill = op * (1 + slippage)
-            shares = int(capital_per_slot // (fill * (1 + FEE_RATE)))
+            shares_by_cash = int(capital_per_slot // (fill * (1 + FEE_RATE)))
+            avg_vol = val(data["_avg_volume_liq"], d, sid)
+            shares_by_liq = (int(avg_vol * cfg.get("max_pct_of_avg_volume", 0.01))
+                             if avg_vol else shares_by_cash)
+            shares = min(shares_by_cash, shares_by_liq)
             if shares <= 0 or cash < shares * fill * (1 + FEE_RATE):
                 continue
             cash -= shares * fill * (1 + FEE_RATE)

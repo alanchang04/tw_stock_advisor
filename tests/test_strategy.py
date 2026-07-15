@@ -2,7 +2,10 @@
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from agent.strategy import decide_exit, suggest_shares, format_size, STRATEGY
+import pandas as pd
+
+from agent.strategy import (decide_exit, suggest_shares, format_size, STRATEGY,
+                            PRACTICE_CFG, compute_hard_vetoes)
 
 
 def cfg(**overrides):
@@ -129,3 +132,80 @@ def test_format_size():
     assert format_size(500) == "500 股（零股）"
     assert format_size(2000) == "2 張"
     assert format_size(1500) == "1 張 + 500 股"
+
+
+# ── 成交量天花板（2026-07-15 人類練習軌規格）───────────────────────
+def test_suggest_shares_respects_volume_cap():
+    c = cfg(capital=300_000, risk_per_trade=0.05, stop_loss=0.08, pick_top_n=5,
+           max_pct_of_avg_volume=0.01)
+    # 風險法/集中度都遠大於量能上限：均量100,000股 * 1% = 1000股
+    assert suggest_shares(60, c, avg_volume=100_000) == 1000
+
+def test_suggest_shares_volume_cap_not_binding_when_generous():
+    c = cfg(capital=300_000, risk_per_trade=0.01, stop_loss=0.08, pick_top_n=5)
+    # 均量很大時量能上限不生效，回到原本的風險法規則（625股，同上面的測試）
+    assert suggest_shares(60, c, avg_volume=100_000_000) == 625
+
+def test_suggest_shares_no_avg_volume_unaffected():
+    c = cfg(capital=300_000, risk_per_trade=0.01, stop_loss=0.08, pick_top_n=5)
+    assert suggest_shares(60, c) == 625   # 沒給 avg_volume 時行為不變（向下相容）
+
+
+# ── PRACTICE_CFG：人類交易員練習軌權重/門檻 ─────────────────────────
+def test_practice_cfg_disables_momentum_and_news_adjacent_factors():
+    assert PRACTICE_CFG["w_rs"] == 0
+    assert PRACTICE_CFG["w_momentum"] == 0
+    assert PRACTICE_CFG["w_foreign_buy"] == 0
+    assert PRACTICE_CFG["w_rev_yoy"] == 0   # 只看 rev_accel(>20%)，不看單純 >0
+
+def test_practice_cfg_only_three_quant_factors_active():
+    assert PRACTICE_CFG["w_invest_streak"] == 2.5
+    assert PRACTICE_CFG["w_trend_stack"] == 1.5
+    assert PRACTICE_CFG["w_rev_accel"] == 2.0
+
+def test_practice_cfg_requires_above_ma20_and_top20():
+    assert PRACTICE_CFG["above_ma20_only"] is True
+    assert PRACTICE_CFG["pick_top_n"] == 20
+
+def test_practice_cfg_inherits_liquidity_floor_from_strategy():
+    assert PRACTICE_CFG["min_turnover_avg5"] == STRATEGY["min_turnover_avg5"]
+    assert PRACTICE_CFG["min_close"] == STRATEGY["min_close"]
+
+
+# ── 空方硬否決規則（2026-07-15，程式層級強制）─────────────────────
+def _hv_df(**over):
+    base = dict(stock_id=["1111"], stock_name=["測試股"], close=[100.0], ma20=[100.0],
+               open=[95.0], high=[100.0], low=[95.0], volume=[1000.0], avg_volume=[1000.0])
+    base.update(over)
+    return pd.DataFrame(base)
+
+def test_hard_veto_triggers_on_deviation_from_ma20():
+    df = _hv_df(close=[120.0], ma20=[100.0])   # 乖離 +20% > 15% 門檻
+    out = compute_hard_vetoes(df)
+    assert len(out) == 1 and out.iloc[0]["stock_id"] == "1111"
+    assert "乖離月線" in out.iloc[0]["hard_veto_reason"]
+
+def test_hard_veto_not_triggered_within_deviation_threshold():
+    df = _hv_df(close=[110.0], ma20=[100.0])   # 乖離 +10% < 15% 門檻
+    assert compute_hard_vetoes(df).empty
+
+def test_hard_veto_triggers_on_upper_wick_with_volume():
+    # 開95收96，高100 → 上影線(100-96)/(100-95)=80% ≥ 60%；量2500 ≥ 均量1000*2.5
+    df = _hv_df(close=[96.0], ma20=[90.0], open=[95.0], high=[100.0], low=[95.0],
+               volume=[2500.0], avg_volume=[1000.0])
+    out = compute_hard_vetoes(df)
+    assert len(out) == 1
+    assert "上引線" in out.iloc[0]["hard_veto_reason"]
+
+def test_hard_veto_upper_wick_needs_both_ratio_and_volume():
+    # 上引線比例夠，但量不夠(只有均量的1.2倍) → 不觸發
+    df = _hv_df(close=[96.0], ma20=[90.0], open=[95.0], high=[100.0], low=[95.0],
+               volume=[1200.0], avg_volume=[1000.0])
+    assert compute_hard_vetoes(df).empty
+
+def test_hard_veto_missing_ohlc_columns_skips_wick_rule_gracefully():
+    df = pd.DataFrame(dict(stock_id=["1111"], close=[100.0], ma20=[100.0]))
+    assert compute_hard_vetoes(df).empty   # 沒 OHLC/量欄位也不會噴例外
+
+def test_hard_veto_empty_df_returns_empty():
+    assert compute_hard_vetoes(pd.DataFrame()).empty

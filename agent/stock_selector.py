@@ -190,6 +190,8 @@ def get_candidate_stocks(
 
     min_turnover = cfg.get("min_turnover_avg5", MIN_TURNOVER_AVG5)
     turnover_days = cfg.get("turnover_avg_days", TURNOVER_AVG_DAYS)
+    vol_avg_days = cfg.get("volume_avg_days", 20)
+    above_ma20_clause = "AND p.close > t.ma20" if cfg.get("above_ma20_only") else ""
 
     with get_session() as session:
         result = session.execute(text(f"""
@@ -202,14 +204,25 @@ def get_candidate_stocks(
                 FROM daily_prices
                 WHERE trade_date IN (SELECT trade_date FROM recent_dates)
                 GROUP BY stock_id
+            ),
+            vol_dates AS (
+                SELECT DISTINCT trade_date FROM daily_prices
+                ORDER BY trade_date DESC LIMIT :vol_avg_days
+            ),
+            avg_volume AS (
+                SELECT stock_id, AVG(volume) AS avg_volume
+                FROM daily_prices
+                WHERE trade_date IN (SELECT trade_date FROM vol_dates)
+                GROUP BY stock_id
             )
             SELECT DISTINCT ON (s.stock_id)
                 s.stock_id,
                 s.stock_name,
                 i.name_zh        AS industry,
-                p.close,
+                p.open, p.high, p.low, p.close,
                 p.change_pct,
                 p.volume,
+                COALESCE(av.avg_volume, 0) AS avg_volume,
                 t.ma5, t.ma20, t.ma60, t.rsi14, t.macd_hist,
                 t.signal_ma_cross, t.signal_breakout,
                 COALESCE(inst.total_net, 0)   AS inst_net,
@@ -225,6 +238,7 @@ def get_candidate_stocks(
             JOIN technical_indicators t ON t.stock_id = m.stock_id
                 AND t.trade_date = p.trade_date
             JOIN avg_turnover at ON at.stock_id = m.stock_id
+            LEFT JOIN avg_volume av ON av.stock_id = m.stock_id
             LEFT JOIN institutional_trading inst ON inst.stock_id = m.stock_id
                 AND inst.trade_date = p.trade_date
             WHERE p.close >= :min_close
@@ -233,12 +247,14 @@ def get_candidate_stocks(
             AND t.rsi14 BETWEEN :min_rsi AND :max_rsi
             AND t.ma5 IS NOT NULL
             AND t.ma20 IS NOT NULL
+            {above_ma20_clause}
             {gate_clause}
         """), {
             "min_close":  MIN_CLOSE,
             "min_volume": MIN_VOLUME,
             "min_turnover": min_turnover,
             "turnover_days": turnover_days,
+            "vol_avg_days": vol_avg_days,
             "min_rsi":    min_rsi,
             "max_rsi":    max_rsi,
         })
@@ -250,6 +266,20 @@ def get_candidate_stocks(
         return pd.DataFrame()
 
     df = pd.DataFrame(rows, columns=cols)
+
+    # 空方硬否決規則（2026-07-15，程式層級強制）：乖離月線太遠/帶量長上引線，
+    # 直接排除、不進辯論也不進練習軌清單（見 strategy.compute_hard_vetoes 註解）。
+    try:
+        from agent.strategy import compute_hard_vetoes
+        hard_excluded = compute_hard_vetoes(df, cfg)
+        if not hard_excluded.empty:
+            df = df[~df["stock_id"].isin(hard_excluded["stock_id"])].copy()
+            logger.warning(f"⚠️ 硬否決規則排除 {len(hard_excluded)} 檔：" +
+                           ", ".join(f"{r.stock_id}({r.hard_veto_reason.strip('；')})"
+                                     for r in hard_excluded.itertuples()))
+    except Exception as e:
+        logger.warning(f"硬否決規則檢查失敗（略過，不阻擋流程）: {e}")
+        hard_excluded = pd.DataFrame()
 
     # 趨勢/題材因子（相對強度/多頭排列持續/投信連買）——與回測共用同一份計算
     try:
@@ -317,9 +347,22 @@ def get_candidate_stocks(
     if not candidates.attrs["inst_data_ok"]:
         logger.warning("⚠️ quality gate：法人資料缺失/落後（日期未跟上或候選全0），"
                        "將在給 LLM 的資料中明確標註，禁止拿 0 當論證依據")
+    candidates.attrs["hard_excluded"] = (
+        hard_excluded[["stock_id", "stock_name", "hard_veto_reason"]].to_dict("records")
+        if not hard_excluded.empty else [])
 
     logger.info(f"篩選出 {len(candidates)} 支候選股票（{'族群閘門' if use_gate else '全市場趨勢/題材'}）")
     return candidates
+
+
+def get_practice_candidates(top_n: int = 20) -> pd.DataFrame:
+    """
+    人類交易員練習軌（2026-07-15）：純量化、不進 LLM，每日輸出前 top_n 檔給使用者自己
+    用純線圖（20MA+成交量）練手動判斷進出場。重用 get_candidate_stocks 的篩選/因子計算，
+    只是換一份權重與門檻（PRACTICE_CFG，見 agent/strategy.py）——跟 AI 軌完全獨立。
+    """
+    from agent.strategy import PRACTICE_CFG
+    return get_candidate_stocks([], top_n=top_n, cfg=PRACTICE_CFG)
 
 
 def _recent_news_map(stock_ids: list[str], days: int = 30, per_stock: int = 3) -> dict:
