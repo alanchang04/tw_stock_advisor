@@ -16,7 +16,8 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from database.connection import get_session
 from agent.strategy import (STRATEGY, score_candidates, split_adjust,
-                            compute_factor_matrices)
+                            compute_factor_matrices, compute_new_entry_flag,
+                            apply_liquidity_gate)
 
 
 # 排除非個股的產業類別（ETF、指數等）
@@ -146,7 +147,7 @@ def _live_factor_maps(cfg: dict) -> dict:
                 SELECT DISTINCT trade_date FROM institutional_trading ORDER BY trade_date DESC LIMIT 70) d)
         """)).fetchall(), columns=["stock_id", "trade_date", "invest_net"])
     if px.empty:
-        return {"rs20": {}, "stack_days": {}, "invest_streak": {}}
+        return {"rs20": {}, "stack_days": {}, "invest_streak": {}, "invest_new_entry": {}}
     for d in (px, tk, it):
         for c in d.columns:
             if c not in ("stock_id", "trade_date"):
@@ -157,11 +158,14 @@ def _live_factor_maps(cfg: dict) -> dict:
     ma60p = tk.pivot_table(index="trade_date", columns="stock_id", values="ma60")
     invest = it.pivot_table(index="trade_date", columns="stock_id", values="invest_net")
     rs20, stack_days, inv_streak = compute_factor_matrices(closes, ma5p, ma20p, ma60p, invest)
+    new_entry = compute_new_entry_flag(invest.reindex(index=closes.index, columns=closes.columns),
+                                       cfg.get("new_entry_min_lots", 50))
     last = closes.index.max()
     return {
         "rs20":          rs20.loc[last].to_dict() if last in rs20.index else {},
         "stack_days":    stack_days.loc[last].to_dict() if last in stack_days.index else {},
         "invest_streak": inv_streak.loc[last].to_dict() if last in inv_streak.index else {},
+        "invest_new_entry": new_entry.loc[last].to_dict() if last in new_entry.index else {},
     }
 
 
@@ -192,6 +196,11 @@ def get_candidate_stocks(
     turnover_days = cfg.get("turnover_avg_days", TURNOVER_AVG_DAYS)
     vol_avg_days = cfg.get("volume_avg_days", 20)
     above_ma20_clause = "AND p.close > t.ma20" if cfg.get("above_ma20_only") else ""
+    # SQL 端只用「較寬鬆」的門檻粗篩（真正的 OR 邏輯留到 Python 端 apply_liquidity_gate，
+    # 因為投信新進場旗標要靠多日 pivot 算，SQL 裡做不了），沒開流動性OR閘門就用原門檻。
+    sql_turnover_floor = (min(min_turnover, cfg.get("alt_min_turnover_avg5", min_turnover))
+                          if cfg.get("allow_new_entry_alt_gate") else min_turnover)
+    etf_lookback = cfg.get("etf_accum_lookback_days", 10)
 
     with get_session() as session:
         result = session.execute(text(f"""
@@ -214,6 +223,13 @@ def get_candidate_stocks(
                 FROM daily_prices
                 WHERE trade_date IN (SELECT trade_date FROM vol_dates)
                 GROUP BY stock_id
+            ),
+            etf_accum AS (
+                SELECT stock_id, COUNT(DISTINCT etf_id) AS etf_accum_count
+                FROM etf_changes
+                WHERE change_type IN ('increased', 'added')
+                  AND detected_date >= CURRENT_DATE - CAST(:etf_lookback AS int)
+                GROUP BY stock_id
             )
             SELECT DISTINCT ON (s.stock_id)
                 s.stock_id,
@@ -222,7 +238,9 @@ def get_candidate_stocks(
                 p.open, p.high, p.low, p.close,
                 p.change_pct,
                 p.volume,
+                at.avg_turnover,
                 COALESCE(av.avg_volume, 0) AS avg_volume,
+                COALESCE(ea.etf_accum_count, 0) AS etf_accum_count,
                 t.ma5, t.ma20, t.ma60, t.rsi14, t.macd_hist,
                 t.signal_ma_cross, t.signal_breakout,
                 COALESCE(inst.total_net, 0)   AS inst_net,
@@ -239,11 +257,12 @@ def get_candidate_stocks(
                 AND t.trade_date = p.trade_date
             JOIN avg_turnover at ON at.stock_id = m.stock_id
             LEFT JOIN avg_volume av ON av.stock_id = m.stock_id
+            LEFT JOIN etf_accum ea ON ea.stock_id = m.stock_id
             LEFT JOIN institutional_trading inst ON inst.stock_id = m.stock_id
                 AND inst.trade_date = p.trade_date
             WHERE p.close >= :min_close
             AND p.volume >= :min_volume
-            AND at.avg_turnover >= :min_turnover
+            AND at.avg_turnover >= :sql_turnover_floor
             AND t.rsi14 BETWEEN :min_rsi AND :max_rsi
             AND t.ma5 IS NOT NULL
             AND t.ma20 IS NOT NULL
@@ -252,9 +271,10 @@ def get_candidate_stocks(
         """), {
             "min_close":  MIN_CLOSE,
             "min_volume": MIN_VOLUME,
-            "min_turnover": min_turnover,
+            "sql_turnover_floor": sql_turnover_floor,
             "turnover_days": turnover_days,
             "vol_avg_days": vol_avg_days,
+            "etf_lookback": etf_lookback,
             "min_rsi":    min_rsi,
             "max_rsi":    max_rsi,
         })
@@ -281,10 +301,10 @@ def get_candidate_stocks(
         logger.warning(f"硬否決規則檢查失敗（略過，不阻擋流程）: {e}")
         hard_excluded = pd.DataFrame()
 
-    # 趨勢/題材因子（相對強度/多頭排列持續/投信連買）——與回測共用同一份計算
+    # 趨勢/題材因子（相對強度/多頭排列持續/投信連買/投信新進場）——與回測共用同一份計算
     try:
         fmaps = _live_factor_maps(cfg)
-        for col in ("rs20", "stack_days", "invest_streak"):
+        for col in ("rs20", "stack_days", "invest_streak", "invest_new_entry"):
             df[col] = df["stock_id"].map(fmaps[col])
     except Exception as e:
         logger.warning(f"趨勢/題材因子計算失敗（略過此因子）: {e}")
@@ -321,6 +341,13 @@ def get_candidate_stocks(
         df["rev_yoy"] = df["stock_id"].map(rev_map)
     except Exception as e:
         logger.warning(f"月營收因子讀取失敗（略過）: {e}")
+
+    # 流動性 OR 閘門（2026-07-15）：SQL 端只粗篩到較寬鬆的門檻，這裡才用算好的
+    # invest_new_entry 因子做精確判斷（成交金額達標 OR 投信新進場+較低下限）。
+    before_gate = len(df)
+    df = apply_liquidity_gate(df, cfg)
+    if cfg.get("allow_new_entry_alt_gate") and len(df) < before_gate:
+        logger.info(f"流動性門檻：{before_gate}→{len(df)} 檔（OR閘門已套用）")
 
     # 綜合評分：統一使用 strategy.score_candidates（與回測共用同一份邏輯）
     df["score"] = score_candidates(df, cfg)
@@ -449,9 +476,15 @@ def format_candidates_for_llm(df: pd.DataFrame, news_map: dict | None = None) ->
             ivs = _f(row.get("invest_streak"))
             if ivs:
                 chips.append(f"投信連買 {ivs:.0f} 日")
+            if row.get("invest_new_entry"):
+                chips.append("投信新進場(剛開始買，非連買多日)")
             blk.append("  籌碼：" + "｜".join(chips))
         else:
             blk.append("  籌碼：法人資料缺失（今日尚未更新），不可據此論證")
+
+        etf_n = _f(row.get("etf_accum_count"))
+        if etf_n:
+            blk.append(f"  主動式ETF：近期 {etf_n:.0f} 檔加碼/新增（見市場情報ETF換股偵測）")
 
         blk.append(f"  單日技術訊號（僅供進出場時機參考）：均線 {ma_cross}｜突破 {breakout}")
 

@@ -46,6 +46,17 @@ STRATEGY = {
     "w_trend_stack":  1.5,  # 多頭排列 MA5>MA20>MA60 持續天數——抓「已確認的趨勢」非今天剛交叉
     "w_invest_streak": 2.5, # 投信連續買超（含量體門檻）——「買氣」升權，追大戶的錢
 
+    # ── 2026-07-15：中小型股×投信剛開始買（使用者要求）──
+    "w_invest_new_entry": 2.0,   # 投信新進場（連買1~2日+當日量體達標）——跟上面的
+                                  # w_invest_streak方向相反，這裡抓「剛開始買」不是「已經買很多天」
+    "new_entry_min_lots": 50,    # 新進場門檻：當日投信買超 ≥ 50 張才算數（避免雜訊）
+    "w_etf_accum": 1.0,          # 近期有幾檔主動式ETF加碼/新增（輔助佐證，非硬性門檻）
+    "etf_accum_lookback_days": 10,
+
+    # ── 流動性 OR 閘門（2026-07-15）：成交金額達標，或投信新進場+較低流動性下限也放行 ──
+    "allow_new_entry_alt_gate": True,   # AI 軌開啟；PRACTICE_CFG 會覆寫成 False
+    "alt_min_turnover_avg5": 30_000_000,  # 替代路徑的流動性下限（3千萬/日，比主門檻低但非0）
+
     # ── 市場濾網（regime filter）──
     # 大盤代理（0050 收盤 vs MA60）：空頭時 (a) 不開新倉 (b) 出場加回死亡交叉保護
     # 這是對「多頭年調參、空頭無保護」的補強——參考常見趨勢跟蹤系統的 market filter
@@ -143,7 +154,10 @@ PRACTICE_CFG = {
     "w_trend_stack":   1.5,   # 多頭排列天數（趨勢優勢）
     "w_invest_streak": 2.5,   # 投信連續買超（籌碼優勢）
     "w_rev_accel":     2.0,   # 月營收年增 >20%（基本面優勢）
+    "w_invest_new_entry": 0.0,  # 練習軌不用「新進場」因子，維持單純機械（2026-07-15決策）
+    "w_etf_accum": 0.0,
     "above_ma20_only": True,  # 硬門檻：股價必須站上月線
+    "allow_new_entry_alt_gate": False,  # 練習軌不開流動性OR閘門，只用單一嚴格門檻
     "pick_top_n": 20,
 }
 
@@ -251,6 +265,55 @@ def compute_factor_matrices(closes, ma5p, ma20p, ma60p, invest):
 
 
 # ══════════════════════════════════════════════════════════════════
+#  投信「新進場」（2026-07-15，使用者要求：中小型股×投信剛開始買）
+#  跟上面的 inv_streak 方向刻意相反：inv_streak 獎勵「已經連買很多天、
+#  累計量體夠大」的股票（追蹤大戶已確立的部位）；這裡要抓的是「連買
+#  第1~2天、單日量體就夠大」——趁還沒漲一大段時就進場，不是追上車。
+# ══════════════════════════════════════════════════════════════════
+NEW_ENTRY_MAX_STREAK_DAYS = 2   # 連買天數 1~2 天內才算「新進場」
+
+def compute_new_entry_flag(invest: pd.DataFrame, min_lots: float = 50) -> pd.DataFrame:
+    """
+    輸入：invest（日期×股票，投信單日淨買超，股為單位）。
+    回傳：布林矩陣，True＝當日是投信連續買超的第1或第2天、且當日單日買超
+          量體 ≥ min_lots 張（避免雜訊：買100股也連續2天不該算「新進場」）。
+    """
+    is_pos = invest > 0
+    streak = _consecutive_true(is_pos.fillna(False))
+    today_lots = (invest.where(is_pos, 0.0) / 1000.0)   # 股→張，當日量體
+    return (streak >= 1) & (streak <= NEW_ENTRY_MAX_STREAK_DAYS) & (today_lots >= min_lots)
+
+
+# ══════════════════════════════════════════════════════════════════
+#  流動性門檻（OR 邏輯，2026-07-15）：成交金額≥門檻，或「投信新進場＋
+#  夠低的流動性下限」也放行——投信有揭露義務、不是隨便的主力，多方機構
+#  同時確認的訊號強度不輸「單純成交金額大」，讓真正被機構買進的中小型
+#  股也有入場券，同時仍保留最低流動性下限，不是完全不設防。
+#  只用於 AI 軌（STRATEGY），練習軌（PRACTICE_CFG）刻意不啟用，維持單純。
+# ══════════════════════════════════════════════════════════════════
+def apply_liquidity_gate(df: pd.DataFrame, cfg: dict = STRATEGY) -> pd.DataFrame:
+    """
+    輸入：含 avg_turnover 欄位（近N日均成交金額）的候選 DataFrame，
+          若已算出 invest_new_entry 欄位（bool）則納入 OR 判斷，沒有就只看主門檻。
+    回傳：通過門檻的子集。
+    """
+    if df.empty:
+        return df
+    min_turnover = cfg.get("min_turnover_avg5", STRATEGY["min_turnover_avg5"])
+    if not cfg.get("allow_new_entry_alt_gate"):
+        return df[pd.to_numeric(df.get("avg_turnover", 0), errors="coerce").fillna(0) >= min_turnover]
+
+    alt_turnover = cfg.get("alt_min_turnover_avg5", 30_000_000)
+    turnover = pd.to_numeric(df.get("avg_turnover", 0), errors="coerce").fillna(0)
+    main_ok = turnover >= min_turnover
+    if "invest_new_entry" in df.columns:
+        alt_ok = df["invest_new_entry"].fillna(False).astype(bool) & (turnover >= alt_turnover)
+    else:
+        alt_ok = pd.Series(False, index=df.index)
+    return df[main_ok | alt_ok]
+
+
+# ══════════════════════════════════════════════════════════════════
 #  進場評分
 # ══════════════════════════════════════════════════════════════════
 def score_candidates(df: pd.DataFrame, cfg: dict = STRATEGY) -> pd.Series:
@@ -298,6 +361,14 @@ def score_candidates(df: pd.DataFrame, cfg: dict = STRATEGY) -> pd.Series:
         yoy = pd.to_numeric(df["rev_yoy"], errors="coerce")
         s += (yoy > 0).fillna(False).astype(float) * cfg.get("w_rev_yoy", 0)
         s += (yoy > 20).fillna(False).astype(float) * cfg.get("w_rev_accel", 0)
+
+    # ── 投信新進場（2026-07-15，中小型股×投信剛開始買）──
+    if "invest_new_entry" in df.columns and cfg.get("w_invest_new_entry", 0) > 0:
+        s += df["invest_new_entry"].fillna(False).astype(float) * cfg["w_invest_new_entry"]
+    # ── 主動式ETF近期增碼檔數（輔助佐證，2日封頂做0~1飽和）──
+    if "etf_accum_count" in df.columns and cfg.get("w_etf_accum", 0) > 0:
+        ec = pd.to_numeric(df["etf_accum_count"], errors="coerce").fillna(0)
+        s += (ec.clip(0, 2) / 2.0) * cfg["w_etf_accum"]
     return s
 
 

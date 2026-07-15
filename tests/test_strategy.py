@@ -5,7 +5,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import pandas as pd
 
 from agent.strategy import (decide_exit, suggest_shares, format_size, STRATEGY,
-                            PRACTICE_CFG, compute_hard_vetoes)
+                            PRACTICE_CFG, compute_hard_vetoes,
+                            compute_new_entry_flag, apply_liquidity_gate)
 
 
 def cfg(**overrides):
@@ -209,3 +210,97 @@ def test_hard_veto_missing_ohlc_columns_skips_wick_rule_gracefully():
 
 def test_hard_veto_empty_df_returns_empty():
     assert compute_hard_vetoes(pd.DataFrame()).empty
+
+
+# ── 投信新進場（2026-07-15，中小型股×投信剛開始買）───────────────────
+def _invest_series(*vals):
+    """依日期序列(股為單位)建一欄的 DataFrame，模擬 compute_new_entry_flag 的輸入。"""
+    idx = pd.date_range("2026-01-01", periods=len(vals))
+    return pd.DataFrame({"1111": vals}, index=idx)
+
+def test_new_entry_true_on_day1_with_enough_lots():
+    # 連買第1日，當日買超60張(60000股) ≥ 50張門檻
+    df = _invest_series(60_000)
+    out = compute_new_entry_flag(df, min_lots=50)
+    assert out.iloc[-1]["1111"] == True
+
+def test_new_entry_true_on_day2():
+    df = _invest_series(60_000, 60_000)   # 連買第2日
+    out = compute_new_entry_flag(df, min_lots=50)
+    assert out.iloc[-1]["1111"] == True
+
+def test_new_entry_false_on_day3_already_established():
+    df = _invest_series(60_000, 60_000, 60_000)   # 連買第3日，不算「剛開始」
+    out = compute_new_entry_flag(df, min_lots=50)
+    assert out.iloc[-1]["1111"] == False
+
+def test_new_entry_false_when_lots_too_small():
+    df = _invest_series(10_000)   # 只有10張，< 50張門檻，雜訊排除
+    out = compute_new_entry_flag(df, min_lots=50)
+    assert out.iloc[-1]["1111"] == False
+
+def test_new_entry_false_when_not_buying():
+    df = _invest_series(60_000, -5_000)   # 昨天連買今天轉賣，streak斷了
+    out = compute_new_entry_flag(df, min_lots=50)
+    assert out.iloc[-1]["1111"] == False
+
+
+# ── 流動性 OR 閘門（2026-07-15）───────────────────────────────────
+def _liq_df(**over):
+    base = dict(stock_id=["1111", "2222"], avg_turnover=[100_000_000.0, 300_000_000.0],
+               invest_new_entry=[False, False])
+    base.update(over)
+    return pd.DataFrame(base)
+
+def test_gate_passes_main_turnover_threshold():
+    # 2222 成交金額3億 ≥ 2億主門檻 → 通過；1111 只有1億且無新進場 → 剔除
+    out = apply_liquidity_gate(_liq_df(), cfg(allow_new_entry_alt_gate=True))
+    assert list(out["stock_id"]) == ["2222"]
+
+def test_gate_alt_path_admits_new_entry_small_cap():
+    # 1111 成交金額1億(<2億但≥3千萬alt下限)+投信新進場 → OR閘門放行
+    out = apply_liquidity_gate(_liq_df(invest_new_entry=[True, False]),
+                               cfg(allow_new_entry_alt_gate=True))
+    assert set(out["stock_id"]) == {"1111", "2222"}
+
+def test_gate_alt_path_rejects_below_alt_floor_even_with_new_entry():
+    # 投信新進場但成交金額只有2千萬，連替代下限(3千萬)都不到 → 仍剔除
+    df = _liq_df(avg_turnover=[20_000_000.0, 300_000_000.0], invest_new_entry=[True, False])
+    out = apply_liquidity_gate(df, cfg(allow_new_entry_alt_gate=True))
+    assert list(out["stock_id"]) == ["2222"]
+
+def test_gate_disabled_falls_back_to_single_threshold():
+    # OR閘門關閉時（如PRACTICE_CFG），新進場不能當替代路徑
+    out = apply_liquidity_gate(_liq_df(invest_new_entry=[True, False]),
+                               cfg(allow_new_entry_alt_gate=False))
+    assert list(out["stock_id"]) == ["2222"]
+
+def test_gate_practice_cfg_has_or_gate_disabled():
+    out = apply_liquidity_gate(_liq_df(invest_new_entry=[True, False]), PRACTICE_CFG)
+    assert list(out["stock_id"]) == ["2222"]
+
+def test_gate_empty_df():
+    assert apply_liquidity_gate(pd.DataFrame(), cfg()).empty
+
+
+# ── score_candidates：新增的兩個因子 ───────────────────────────────
+def test_score_rewards_invest_new_entry():
+    from agent.strategy import score_candidates
+    df = pd.DataFrame(dict(
+        stock_id=["1111", "2222"], signal_ma_cross=[0, 0], signal_breakout=[0, 0],
+        macd_hist=[0.0, 0.0], inst_net=[0, 0], foreign_net=[0, 0], rsi14=[60, 60],
+        invest_new_entry=[True, False],
+    ))
+    s = score_candidates(df, cfg(w_invest_new_entry=2.0))
+    assert s.iloc[0] > s.iloc[1]
+
+def test_score_rewards_etf_accum_count_capped():
+    from agent.strategy import score_candidates
+    df = pd.DataFrame(dict(
+        stock_id=["1111", "2222", "3333"], signal_ma_cross=[0, 0, 0], signal_breakout=[0, 0, 0],
+        macd_hist=[0.0, 0.0, 0.0], inst_net=[0, 0, 0], foreign_net=[0, 0, 0], rsi14=[60, 60, 60],
+        etf_accum_count=[0, 1, 5],   # 5檔應被封頂在2檔的滿分
+    ))
+    s = score_candidates(df, cfg(w_etf_accum=1.0))
+    assert s.iloc[1] > s.iloc[0]
+    assert s.iloc[2] == s.iloc[1] * 2   # 5檔封頂=2檔滿分，剛好是1檔的兩倍

@@ -27,10 +27,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from database.connection import get_session
 from agent.stock_selector import (
     EXCLUDE_INDUSTRIES, MIN_RSI, MAX_RSI, MIN_CLOSE, MIN_VOLUME,
-    MIN_TURNOVER_AVG5, TURNOVER_AVG_DAYS,
+    TURNOVER_AVG_DAYS,
 )
 from agent.strategy import (STRATEGY, score_candidates, decide_exit, split_adjust,
-                            compute_factor_matrices,
+                            compute_factor_matrices, compute_new_entry_flag, apply_liquidity_gate,
                             # 交易成本/成交假設：單一事實來源在 strategy.py（回測與即時帳本共用）
                             FEE_RATE, TAX_RATE, SLIPPAGE, net_return)
 
@@ -208,7 +208,7 @@ def _normalize(s: pd.Series) -> pd.Series:
 #   2026-07-09 選股重構新增的「可回測」因子：相對強度、多頭排列持續、投信連買，
 #   取代原本只認「今天剛發生訊號」的單日技術面 event flags。
 #   實際計算在 strategy.compute_factor_matrices（回測與即時選股共用同一份）。
-def _precompute_factors(data: dict) -> None:
+def _precompute_factors(data: dict, cfg: dict = STRATEGY) -> None:
     closes = data["_closes"]
     tech = data["tech"]
     ma5p  = tech.pivot_table(index="trade_date", columns="stock_id", values="ma5")
@@ -217,6 +217,10 @@ def _precompute_factors(data: dict) -> None:
     invest = data["inst"].pivot_table(index="trade_date", columns="stock_id", values="invest_net")
     data["_rs20"], data["_stack_days"], data["_inv_streak"] = \
         compute_factor_matrices(closes, ma5p, ma20p, ma60p, invest)
+    # 投信新進場（2026-07-15）：可回測，用同一份法人歷史資料算——跟ETF增碼不同，
+    # 這個因子完全靠 institutional_trading，沒有ETF訊號那種資料量稀薄的問題。
+    invest_r = invest.reindex(index=closes.index, columns=closes.columns)
+    data["_new_entry"] = compute_new_entry_flag(invest_r, cfg.get("new_entry_min_lots", 50))
 
 
 # ── 某日（含當天）為止的熱門族群 ─────────────────────────────────
@@ -308,14 +312,24 @@ def _candidates_asof(data, d, industry_codes, top_n=5, cfg=None):
         return []
     df = df.copy()
 
+    # 趨勢/題材新因子：相對強度、多頭排列持續、投信連買、投信新進場
+    # （O(1) 查預算矩陣的當日列；要先算好才能給下面的流動性OR閘門用 invest_new_entry）
+    for col, key in [("rs20", "_rs20"), ("stack_days", "_stack_days"),
+                     ("invest_streak", "_inv_streak"), ("invest_new_entry", "_new_entry")]:
+        mat = data.get(key)
+        if mat is not None and d in mat.index:
+            df[col] = df["stock_id"].map(mat.loc[d])
+
     # 成交金額（流動性/抗操控）門檻：舊資料（無 turnover 欄位，如老師歷史檔）全 NaN 時優雅跳過。
+    # 2026-07-15 起改用 apply_liquidity_gate（OR邏輯：成交金額達標 OR 投信新進場+較低下限）；
+    # ETF增碼訊號資料量太稀薄不進回測（同新聞的限制），backtest 沒有 etf_accum_count 欄位，
+    # score_candidates 會自動跳過那個因子，不影響其他分數。
     avg_to = data.get("_avg_turnover")
     if avg_to is not None and d in avg_to.index:
         to_row = avg_to.loc[d]
         if to_row.notna().any():
-            min_turnover = cfg.get("min_turnover_avg5", MIN_TURNOVER_AVG5)
-            df["_avg_turnover"] = df["stock_id"].map(to_row)
-            df = df[df["_avg_turnover"] >= min_turnover]
+            df["avg_turnover"] = df["stock_id"].map(to_row)
+            df = apply_liquidity_gate(df, cfg)
             if df.empty:
                 return []
 
@@ -326,13 +340,6 @@ def _candidates_asof(data, d, industry_codes, top_n=5, cfg=None):
         if i >= 60:
             mom = (piv.iloc[i] / piv.iloc[i - 60] - 1)
             df["mom60"] = df["stock_id"].map(mom)
-
-    # 趨勢/題材新因子：相對強度、多頭排列持續、投信連買（O(1) 查預算矩陣的當日列）
-    for col, key in [("rs20", "_rs20"), ("stack_days", "_stack_days"),
-                     ("invest_streak", "_inv_streak")]:
-        mat = data.get(key)
-        if mat is not None and d in mat.index:
-            df[col] = df["stock_id"].map(mat.loc[d])
 
     # 月營收年增（point-in-time：只用當日已公布的月份，避免前視偏差）
     rev_map = data.get("rev_map")
@@ -386,8 +393,8 @@ def run_backtest(top_n=None, rebalance=5, cfg=None, data=None, quiet=False,
     closes = data["prices"].pivot_table(index="trade_date", columns="stock_id", values="close")
     closes = closes.where(closes > 0)   # close<=0 為資料瑕疵(停牌/無成交)，視為缺值
     data["_closes"] = closes            # 供 _candidates_asof 算 60 日動能
-    if "_rs20" not in data:             # 趨勢/題材因子矩陣（相對強度/多頭排列/投信連買）
-        _precompute_factors(data)
+    if "_rs20" not in data:             # 趨勢/題材因子矩陣（相對強度/多頭排列/投信連買/新進場）
+        _precompute_factors(data, cfg)
     if "_avg_turnover" not in data:     # 近N日均成交金額（流動性/抗操控門檻，SPEC_STRATEGY_MIDCAP）
         turnover_piv = data["prices"].pivot_table(index="trade_date", columns="stock_id", values="turnover")
         turnover_piv = turnover_piv.reindex(index=closes.index, columns=closes.columns)
