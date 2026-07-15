@@ -122,7 +122,7 @@ def _run_debate(candidates_text: str, hot_sectors: list[str]) -> tuple[dict, dic
             "3. evidence_fields：列出你論點實際引用的資料欄位名。\n"
             '輸出 JSON：{"picks":[{"stock_id":"","stock_name":"","thesis":"",'
             '"evidence_fields":["rs20","rev_yoy"],"preempt_rebuttal":""}]}',
-            max_tokens=2000, rec=rec, json_mode=True,
+            max_tokens=2600, rec=rec, json_mode=True,
         )
         bull_pack["raw"] = raw
         bull_pack["data"] = _parse_json(raw) if raw else None
@@ -144,11 +144,11 @@ def _run_debate(candidates_text: str, hot_sectors: list[str]) -> tuple[dict, dic
             "「veto」＝基於數據有具體理由絕對不該碰（例：外資大額賣超疑似出貨、跌勢未止、"
             "資料異常）；「caution」＝有風險但可控（例：RSI 偏高但趨勢完整）。"
             "不要把所有 RSI>70 一律打成 veto——動能股本來就常在高檔，要看趨勢結構是否完好。\n"
-            "2. 每條異議必須引用具體數據，禁止空泛形容。\n"
-            "3. market_concerns：族群集中度/整體市場層面的疑慮。\n"
+            "2. 每條異議必須引用具體數據，reason 精簡在 40 字內。\n"
+            "3. market_concerns：族群集中度/整體市場疑慮，最多 3 條、每條一句話。\n"
             '輸出 JSON：{"vetoes":[{"stock_id":"","stock_name":"","severity":"veto|caution",'
             '"reason":"引用具體數據的異議"}],"market_concerns":["..."]}',
-            max_tokens=1600, rec=rec, json_mode=True,
+            max_tokens=3200, rec=rec, json_mode=True,
         )
         bear_pack["raw"] = raw
         bear_pack["data"] = _parse_json(raw) if raw else None
@@ -159,8 +159,12 @@ def _run_debate(candidates_text: str, hot_sectors: list[str]) -> tuple[dict, dic
             _c = [v for v in bear_pack["data"].get("vetoes", []) if v.get("severity") != "veto"]
             rec.summary = (f"VETO {len(_v)} 檔（{', '.join(x.get('stock_id', '?') for x in _v) or '無'}）"
                            f"＋提醒 {len(_c)} 檔")
+        elif raw:
+            # 有輸出但解析不出結構 → guardrail 會失效，這件事必須顯性化，不能默默降級
+            rec.summary = "⚠️ 空方 JSON 解析失敗 → 裁決問責 guardrail 本次未啟用（VETO 不會被強制）"
+            logger.warning("⚠️ 空方 JSON 無法解析，apply_judge_guardrail 本次不會攔截任何 VETO")
         else:
-            rec.summary = ("JSON 解析失敗，退化為散文模式" if raw else "呼叫失敗（裁決將退化為單次模式）")
+            rec.summary = "呼叫失敗（裁決將退化為單次模式）"
         rec.payload = {"text": raw, "parsed": bear_pack["data"]} if raw else None
 
     return bull_pack, bear_pack
@@ -368,7 +372,15 @@ def _parse_json(text: str) -> dict:
         except Exception:
             pass
 
-    # 截斷救援：推薦物件內無巢狀大括號（key_signals 是陣列），可逐一抽出
+    # 通用截斷救援：被 token 上限切斷的 JSON（關未結束的字串、補未閉合的括號）。
+    # 2026-07-14 修：空方輸出結構是 {"vetoes":[...],"market_concerns":[...]}，
+    # 舊版只認 recommendations，導致空方一截斷就整包丟掉、guardrail 靜默失效。
+    repaired = _repair_truncated_json(text)
+    if isinstance(repaired, dict) and repaired:
+        logger.warning("JSON 被截斷，已補齊救回（建議檢查 max_tokens 是否過小）")
+        return repaired
+
+    # 舊的推薦專用救援（保底）：推薦物件內無巢狀大括號，可逐一抽出
     recs = []
     for m in re.finditer(r"\{[^{}]*?\"stock_id\"[^{}]*?\}", text, re.DOTALL):
         try:
@@ -381,6 +393,56 @@ def _parse_json(text: str) -> dict:
 
     logger.error(f"JSON 解析失敗，原始內容：\n{text[:500]}")
     return {}
+
+
+def _close_json(prefix: str) -> str:
+    """把一段（可能被截斷的）JSON 前綴補成語法完整：關未結束的字串、補未閉合的括號、去尾逗號。"""
+    stack, in_str, esc = [], False, False
+    for ch in prefix:
+        if esc:
+            esc = False
+            continue
+        if ch == "\\" and in_str:
+            esc = True
+            continue
+        if ch == '"':
+            in_str = not in_str
+            continue
+        if in_str:
+            continue
+        if ch in "{[":
+            stack.append(ch)
+        elif ch in "}]":
+            if stack:
+                stack.pop()
+    out = prefix + ('"' if in_str else "")
+    out = out.rstrip().rstrip(",").rstrip()
+    for ch in reversed(stack):
+        out += "}" if ch == "{" else "]"
+    return out
+
+
+def _repair_truncated_json(text: str) -> dict | None:
+    """
+    救回尾端被截斷的 JSON（LLM 寫到一半沒 token）。策略：從第一個 { 起，先整段補齊；
+    失敗則逐次砍掉最後一個逗號片段再補（丟掉最後那筆不完整的元素，保住前面完整的）。
+    """
+    if "{" not in text:
+        return None
+    s = text[text.find("{"):]
+    cand = s
+    for _ in range(6):
+        try:
+            obj = json.loads(_close_json(cand))
+            if isinstance(obj, dict):
+                return obj
+        except Exception:
+            pass
+        cut = cand.rstrip().rstrip(",").rfind(",")
+        if cut <= 0:
+            break
+        cand = cand[:cut]
+    return None
 
 
 def save_recommendations(result: dict):
