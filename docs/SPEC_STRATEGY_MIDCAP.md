@@ -245,6 +245,24 @@ TPEX `mopsfin_t187ap06/07_O_ci`(綜合損益表+資產負債表 OpenAPI,免 key)
 跟新聞的限制同一類)。要提升時效性需要為個別ETF發行商寫像統一那樣的專屬每日
 爬蟲(每家格式不同，是額外工程，先不做)。
 
+### 7.1 追加(2026-07-17):群益投信改走每日完整持股專屬爬蟲
+
+使用者追問「能不能主動爬群益/野村/復華/國泰的官網」，查證後確認**主動式ETF依法規
+每日揭露完整持股(PCF)**，MoneyDJ月更只是它自己抓得慢，不是資料源頭限制。用
+Playwright攔截網路請求找到群益投信官網的真實API：
+`POST https://www.capitalfund.com.tw/CFWeb/api/etf/buyback`，body `{"fundId":fundNo}`，
+回傳當日**完整持股**(00982A實測53檔、00992A實測37檔，遠多於MoneyDJ的前10大)。
+**這個API被Incapsula防機器人WAF擋下，純requests會逾時吊住**，必須用真的瀏覽器
+(headless chromium)過JS挑戰才放行——這是本專案第一個需要瀏覽器自動化的爬蟲，
+其餘都是輕量requests。已建`data_pipeline/fetchers/capitalfund_etf_fetcher.py`，
+一個瀏覽器實例跑完群益兩檔(00982A/00992A，省開瀏覽器固定成本)，接進
+`run_etf_tracking()`(這兩檔改標「群益官網(每日,Playwright)」)。CI需額外
+`playwright install --with-deps chromium`(已加進`.github/workflows/daily_update.yml`)。
+**野村/復華/國泰尚未做**：需要重複同樣的devtools網路攔截偵查(每家格式不同)，
+先驗證群益這個試點穩定後再考慮擴展。真實跑通：run_etf_tracking()正確路由，
+偵測到72筆換股異動(6週未更新後的第一次新鮮資料，含真實加碼/減碼)。
+新增7個純函式測試(`_parse_buyback_json`)。全套144測試通過。
+
 **評分新增**：`w_invest_new_entry=2.0`(投信新進場)、`w_etf_accum=1.0`(近期
 增碼ETF檔數，2檔封頂)。
 

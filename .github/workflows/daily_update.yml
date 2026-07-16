@@ -32,6 +32,9 @@ jobs:
           python -c "import importlib.metadata; print('✅ litellm OK:', importlib.metadata.version('litellm'))"
           python -c "from FinMind.data import DataLoader; print('✅ FinMind OK')"
 
+      - name: 安裝 Playwright headless chromium（群益ETF每日持股爬蟲用，繞過Incapsula需真瀏覽器）
+        run: python -m playwright install --with-deps chromium
+
       - name: 執行每日 Pipeline
         env:
           DATABASE_URL:        ${{ secrets.DATABASE_URL }}

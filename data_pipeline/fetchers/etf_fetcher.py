@@ -272,6 +272,8 @@ def format_etf_changes_report(changes: list[tuple[str, str, dict]]) -> str | Non
         return None
 
     from data_pipeline.fetchers.uni_etf_fetcher import UNI_ACTIVE_FUNDS
+    from data_pipeline.fetchers.capitalfund_etf_fetcher import CAPITALFUND_FUNDS
+    daily_full_funds = set(UNI_ACTIVE_FUNDS) | set(CAPITALFUND_FUNDS)
     IN_LABEL  = {"added": "🆕新增", "increased": "⬆加碼"}
     OUT_LABEL = {"removed": "🚫剔除", "decreased": "⬇減碼"}
 
@@ -295,12 +297,12 @@ def format_etf_changes_report(changes: list[tuple[str, str, dict]]) -> str | Non
                              f"（{c['old']:.2f}% → {c['new']:.2f}%）")
         return "\n".join(lines)
 
-    uni_blocks   = [_render_etf_block(eid, d) for eid, d in by_etf.items() if eid in UNI_ACTIVE_FUNDS]
-    other_blocks = [_render_etf_block(eid, d) for eid, d in by_etf.items() if eid not in UNI_ACTIVE_FUNDS]
+    daily_blocks = [_render_etf_block(eid, d) for eid, d in by_etf.items() if eid in daily_full_funds]
+    other_blocks = [_render_etf_block(eid, d) for eid, d in by_etf.items() if eid not in daily_full_funds]
 
     parts = []
-    if uni_blocks:
-        parts.append("⭐ 統一主動式ETF換股（每日全持股，同步大戶操作）：\n" + "\n\n".join(uni_blocks))
+    if daily_blocks:
+        parts.append("⭐ 主動式ETF換股（每日全持股，同步大戶操作）：\n" + "\n\n".join(daily_blocks))
     if other_blocks:
         parts.append("📊 其他ETF換股（MoneyDJ月更）：\n" + "\n\n".join(other_blocks))
     return "\n\n".join(parts)
@@ -327,16 +329,25 @@ def run_etf_tracking():
     logger.info(f"=== ETF 換股偵測：共 {len(etfs)} 支 ETF ===")
     all_changes = []
 
-    # 統一主動式 ETF 走官網每日全持股（跟大戶換股的核心）；其他走 MoneyDJ 月更
+    # 統一/群益主動式 ETF 走官網每日全持股（跟大戶換股的核心）；其他走 MoneyDJ 月更
     from data_pipeline.fetchers.uni_etf_fetcher import UNI_ACTIVE_FUNDS, fetch_uni_holdings
+    from data_pipeline.fetchers.capitalfund_etf_fetcher import CAPITALFUND_FUNDS, fetch_capitalfund_holdings
+
+    # 群益的用 Playwright 一次跑完全部檔（開瀏覽器成本較高，不要逐檔各開一次）
+    tracked_capitalfund = [etf_id for etf_id, _, _ in etfs if etf_id in CAPITALFUND_FUNDS]
+    capitalfund_holdings = fetch_capitalfund_holdings(tracked_capitalfund) if tracked_capitalfund else {}
 
     for etf_id, etf_name, etf_type in etfs:
-        src = "統一官網(每日)" if etf_id in UNI_ACTIVE_FUNDS else "MoneyDJ(月更)"
-        logger.info(f"  [{etf_type}] {etf_id} {etf_name} ← {src}")
         if etf_id in UNI_ACTIVE_FUNDS:
+            src = "統一官網(每日)"
             df = fetch_uni_holdings(etf_id)
+        elif etf_id in CAPITALFUND_FUNDS:
+            src = "群益官網(每日,Playwright)"
+            df = capitalfund_holdings.get(etf_id, pd.DataFrame())
         else:
+            src = "MoneyDJ(月更)"
             df = fetch_etf_holdings(etf_id)
+        logger.info(f"  [{etf_type}] {etf_id} {etf_name} ← {src}")
         if df.empty:
             continue
         changes = detect_and_save_changes(etf_id, etf_name, df)

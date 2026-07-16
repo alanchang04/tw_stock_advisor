@@ -24,6 +24,10 @@ requests==2.32.3
 beautifulsoup4==4.12.3
 # lxml 5.3.0 無 cp314 wheel，改用 html.parser；若本機要用 lxml，在本機單獨安裝
 
+# 群益投信ETF持股（Incapsula防機器人擋純requests，需真的開瀏覽器過JS挑戰）
+# CI/首次本機需另外執行一次：playwright install chromium（見 .github/workflows）
+playwright==1.61.0
+
 # 排程
 APScheduler==3.11.2
 
