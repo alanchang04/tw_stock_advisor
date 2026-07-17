@@ -68,6 +68,11 @@ def test_prompt_no_news_says_so():
 
 # ── analyze_stock 早退路徑：不存在的股票，不呼叫 LLM ────────────────
 def test_analyze_stock_unknown_id_short_circuits(monkeypatch):
+    # analyze_stock() 開頭會呼叫 ensure_execution_log_table()（確保kind欄位存在），
+    # 這一步本身要連DB，早退測試的本意是「不需要DB」，所以連這步也要mock掉
+    # （2026-07-17 Neon資料傳輸配額用盡事故才讓這個既有的測試隔離漏洞浮現，
+    # 不是這次改動造成的回歸）。
+    monkeypatch.setattr(sa, "ensure_execution_log_table", lambda: None)
     monkeypatch.setattr(sa, "_stock_basic", lambda sid: None)
     called = {"llm": False}
     monkeypatch.setattr("agent.llm_advisor._ask", lambda *a, **k: called.__setitem__("llm", True))

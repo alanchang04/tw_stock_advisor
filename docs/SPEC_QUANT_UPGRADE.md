@@ -160,12 +160,47 @@ P5  實盤協定:凍結版本→紙上3-6個月→追蹤誤差監控→kill swit
 - `scripts/db_to_parquet.py`:擴充支援 `dividend_events.parquet` 匯出 + 補上
   `turnover` 欄位(原本漏了)。
 - `scripts/historical_backfill.py`(新增):四步驟主控腳本(下市清單→價量/法人→
-  除權息→匯出parquet),可安全中斷、重跑自動接續。**dry-run 全流程驗證通過**
-  (跳過最耗時的價量步驟,8.9分鐘跑完其餘三步+parquet匯出)。
-  **2026-07-17 已啟動 `--start-year 2015` 真實10年回補**(背景執行,價量+法人
-  逐日回補預估數小時,完成後會更新此節)。
-- 新增 17 個測試(`total_return_adjust`/`apply_total_return_adjustment` 7個 +
-  `corporate_actions_fetcher` 純函式解析 11個)。全套 160 測試通過。
+  除權息→匯出parquet),可安全中斷、重跑自動接續。dry-run 全流程驗證通過。
+
+### 2.8 事故記錄與架構調整(2026-07-17 晚間):10年回補把 Neon 免費配額燒穿
+
+**發生什麼事**:啟動 `--start-year 2015` 真實回補後,跑了 50 分鐘、只完成
+**14 個交易日**(2015-01-05~2015-01-21)就被 Neon 伺服器**主動砍斷連線**,
+之後除權息回補、parquet 匯出全部連鎖失敗,錯誤訊息:
+`Your project has exceeded the data transfer quota. Upgrade your plan to increase limits.`
+**整個 Neon 專案在事故後完全連不上,連正式每日 pipeline 都受影響**——這是當天
+稍早驗證除權息還原時(兩次除權息backfill+一次51萬列規模的parquet dry-run匯出)
+疊加這次回補的資料傳輸量,一起把免費層月配額燒穿。
+
+**根因追查**(實測,非猜測):抽測單日抓取(TWSE價量+TPEX價量+TWSE法人+TPEX法人
+四支API)只要 5.8 秒;但正式回補記錄顯示平均每個交易日耗時 3~4 分鐘。差距不是
+來自官方端點限流,是 **Neon serverless 的連線 cold-start 開銷**——免費層 compute
+閒置後會休眠,每次 `get_session()` 重新喚醒都要付出秒級到分鐘級的延遲,逐日迴圈
+高頻重新連線把這個開銷放大了幾十倍。
+
+**架構調整**:10年規模的歷史研究資料庫**不該養在按流量計費的雲端免費層**,改成
+本機 SQLite:
+- 新增 `data_pipeline/local_research_db.py`:本機 SQLite helper(建表/upsert/
+  進度追蹤/匯出parquet),全程不碰 Neon。
+- 新增 `scripts/historical_backfill_local.py`:重用既有「只抓取回傳DataFrame、
+  不碰DB」的抓取函式(`fetch_prices_twse_by_date` 等),寫入端換成本機 SQLite。
+  不需要「先登記已知股票清單」這道防護——本機表沒有外鍵約束,下市股歷史資料
+  不會被過濾掉,這正是原本要修的倖存者偏誤問題,改本機架構後反而更簡單。
+  可安全中斷、重跑自動接續(`backfill_progress` 表逐任務記錄進度,任務key含
+  起始年份,避免不同範圍的回補互相誤判「已完成」)。
+- **實測驗證**:小範圍測試(2026年至今,128個交易日、約48.8萬列)**16.3分鐘
+  跑完**,平均每交易日約 7.6 秒——比 Neon 版本快約 30 倍,證實 cold-start
+  假說。資料品質抽查正常(2330近3日價格與已知數字一致)。
+  **已啟動 `--start-year 2015` 真實10年本機回補**(背景執行中,預估約
+  5~6小時,完成後會更新此節與回測對照結果)。
+
+**Neon 配額後續**:配額問題本身(何時重置/是否升級方案)由使用者自行到 Neon
+主控台確認,不在這次調整範圍內處理;本機回補架構調整後,10年研究資料庫的
+建置完全不依賴 Neon 是否恢復,兩件事解耦。
+
+新增 25 個測試(`total_return_adjust`/`apply_total_return_adjustment` 7個 +
+`corporate_actions_fetcher` 純函式解析 11個 + `local_research_db` 8個 -1重複命名)。
+全套 149 測試通過(21 個因 Neon 目前不可連線優雅跳過,設計如此)。
 
 **待做**:P0 完成後續(P1 因子研究框架/P2 驗證協定/P3 策略重設計)未開始,
 等 10 年回補完成、且與老師的歷史資料交叉驗證後再排。
