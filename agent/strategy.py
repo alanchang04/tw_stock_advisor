@@ -135,6 +135,10 @@ STRATEGY = {
     # （不能只信任 LLM 自己遵守 System Prompt 裡的規則）。
     "hard_veto_deviation_pct": 15.0,  # 乖離 MA20 超過 ±15%
     "hard_veto_upper_wick":    True,  # 帶量長上引線（沿用 exit_upper_wick 同組門檻）
+
+    # ── 個股除權息還原（2026-07-17，SPEC_QUANT_UPGRADE.md P0-2）──
+    "total_return_adjust": True,   # 用 dividend_events 官方事件還原個股報酬；
+                                    # 消融/對照用途可設 False 關閉，回到未還原行為
 }
 
 
@@ -219,6 +223,61 @@ def split_adjust(closes: pd.Series) -> pd.Series:
         adj.loc[:jump_date] *= r
         adj.loc[jump_date] = 1.0   # 斷點當天本身已是新基準，不重複調整
     return (closes * adj.reindex(closes.index).ffill().bfill()).where(closes.notna())
+
+
+# ══════════════════════════════════════════════════════════════════
+#  個股除權息還原（2026-07-17，SPEC_QUANT_UPGRADE.md P0-2）
+#
+#  split_adjust() 只用在市場濾網代理股，靠「單日漲跌>20%」猜測分割事件——
+#  這對「還原個股報酬」不夠用：(a) 正常除權息常在門檻之下(<20%)完全偵測不到，
+#  股息就這樣從回測報酬裡消失；(b) 沒有事件對照，猜法在真實大跌日會誤判成分割。
+#  這裡改用 dividend_events 表的官方公告事件（真實除權息日+前收盤+參考價），
+#  不是用門檻猜的。同一套「後復權」數學（乘上調整係數讓序列跟現在的股價連續），
+#  但輸入是 ground truth 不是統計推測——這也是為什麼除息會被「還原」進報酬：
+#  事件前的價格被按 ref_price/pre_close 的比例向下調整，讓事件前後的報酬率
+#  等於「有領到息」的真實報酬，而不是除息當天那筆虛假的下跌。
+# ══════════════════════════════════════════════════════════════════
+def total_return_adjust(closes: pd.Series, dividend_events: pd.DataFrame) -> pd.Series:
+    """
+    closes：單一股票、日期排序的收盤價 Series（index 為 date）。
+    dividend_events：該股票的除權息事件，至少含 ex_date/pre_close/ref_price 三欄
+                     （可為 None 或空 DataFrame，此時原樣回傳，不報錯）。
+    回傳：後復權還原後的收盤價序列。
+    """
+    s = closes.dropna().sort_index()
+    if len(s) < 2 or dividend_events is None or dividend_events.empty:
+        return closes
+
+    events = dividend_events.dropna(subset=["ex_date", "pre_close", "ref_price"])
+    events = events[(events["pre_close"] > 0) & (events["ref_price"] > 0)]
+    if events.empty:
+        return closes
+
+    adj = pd.Series(1.0, index=s.index)
+    for _, ev in events.sort_values("ex_date").iterrows():
+        ex_date = ev["ex_date"]
+        ratio = float(ev["ref_price"]) / float(ev["pre_close"])
+        if ratio <= 0:
+            continue
+        adj.loc[adj.index < ex_date] *= ratio
+    return (closes * adj.reindex(closes.index).ffill().bfill()).where(closes.notna())
+
+
+def apply_total_return_adjustment(closes: pd.DataFrame, dividend_events: pd.DataFrame) -> pd.DataFrame:
+    """
+    批次版：closes 為「日期×股票」的 pivot，dividend_events 為全市場除權息事件表
+    （含 stock_id 欄）。回傳同形狀、已逐檔還原的 DataFrame。
+    沒有除權息資料（dividend_events 為 None/空）時原樣回傳，優雅降級。
+    """
+    if dividend_events is None or dividend_events.empty:
+        return closes
+    out = closes.copy()
+    by_stock = dividend_events.groupby("stock_id")
+    for sid in closes.columns:
+        if sid not in by_stock.groups:
+            continue
+        out[sid] = total_return_adjust(closes[sid], by_stock.get_group(sid))
+    return out
 
 
 # ══════════════════════════════════════════════════════════════════

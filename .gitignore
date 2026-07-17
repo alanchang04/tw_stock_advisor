@@ -225,3 +225,4 @@ db_export.sql
 # 本機歷史回測資料（parquet，可能數百MB~GB，不進版控）
 data/history/
 *.parquet
+data/research/

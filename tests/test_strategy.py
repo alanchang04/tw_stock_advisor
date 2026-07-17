@@ -3,10 +3,12 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pandas as pd
+import pytest
 
 from agent.strategy import (decide_exit, suggest_shares, format_size, STRATEGY,
                             PRACTICE_CFG, compute_hard_vetoes,
-                            compute_new_entry_flag, apply_liquidity_gate)
+                            compute_new_entry_flag, apply_liquidity_gate,
+                            total_return_adjust, apply_total_return_adjustment)
 
 
 def cfg(**overrides):
@@ -210,6 +212,81 @@ def test_hard_veto_missing_ohlc_columns_skips_wick_rule_gracefully():
 
 def test_hard_veto_empty_df_returns_empty():
     assert compute_hard_vetoes(pd.DataFrame()).empty
+
+
+# ── 個股除權息還原（2026-07-17，SPEC_QUANT_UPGRADE.md P0-2）─────────
+import datetime as _dt
+
+def _dates(n):
+    return [_dt.date(2025, 1, 1) + _dt.timedelta(days=i) for i in range(n)]
+
+def test_total_return_adjust_no_events_returns_unchanged():
+    idx = _dates(3)
+    closes = pd.Series([100.0, 101.0, 102.0], index=idx)
+    out = total_return_adjust(closes, pd.DataFrame())
+    assert list(out) == [100.0, 101.0, 102.0]
+    assert total_return_adjust(closes, None) is closes or list(total_return_adjust(closes, None)) == [100.0, 101.0, 102.0]
+
+def test_total_return_adjust_removes_false_ex_dividend_drop():
+    idx = _dates(5)
+    # d1收盤100(除息前一日)，d2除息後真實收盤92（相對ref_price=90只小幅波動，
+    # 不是真正暴跌——但原始序列 100→92 看起來像跌8%，還原後才知道其實是正常的）
+    closes = pd.Series([100.0, 100.0, 92.0, 93.0, 95.0], index=idx)
+    events = pd.DataFrame([{"ex_date": idx[2], "pre_close": 100.0, "ref_price": 90.0}])
+    out = total_return_adjust(closes, events)
+    # ratio = 90/100 = 0.9；ex_date(d2)之前的日期都要乘上這個比例
+    assert out[idx[0]] == pytest.approx(90.0)
+    assert out[idx[1]] == pytest.approx(90.0)
+    # ex_date當天及之後不動（它已經是新的定價基準）
+    assert out[idx[2]] == 92.0
+    assert out[idx[3]] == 93.0
+    assert out[idx[4]] == 95.0
+
+def test_total_return_adjust_compounds_multiple_events():
+    idx = _dates(6)
+    closes = pd.Series([100.0, 100.0, 90.0, 90.0, 81.0, 82.0], index=idx)
+    events = pd.DataFrame([
+        {"ex_date": idx[2], "pre_close": 100.0, "ref_price": 90.0},   # ratio 0.9
+        {"ex_date": idx[4], "pre_close": 90.0, "ref_price": 81.0},    # ratio 0.9
+    ])
+    out = total_return_adjust(closes, events)
+    # d0,d1 早於兩個事件 → 兩個 ratio 都要乘（複利）：100*0.9*0.9=81
+    assert out[idx[0]] == pytest.approx(81.0)
+    assert out[idx[1]] == pytest.approx(81.0)
+    # d2,d3 只早於第二個事件 → 只乘一次：90*0.9=81
+    assert out[idx[2]] == pytest.approx(81.0)
+    assert out[idx[3]] == pytest.approx(81.0)
+    # d4之後不再調整
+    assert out[idx[4]] == 81.0
+    assert out[idx[5]] == 82.0
+
+def test_total_return_adjust_short_series_unchanged():
+    idx = _dates(1)
+    closes = pd.Series([100.0], index=idx)
+    out = total_return_adjust(closes, pd.DataFrame([{"ex_date": idx[0], "pre_close": 100.0, "ref_price": 90.0}]))
+    assert list(out) == [100.0]
+
+def test_total_return_adjust_ignores_invalid_events():
+    idx = _dates(3)
+    closes = pd.Series([100.0, 101.0, 102.0], index=idx)
+    bad_events = pd.DataFrame([{"ex_date": idx[1], "pre_close": 0.0, "ref_price": 90.0}])  # pre_close=0 不合理，跳過
+    out = total_return_adjust(closes, bad_events)
+    assert list(out) == [100.0, 101.0, 102.0]
+
+def test_apply_total_return_adjustment_only_touches_stocks_with_events():
+    idx = _dates(3)
+    piv = pd.DataFrame({"1111": [100.0, 100.0, 92.0], "2222": [50.0, 51.0, 52.0]}, index=idx)
+    events = pd.DataFrame([{"stock_id": "1111", "ex_date": idx[2], "pre_close": 100.0, "ref_price": 90.0}])
+    out = apply_total_return_adjustment(piv, events)
+    assert out["1111"][idx[0]] == pytest.approx(90.0)      # 有事件的股票被還原
+    assert list(out["2222"]) == [50.0, 51.0, 52.0]          # 沒事件的股票原樣不動
+
+def test_apply_total_return_adjustment_empty_events_returns_unchanged():
+    idx = _dates(2)
+    piv = pd.DataFrame({"1111": [100.0, 101.0]}, index=idx)
+    out = apply_total_return_adjustment(piv, pd.DataFrame())
+    assert list(out["1111"]) == [100.0, 101.0]
+
 
 
 # ── 投信新進場（2026-07-15，中小型股×投信剛開始買）───────────────────

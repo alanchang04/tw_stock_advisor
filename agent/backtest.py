@@ -31,6 +31,7 @@ from agent.stock_selector import (
 )
 from agent.strategy import (STRATEGY, score_candidates, decide_exit, split_adjust,
                             compute_factor_matrices, compute_new_entry_flag, apply_liquidity_gate,
+                            apply_total_return_adjustment,
                             # 交易成本/成交假設：單一事實來源在 strategy.py（回測與即時帳本共用）
                             FEE_RATE, TAX_RATE, SLIPPAGE, net_return)
 
@@ -82,6 +83,20 @@ def _load(parquet_dir: str | None = None) -> dict:
             rev["yoy_pct"] = pd.to_numeric(rev["yoy_pct"], errors="coerce")
         except Exception:
             rev = pd.DataFrame(columns=["stock_id", "year_month", "yoy_pct"])
+        try:
+            # 除權息事件（SPEC_QUANT_UPGRADE.md P0-2）：個股後復權還原用，表可能還沒
+            # backfill（見 corporate_actions_fetcher.py），查不到就優雅降級為空。
+            div = pd.DataFrame(
+                s.execute(text(
+                    "SELECT stock_id, ex_date, pre_close, ref_price FROM dividend_events"
+                )).fetchall(),
+                columns=["stock_id", "ex_date", "pre_close", "ref_price"],
+            )
+            div["pre_close"] = pd.to_numeric(div["pre_close"], errors="coerce")
+            div["ref_price"] = pd.to_numeric(div["ref_price"], errors="coerce")
+            div["ex_date"] = pd.to_datetime(div["ex_date"]).dt.date
+        except Exception:
+            div = pd.DataFrame(columns=["stock_id", "ex_date", "pre_close", "ref_price"])
 
     # 型別整理：DB 的 NUMERIC → float
     for df, cols in [
@@ -98,7 +113,7 @@ def _load(parquet_dir: str | None = None) -> dict:
     rev_map = {(r.stock_id, r.year_month): r.yoy_pct for r in rev.itertuples()}
 
     return {"prices": prices, "tech": tech, "inst": inst,
-            "imap": imap, "inds": inds, "rev_map": rev_map}
+            "imap": imap, "inds": inds, "rev_map": rev_map, "dividends": div}
 
 
 # ── 從本機 parquet 載入（跨週期歷史回測；資料來源＝TWSE回補 或 匯入老師的歷史檔）──
@@ -157,10 +172,22 @@ def _load_parquet(parquet_dir: str) -> dict:
         rev["yoy_pct"] = pd.to_numeric(rev["yoy_pct"], errors="coerce")
         rev_map = {(r.stock_id, r.year_month): r.yoy_pct for r in rev.itertuples()}
 
+    # 除權息事件（選配，P0-2）：老師的歷史檔多半不含，優雅降級為空——
+    # 此時個股報酬不做除權息還原，跟現行行為一致，不會讓舊資料跑不動。
+    div = _p("dividend_events.parquet")
+    if div is None:
+        div = pd.DataFrame(columns=["stock_id", "ex_date", "pre_close", "ref_price"])
+    else:
+        for c in ["pre_close", "ref_price"]:
+            if c in div.columns:
+                div[c] = pd.to_numeric(div[c], errors="coerce")
+        div["ex_date"] = pd.to_datetime(div["ex_date"]).dt.date
+
     logger.info(f"從 parquet 載入：股價 {len(prices)} 列、法人 {len(inst)} 列、"
-                f"技術指標 {len(tech)} 列（{'現算' if _p('technical.parquet') is None else '讀檔'}）")
+                f"技術指標 {len(tech)} 列、除權息 {len(div)} 筆"
+                f"（{'現算' if _p('technical.parquet') is None else '讀檔'}）")
     return {"prices": prices, "tech": tech, "inst": inst,
-            "imap": imap, "inds": inds, "rev_map": rev_map}
+            "imap": imap, "inds": inds, "rev_map": rev_map, "dividends": div}
 
 
 def _compute_tech_from_prices(prices: pd.DataFrame) -> pd.DataFrame:
@@ -392,6 +419,13 @@ def run_backtest(top_n=None, rebalance=5, cfg=None, data=None, quiet=False,
         data = _load(parquet_dir=parquet_dir)
     closes = data["prices"].pivot_table(index="trade_date", columns="stock_id", values="close")
     closes = closes.where(closes > 0)   # close<=0 為資料瑕疵(停牌/無成交)，視為缺值
+    div_events = data.get("dividends")
+    if cfg.get("total_return_adjust", True) and div_events is not None and not div_events.empty:
+        # 個股除權息還原（SPEC_QUANT_UPGRADE.md P0-2）：用官方除權息事件（ground truth，
+        # 不是像 split_adjust 那樣用單日跌幅門檻猜）把股息還原進報酬，同時消除除息日
+        # 假跳空誤觸停損/跌破實體底等出場規則。opens 建立時會用同一批事件再做一次，
+        # 確保同一天 open/close 落在一致的復權基準上。
+        closes = apply_total_return_adjustment(closes, div_events)
     data["_closes"] = closes            # 供 _candidates_asof 算 60 日動能
     if "_rs20" not in data:             # 趨勢/題材因子矩陣（相對強度/多頭排列/投信連買/新進場）
         _precompute_factors(data, cfg)
@@ -425,6 +459,8 @@ def run_backtest(top_n=None, rebalance=5, cfg=None, data=None, quiet=False,
     # 隔日開盤成交用的開盤價矩陣（對齊 closes 的 index/columns）
     opens = data["prices"].pivot_table(index="trade_date", columns="stock_id", values="open")
     opens = opens.where(opens > 0).reindex(index=closes.index, columns=closes.columns)
+    if cfg.get("total_return_adjust", True) and div_events is not None and not div_events.empty:
+        opens = apply_total_return_adjustment(opens, div_events)
 
     tech = data["tech"]
     ma5p = tech.pivot_table(index="trade_date", columns="stock_id", values="ma5")

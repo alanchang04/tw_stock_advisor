@@ -1,9 +1,13 @@
 # 規格:量化方法論全面升級——從「策略調參」轉向「edge 研究」
 
-> 狀態:**草案,待使用者確認決策點後分階段實作**。
+> 狀態:**決策點1-5已由使用者確認,P0(資料地基)實作中**。
 > 緣起:使用者(2026-07-17)自評「目前的系統注定沒辦法賺錢」,要求以量化專家視角
 > 從資料蒐集、架構、策略設計到回測驗證全面體檢,產出明確升級規格。
 > 本文件所有數字都是從正式 DB / 程式碼現場查證,不是印象。
+>
+> **使用者決策(2026-07-17)**:1.歷史資料自建官方回補立即開始 2.同意凍結現行參數
+> 3.LLM平行A/B量測(推薦) 4.先用免費key,不足再評估付費(A/B本身不增加LLM呼叫，
+> 免費額度夠測試階段用) 5.接受§4.6成功/放棄準則。
 
 ---
 
@@ -119,6 +123,52 @@ P5  實盤協定:凍結版本→紙上3-6個月→追蹤誤差監控→kill swit
 - 融資融券餘額、借券賣出、當沖比率(投機熱度,呼應你的抗操控目標)、
   **集保股權分散表(TDCC 週更,免費)**——大戶持股集中度變化是中小型股
   「聰明錢」偵測的正宗資料,跟你的 edge 假說直接互補。先記錄,P1 做完再說。
+
+### 2.7 實作進度(2026-07-17)
+
+**P0-1(官方歷史回補)+ P0-2(個股除權息還原)+ P0-3(parquet 研究庫)已完成並實跑驗證：**
+
+- `database/migrations/19_dividend_events.sql`:新增 `dividend_events`(除權息事件)
+  與 `delisted_stocks`(下市清單)兩表。
+- `data_pipeline/fetchers/corporate_actions_fetcher.py`:
+  - 除權息:TWSE `exchangeReport/TWT49U`(startDate/endDate)+ TPEX
+    `www/zh-tw/bulletin/exDailyQ`——TPEX 端點額外拆出「權值」「息值」兩欄,
+    比 TWSE 只給合計值更詳細。逐月回補(`backfill_dividend_events`),已在正式
+    DB 對現行 13 個月回測窗跑過,回補 **2,646 筆**除權息事件。
+  - 下市清單:TWSE openapi `company/suspendListingCsvAndHtml`,已回補 **245 家**,
+    **同步登記進 `stocks` 表(`is_active=False`)**——這步是必要的,不是順手做:
+    `daily_prices`/`dividend_events` 對 stock_id 都有外鍵約束,pipeline 各處的
+    `_filter_known()` 也只認 stocks 表裡已存在的代號,不先登記,等下歷史回補時
+    這些下市股的價量資料會被整批靜默濾掉,倖存者偏誤依舊修不掉(這是實作時
+    抓到的真實 bug,不是預先設計好的)。
+  - **誠實限制**(實測,非猜測):TPEX 三大法人官方端點只回溯到約 2019 年
+    (2018/2016 測試回傳 0 筆);TPEX 下市清單目前沒找到對應端點(已測試
+    `tpex_delisted_stock`/`tpex_suspend_listing` 皆 404),只有 TWSE 下市股被登記,
+    上櫃股的倖存者偏誤修正不完整。
+- `agent/strategy.py total_return_adjust()` / `apply_total_return_adjustment()`:
+  用 `dividend_events` 的官方事件(pre_close/ref_price 算出的真實調整比例)做
+  個股後復權,取代 `split_adjust()` 那種「單日跌幅>20%用猜的」——正常除權息常
+  在門檻之下完全偵測不到,股息就這樣從回測報酬裡消失,且猜測法在真實大跌日
+  會誤判成分割。新增 `STRATEGY["total_return_adjust"]`(預設 True)。
+- `agent/backtest.py`:`_load()`/`_load_parquet()` 讀入除權息事件,`run_backtest()`
+  對 `closes`/`opens` pivot 套用還原(opens 用同一批事件避免同一天 open/close
+  落在不同復權基準)。**A/B 對照結果(現行13個月窗)**:有還原 vs 無還原——
+  總報酬 +150.7% vs +143.4%、Sharpe 1.48 vs 1.40、最大回撤 -25.8% vs -26.7%,
+  三項指標同向改善,符合預期(股息計入報酬+除息假跳空不再誤觸出場)。
+  副作用(合理,非bug):0050 基準本身也套用了還原,原本只做 `split_adjust`
+  沒算進 0050 自己的配息,現在比較基準更準確。
+- `scripts/db_to_parquet.py`:擴充支援 `dividend_events.parquet` 匯出 + 補上
+  `turnover` 欄位(原本漏了)。
+- `scripts/historical_backfill.py`(新增):四步驟主控腳本(下市清單→價量/法人→
+  除權息→匯出parquet),可安全中斷、重跑自動接續。**dry-run 全流程驗證通過**
+  (跳過最耗時的價量步驟,8.9分鐘跑完其餘三步+parquet匯出)。
+  **2026-07-17 已啟動 `--start-year 2015` 真實10年回補**(背景執行,價量+法人
+  逐日回補預估數小時,完成後會更新此節)。
+- 新增 17 個測試(`total_return_adjust`/`apply_total_return_adjustment` 7個 +
+  `corporate_actions_fetcher` 純函式解析 11個)。全套 160 測試通過。
+
+**待做**:P0 完成後續(P1 因子研究框架/P2 驗證協定/P3 策略重設計)未開始,
+等 10 年回補完成、且與老師的歷史資料交叉驗證後再排。
 
 ---
 
