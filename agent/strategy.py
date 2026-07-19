@@ -26,6 +26,10 @@ STRATEGY = {
     "min_close": 15, "min_volume": 500,    # 張
     "min_turnover_avg5": 200_000_000,  # 近5日均成交金額下限（元）＝抗操控核心門檻，可調鬆緊
     "turnover_avg_days": 5,
+    "min_turnover_percentile": 0.75,   # 2026-07-19：改用「當日全市場成交金額前25%」取代
+                                        # 固定金額門檻（10年回測A/B驗證：跟固定門檻表現幾乎
+                                        # 一樣，但不隨市場規模膨脹而鬆動，是更穩健的預設）。
+                                        # None=改回沿用上面的絕對金額門檻，見apply_liquidity_gate註解
     "hot_sectors_top_n": 5, "sector_min_stocks": 10,
     "use_hot_sector_gate": False,          # False=全市場趨勢/題材選股（趨勢版，回測勝出）；True=舊的族群硬閘門
     "pick_top_n": 5,                        # 每次買進檔數
@@ -62,7 +66,10 @@ STRATEGY = {
     # 這是對「多頭年調參、空頭無保護」的補強——參考常見趨勢跟蹤系統的 market filter
     "market_filter":            True,
     "market_filter_stock":      "0050",
-    "market_filter_block_entries": False,  # True=空頭完全不開新倉（保守）；False=只加出場保護
+    "market_filter_block_entries": True,   # 2026-07-19：10年回測A/B驗證，開啟後最大回撤從
+                                            # -54.7%收斂到-35.5%（大幅改善），總報酬雖降但
+                                            # Sharpe/Calmar同步改善，是四組對照中最佳配置。
+                                            # False=只加出場保護，不擋新倉（舊預設）
     "bear_reenable_death_cross": True,
 
     # ── 資金/風險管理（參考 freqtrade money management / 1% 風險法則）──
@@ -162,6 +169,7 @@ PRACTICE_CFG = {
     "w_etf_accum": 0.0,
     "above_ma20_only": True,  # 硬門檻：股價必須站上月線
     "allow_new_entry_alt_gate": False,  # 練習軌不開流動性OR閘門，只用單一嚴格門檻
+    "min_turnover_percentile": None,    # 練習軌維持單純，固定金額門檻即可，不用百分位模式
     "pick_top_n": 20,
 }
 
@@ -355,16 +363,29 @@ def apply_liquidity_gate(df: pd.DataFrame, cfg: dict = STRATEGY) -> pd.DataFrame
     輸入：含 avg_turnover 欄位（近N日均成交金額）的候選 DataFrame，
           若已算出 invest_new_entry 欄位（bool）則納入 OR 判斷，沒有就只看主門檻。
     回傳：通過門檻的子集。
+
+    2026-07-19（SPEC_QUANT_UPGRADE.md，10年回測發現的固定門檻疑點）：主門檻可切換
+    成「當日全市場成交金額百分位」（`min_turnover_percentile`，需先算好
+    `turnover_percentile` 欄位——見 backtest._candidates_asof）而不是固定NT$金額。
+    固定 2億/日這種絕對值是照 2025~2026 年的市場規模校準的，10年前全市場成交量
+    級別不同，同一個絕對門檻在早期年份可能過鬆或過嚴，百分位門檻才能在不同市場
+    規模的年份間保持一致的「相對流動性排名」意義。沒設定 `min_turnover_percentile`
+    時完全比照舊行為（絕對金額門檻），不影響任何既有結果。
     """
     if df.empty:
         return df
-    min_turnover = cfg.get("min_turnover_avg5", STRATEGY["min_turnover_avg5"])
+    pct_threshold = cfg.get("min_turnover_percentile")
+    turnover = pd.to_numeric(df.get("avg_turnover", 0), errors="coerce").fillna(0)
+    if pct_threshold is not None and "turnover_percentile" in df.columns:
+        main_ok = pd.to_numeric(df["turnover_percentile"], errors="coerce").fillna(0) >= pct_threshold
+    else:
+        min_turnover = cfg.get("min_turnover_avg5", STRATEGY["min_turnover_avg5"])
+        main_ok = turnover >= min_turnover
+
     if not cfg.get("allow_new_entry_alt_gate"):
-        return df[pd.to_numeric(df.get("avg_turnover", 0), errors="coerce").fillna(0) >= min_turnover]
+        return df[main_ok]
 
     alt_turnover = cfg.get("alt_min_turnover_avg5", 30_000_000)
-    turnover = pd.to_numeric(df.get("avg_turnover", 0), errors="coerce").fillna(0)
-    main_ok = turnover >= min_turnover
     if "invest_new_entry" in df.columns:
         alt_ok = df["invest_new_entry"].fillna(False).astype(bool) & (turnover >= alt_turnover)
     else:

@@ -356,6 +356,29 @@ def test_gate_practice_cfg_has_or_gate_disabled():
     out = apply_liquidity_gate(_liq_df(invest_new_entry=[True, False]), PRACTICE_CFG)
     assert list(out["stock_id"]) == ["2222"]
 
+
+# ── 百分位數流動性門檻（2026-07-19，10年回測發現固定金額門檻的疑點）───
+def test_gate_percentile_mode_uses_percentile_not_absolute():
+    df = pd.DataFrame(dict(stock_id=["1111", "2222", "3333"],
+                           avg_turnover=[1_000_000.0, 2_000_000.0, 3_000_000.0],   # 遠低於絕對門檻2億
+                           turnover_percentile=[0.2, 0.5, 0.9]))
+    out = apply_liquidity_gate(df, cfg(min_turnover_percentile=0.6, allow_new_entry_alt_gate=False))
+    assert list(out["stock_id"]) == ["3333"]   # 只有百分位>=0.6的通過，絕對金額完全不看
+
+def test_gate_percentile_mode_falls_back_when_column_missing():
+    # 設了門檻但df沒算turnover_percentile欄位 → 優雅退回絕對金額門檻，不報錯
+    df = pd.DataFrame(dict(stock_id=["1111", "2222"],
+                           avg_turnover=[100_000_000.0, 300_000_000.0]))
+    out = apply_liquidity_gate(df, cfg(min_turnover_percentile=0.6, allow_new_entry_alt_gate=False))
+    assert list(out["stock_id"]) == ["2222"]   # 用絕對門檻2億判斷
+
+def test_gate_percentile_none_uses_absolute_threshold_unchanged():
+    df = pd.DataFrame(dict(stock_id=["1111", "2222"],
+                           avg_turnover=[100_000_000.0, 300_000_000.0],
+                           turnover_percentile=[0.9, 0.1]))
+    out = apply_liquidity_gate(df, cfg(min_turnover_percentile=None, allow_new_entry_alt_gate=False))
+    assert list(out["stock_id"]) == ["2222"]   # 即使有turnover_percentile欄位，None時忽略它
+
 def test_gate_empty_df():
     assert apply_liquidity_gate(pd.DataFrame(), cfg()).empty
 

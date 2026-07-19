@@ -356,6 +356,10 @@ def _candidates_asof(data, d, industry_codes, top_n=5, cfg=None):
         to_row = avg_to.loc[d]
         if to_row.notna().any():
             df["avg_turnover"] = df["stock_id"].map(to_row)
+            # 百分位排名要用「當日全市場」分佈算，不能只用已經被RSI/收盤價等其他
+            # 條件篩過的candidate子集（子集分佈會偏，百分位失去「相對排名」的意義）。
+            if cfg.get("min_turnover_percentile") is not None:
+                df["turnover_percentile"] = df["stock_id"].map(to_row.rank(pct=True))
             df = apply_liquidity_gate(df, cfg)
             if df.empty:
                 return []

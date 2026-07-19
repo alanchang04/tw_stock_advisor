@@ -196,10 +196,15 @@ def get_candidate_stocks(
     turnover_days = cfg.get("turnover_avg_days", TURNOVER_AVG_DAYS)
     vol_avg_days = cfg.get("volume_avg_days", 20)
     above_ma20_clause = "AND p.close > t.ma20" if cfg.get("above_ma20_only") else ""
+    use_percentile = cfg.get("min_turnover_percentile") is not None
     # SQL 端只用「較寬鬆」的門檻粗篩（真正的 OR 邏輯留到 Python 端 apply_liquidity_gate，
     # 因為投信新進場旗標要靠多日 pivot 算，SQL 裡做不了），沒開流動性OR閘門就用原門檻。
-    sql_turnover_floor = (min(min_turnover, cfg.get("alt_min_turnover_avg5", min_turnover))
-                          if cfg.get("allow_new_entry_alt_gate") else min_turnover)
+    # 百分位模式：SQL完全不篩turnover（門檻設0視同不擋），因為百分位是「相對當日全市場
+    # 分佈」算的，市場規模會隨時間變化，SQL端用絕對值粗篩可能在空頭年誤刪掉本該通過
+    # 百分位門檻的股票——一定要對「全市場」算完百分位才能篩，不能先篩再算。
+    sql_turnover_floor = 0 if use_percentile else (
+        min(min_turnover, cfg.get("alt_min_turnover_avg5", min_turnover))
+        if cfg.get("allow_new_entry_alt_gate") else min_turnover)
     etf_lookback = cfg.get("etf_accum_lookback_days", 10)
 
     with get_session() as session:
@@ -286,6 +291,26 @@ def get_candidate_stocks(
         return pd.DataFrame()
 
     df = pd.DataFrame(rows, columns=cols)
+
+    # 百分位流動性門檻（2026-07-19）：對「全市場」（不是已被RSI/價格篩過的候選子集）
+    # 算成交金額百分位排名，避免市場規模隨時間變化時，用絕對金額當代理的排名失真。
+    if use_percentile:
+        try:
+            with get_session() as session:
+                mkt_rows = session.execute(text("""
+                    WITH recent_dates AS (
+                        SELECT DISTINCT trade_date FROM daily_prices
+                        ORDER BY trade_date DESC LIMIT :turnover_days
+                    )
+                    SELECT stock_id, AVG(turnover) AS avg_turnover
+                    FROM daily_prices
+                    WHERE trade_date IN (SELECT trade_date FROM recent_dates)
+                    GROUP BY stock_id
+                """), {"turnover_days": turnover_days}).fetchall()
+            mkt_turnover = pd.Series({r[0]: float(r[1]) if r[1] is not None else 0.0 for r in mkt_rows})
+            df["turnover_percentile"] = df["stock_id"].map(mkt_turnover.rank(pct=True))
+        except Exception as e:
+            logger.warning(f"全市場流動性百分位計算失敗（優雅退回絕對金額門檻）: {e}")
 
     # 空方硬否決規則（2026-07-15，程式層級強制）：乖離月線太遠/帶量長上引線，
     # 直接排除、不進辯論也不進練習軌清單（見 strategy.compute_hard_vetoes 註解）。
