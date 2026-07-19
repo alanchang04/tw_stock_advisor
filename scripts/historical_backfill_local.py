@@ -42,6 +42,7 @@ from data_pipeline.fetchers.twse_fetcher import (
 from data_pipeline.fetchers.corporate_actions_fetcher import (
     fetch_dividend_events_twse, fetch_dividend_events_tpex, URL_TWSE_DELISTED, _parse_roc_slash, _UA,
 )
+from data_pipeline.fetchers.revenue_fetcher import fetch_month_rows, latest_published_month
 from data_pipeline.local_research_db import (
     get_local_conn, ensure_local_tables, upsert_df, get_progress, set_progress, export_to_parquet,
 )
@@ -146,6 +147,38 @@ def backfill_dividends_local(conn, start_year: int, delay: float = 0.8):
     logger.info(f"=== 除權息回補完成：累計 {total} 筆 ===")
 
 
+def backfill_revenue_local(conn, start_year: int, delay: float = 0.5):
+    """月營收回補（P1因子研究缺口：w_rev_yoy/w_rev_accel 因子驗證需要）。
+    來源同 revenue_fetcher.py（MOPS彙總頁），只換寫入端成本機SQLite——一個月2個
+    請求（上市+上櫃），10年也才~240個請求，比逐日的價量回補快得多（分鐘級不是小時級）。"""
+    task = f"revenue_from_{start_year}"
+    resume = get_progress(conn, task)
+    y, m = (resume.year, resume.month + 1) if resume else (start_year, 1)
+    if m > 12:
+        m, y = 1, y + 1
+    end_y, end_m = latest_published_month()
+    logger.info(f"=== 月營收回補：{y}-{m:02d} ~ {end_y}-{end_m:02d}"
+               f"（{'接續上次進度' if resume else '從頭開始'}）===")
+
+    total = 0
+    while (y, m) <= (end_y, end_m):
+        rows = fetch_month_rows(y, m)
+        if rows:
+            df = pd.DataFrame([{"stock_id": r["sid"], "year_month": r["ym"],
+                               "revenue": r["rev"], "mom_pct": r["mom"], "yoy_pct": r["yoy"]}
+                              for r in rows])
+            n = upsert_df(conn, "monthly_revenue", df)
+            total += n
+        # 用「當月最後一天」當進度標記，跟 dividends 回補用同一個慣例（get_progress回傳date）
+        from calendar import monthrange
+        set_progress(conn, task, date(y, m, monthrange(y, m)[1]))
+        m += 1
+        if m > 12:
+            m, y = 1, y + 1
+        time.sleep(delay)
+    logger.info(f"=== 月營收回補完成：累計 {total} 筆 ===")
+
+
 def backfill_delisted_local(conn):
     import requests
     try:
@@ -181,6 +214,7 @@ def run(start_year: int, out_dir: str, export_only: bool = False):
         backfill_delisted_local(conn)
         backfill_prices_and_institutional(conn, start_year)
         backfill_dividends_local(conn, start_year)
+        backfill_revenue_local(conn, start_year)
 
     logger.info(f"=== 匯出 parquet → {out_dir} ===")
     stats = export_to_parquet(conn, out_dir)

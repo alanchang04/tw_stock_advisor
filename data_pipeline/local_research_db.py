@@ -58,6 +58,11 @@ def ensure_local_tables(conn: sqlite3.Connection):
             stock_id TEXT PRIMARY KEY, stock_name TEXT,
             delisting_date TEXT, market TEXT
         );
+        CREATE TABLE IF NOT EXISTS monthly_revenue (
+            stock_id TEXT NOT NULL, year_month TEXT NOT NULL,
+            revenue REAL, mom_pct REAL, yoy_pct REAL,
+            PRIMARY KEY (stock_id, year_month)
+        );
         CREATE TABLE IF NOT EXISTS backfill_progress (
             task TEXT PRIMARY KEY, last_date TEXT
         );
@@ -71,6 +76,7 @@ _PK_COLS = {
     "institutional_trading": ("stock_id", "trade_date"),
     "dividend_events": ("stock_id", "ex_date"),
     "delisted_stocks": ("stock_id",),
+    "monthly_revenue": ("stock_id", "year_month"),
 }
 
 
@@ -130,4 +136,9 @@ def export_to_parquet(conn: sqlite3.Connection, out_dir: str):
     div = pd.read_sql_query("SELECT stock_id, ex_date, pre_close, ref_price FROM dividend_events", conn)
     div.to_parquet(_os.path.join(out_dir, "dividend_events.parquet"), index=False)
 
-    return {"prices": len(prices), "institutional": len(inst), "dividend_events": len(div)}
+    rev = pd.read_sql_query(
+        "SELECT stock_id, year_month, revenue, mom_pct, yoy_pct FROM monthly_revenue", conn)
+    rev.to_parquet(_os.path.join(out_dir, "monthly_revenue.parquet"), index=False)
+
+    return {"prices": len(prices), "institutional": len(inst), "dividend_events": len(div),
+            "monthly_revenue": len(rev)}

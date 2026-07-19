@@ -31,7 +31,7 @@ def test_ensure_local_tables_idempotent(conn):
     tables = {r[0] for r in conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
     assert {"daily_prices", "institutional_trading", "dividend_events",
-           "delisted_stocks", "backfill_progress"} <= tables
+           "delisted_stocks", "monthly_revenue", "backfill_progress"} <= tables
 
 
 def test_upsert_df_inserts_new_rows(conn):

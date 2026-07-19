@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import pandas as pd
 from loguru import logger
 
-from agent.backtest import _load_parquet
+from agent.backtest import _load_parquet, _available_rev_month
 from agent.strategy import (
     compute_factor_matrices, compute_new_entry_flag, apply_total_return_adjustment,
 )
@@ -57,7 +57,23 @@ def build_factor_matrices(data: dict) -> dict:
     mom60 = closes / closes.shift(60) - 1
     foreign_buy = (foreign > 0).astype(float)
 
-    return {
+    rev_map = data.get("rev_map") or {}
+    if rev_map:
+        logger.info("計算 rev_yoy（point-in-time，跟正式選股用同一個 _available_rev_month 邏輯："
+                    "M月營收於M+1月10日後才「可得」，事前不能偷看）...")
+        rev_records = [{"stock_id": sid, "year_month": ym, "yoy_pct": yoy}
+                       for (sid, ym), yoy in rev_map.items()]
+        rev_pivot = pd.DataFrame(rev_records).pivot_table(
+            index="year_month", columns="stock_id", values="yoy_pct")
+        avail_ym = [_available_rev_month(d) for d in closes.index]
+        rev_yoy = rev_pivot.reindex(avail_ym)
+        rev_yoy.index = closes.index
+        rev_yoy = rev_yoy.reindex(columns=closes.columns)
+    else:
+        logger.warning("沒有月營收資料（monthly_revenue.parquet 缺或空），rev_yoy 因子跳過")
+        rev_yoy = None
+
+    out = {
         "closes": closes,
         "rs20": rs20,
         "stack_days": stack_days.astype(float),
@@ -66,6 +82,9 @@ def build_factor_matrices(data: dict) -> dict:
         "invest_new_entry": invest_new_entry.astype(float),
         "foreign_buy": foreign_buy,
     }
+    if rev_yoy is not None:
+        out["rev_yoy"] = rev_yoy
+    return out
 
 
 def run(out_path: str, horizons=(5, 10, 20, 60)):

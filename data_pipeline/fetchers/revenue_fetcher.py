@@ -52,8 +52,9 @@ def latest_published_month(today: date = None) -> tuple[int, int]:
     return y, m
 
 
-def fetch_month(year: int, month: int) -> int:
-    """抓某年月（西元）的上市+上櫃月營收，upsert 進 monthly_revenue。回傳筆數。"""
+def fetch_month_rows(year: int, month: int) -> list[dict]:
+    """純抓取：某年月（西元）的上市+上櫃月營收，回傳 list[dict]，不碰 DB
+    （給 Neon 版 fetch_month() 和本機 SQLite 版回補共用同一份抓取邏輯）。"""
     roc = year - 1911
     ym = f"{year:04d}-{month:02d}"
     rows_all = []
@@ -82,7 +83,12 @@ def fetch_month(year: int, month: int) -> int:
                     "mom": _num(tds[5]),
                     "yoy": _num(tds[6]),
                 })
+    return rows_all
 
+
+def fetch_month(year: int, month: int) -> int:
+    """抓某年月（西元）的上市+上櫃月營收，upsert 進 monthly_revenue（Neon）。回傳筆數。"""
+    rows_all = fetch_month_rows(year, month)
     if not rows_all:
         return 0
 
@@ -96,7 +102,7 @@ def fetch_month(year: int, month: int) -> int:
                 yoy_pct = EXCLUDED.yoy_pct
         """), rows_all)
 
-    logger.info(f"  月營收 {ym}：寫入 {len(rows_all)} 家")
+    logger.info(f"  月營收 {year:04d}-{month:02d}：寫入 {len(rows_all)} 家")
     return len(rows_all)
 
 
