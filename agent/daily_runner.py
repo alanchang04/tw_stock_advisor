@@ -140,7 +140,13 @@ def run_daily_recommendation(with_entries: bool = True):
         else:
             logger.warning("無候選股票，僅輸出出場提醒")
     else:
-        logger.info("（週末模式：略過新進場推薦，只檢查持倉出場）")
+        # 2026-07-20修正：這裡原本不分青紅皂白都印「週末模式」，但with_entries=False
+        # 有兩種完全不同的成因——真正的週末(mode_auto的星期判斷)，或空頭市場濾網
+        # 擋新倉(跟星期幾無關，交易日一樣會觸發)。訊息混用「週末模式」誤導使用者
+        # 以為系統認錯日期，實際上tw_today()從頭到尾都是對的，只是這句話沒講清楚
+        # 是市場濾網在擋，不是日期算錯。
+        logger.info("（空頭濾網擋新倉：略過新進場推薦，只檢查持倉出場）" if blocked
+                   else "（週末模式：略過新進場推薦，只檢查持倉出場）")
 
     # 合併報告（進場推薦 + 出場提醒）
     logger.info("產出報告")
@@ -148,6 +154,8 @@ def run_daily_recommendation(with_entries: bool = True):
         report = format_report(result)
     elif with_entries:
         report = "📊 今日無新進場推薦（候選不足或 LLM 失敗）"
+    elif blocked:
+        report = "🐻 空頭濾網擋新倉：今日不產生新進場推薦，僅追蹤持倉（非週末，是市場濾網判斷空頭）"
     else:
         report = "📅 週末模式：今日不產生新進場推薦，僅追蹤持倉"
     report += "\n\n" + format_positions_report(exits, opened, filled)
