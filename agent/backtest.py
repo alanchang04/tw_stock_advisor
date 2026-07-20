@@ -16,6 +16,7 @@ agent/backtest.py
     python -m agent.backtest
     python run_pipeline.py --mode backtest
 """
+from collections import Counter
 from datetime import date, timedelta
 
 import pandas as pd
@@ -462,6 +463,13 @@ def run_backtest(top_n=None, rebalance=5, cfg=None, data=None, quiet=False,
         liq_days = cfg.get("liquidity_avg_days", 5)
         # shift(1)：baseline 用「當天以前」的量，避免鎖死當天的量把自己的基準拉低
         data["_avg_volume_liq"] = vol_piv.shift(1).rolling(liq_days, min_periods=1).mean()
+    if "_sid_to_inds" not in data:      # 族群曝險上限用（SPEC_QUANT_UPGRADE.md P3決策3）
+        d2 = {}
+        imap = data.get("imap")
+        if imap is not None and not imap.empty:
+            for sid, g in imap.groupby("stock_id"):
+                d2[sid] = set(g["industry_code"])   # 一檔可能跨多族群
+        data["_sid_to_inds"] = d2
 
     # 市場濾網：大盤代理收盤 vs 其 60 日均線（逐日 bull/bear）
     regime_bull = None
@@ -586,7 +594,37 @@ def run_backtest(top_n=None, rebalance=5, cfg=None, data=None, quiet=False,
             if free_slots > 0:
                 hot = (_hot_sectors_asof(data, d, top_n=cfg["hot_sectors_top_n"])
                        if cfg.get("use_hot_sector_gate", True) else None)
-                for sid in _candidates_asof(data, d, hot, top_n=top_n, cfg=cfg):
+                cap = cfg.get("sector_exposure_cap")
+                sid_to_inds = data.get("_sid_to_inds") or {}
+                # 族群曝險上限（P3決策3）：cap給定時候選池要比 top_n 寬，被上限擋掉
+                # 的名額才有下一名可以遞補，不然只是少買，不是真的分散。
+                pool_n = max(top_n * 4, 20) if (cap and sid_to_inds) else top_n
+                candidates = _candidates_asof(data, d, hot, top_n=pool_n, cfg=cfg)
+
+                if cap and sid_to_inds:
+                    max_per_sector = max(1, round(max_open * cap))
+                    sector_counts = Counter()
+                    for s2 in list(open_pos.keys()) + pending_entries:
+                        for ind in sid_to_inds.get(s2, ()):
+                            sector_counts[ind] += 1
+                    picked, n_picked = [], 0
+                    for sid in candidates:
+                        if n_picked >= top_n:
+                            break
+                        if sid in open_pos or sid in pending_entries:
+                            continue
+                        inds = sid_to_inds.get(sid)
+                        if inds and any(sector_counts[i] >= max_per_sector for i in inds):
+                            continue   # 這檔會讓某個族群超過上限，跳過換下一名
+                        picked.append(sid)
+                        n_picked += 1
+                        for i in (inds or ()):
+                            sector_counts[i] += 1
+                    candidates = picked
+                else:
+                    candidates = candidates[:top_n]
+
+                for sid in candidates:
                     if free_slots <= 0:
                         break
                     if sid in open_pos or sid in pending_entries:
