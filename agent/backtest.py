@@ -411,6 +411,28 @@ def is_limit_locked(change_pct: float | None, volume: float | None,
     return volume < avg_volume * lock_vol_ratio
 
 
+def _adaptive_throttle_blocked(recent_wins: list[bool], cfg: dict = STRATEGY) -> bool:
+    """
+    訊號品質偵測+動態縮手（2026-07-20，SPEC_QUANT_UPGRADE.md：診斷2021/2024兩個
+    「0050被少數權值股拉漲、但策略實際交易的個股池當年沒有明確趨勢」的異常虧損
+    年份後新增）：死亡交叉/停損這類趨勢跟隨出場規則，在無趨勢/巴來巴去的環境裡
+    會被反覆巴（那兩年勝率掉到25~27%，遠低於10年平均34%）。這種「個股池無趨勢」
+    沒辦法只看0050自己的漲跌判斷（0050那兩年都還是正的），只能從策略自己「最近
+    實際打得怎樣」偵測——recent_wins 是逐筆平倉勝負紀錄（True=贏），累積到
+    min_trades 筆之前一律不擋（避免暖身期資料不足誤觸發），之後看最近 lookback
+    筆的勝率，低於門檻就回傳 True（擋新倉；已有部位的出場規則不受影響）。
+    純函式方便單獨測試，不用跑整個 run_backtest。
+    """
+    if not cfg.get("adaptive_throttle_enabled"):
+        return False
+    min_trades = cfg.get("adaptive_throttle_min_trades", 10)
+    if len(recent_wins) < min_trades:
+        return False
+    lookback = cfg.get("adaptive_throttle_lookback", 10)
+    recent = recent_wins[-lookback:]
+    return (sum(recent) / len(recent)) < cfg.get("adaptive_throttle_win_rate", 0.20)
+
+
 # ── 主回測：真實進出場（round-trip）─────────────────────────────
 def run_backtest(top_n=None, rebalance=5, cfg=None, data=None, quiet=False,
                  start_date=None, end_date=None, parquet_dir=None, slippage=SLIPPAGE):
@@ -525,13 +547,15 @@ def run_backtest(top_n=None, rebalance=5, cfg=None, data=None, quiet=False,
     # 掛單簿：今日收盤決定 → 隔日開盤成交（真實可執行的時序，見 SLIPPAGE 上方說明）
     pending_entries: list[str] = []
     pending_exits: list[tuple[str, str]] = []   # (stock_id, 出場原因)
+    recent_wins: list[bool] = []   # 訊號品質偵測用（見下方 adaptive_throttle）：逐筆平倉勝負紀錄
 
     def _record_exit(sid, p, fill, d_exit, i_exit, reason):
         hold = i_exit - p["entry_i"]
+        net_ret = net_return(p["entry_price"], fill)
         trades.append({"stock_id": sid, "entry_date": p["entry_date"], "exit_date": d_exit,
-                       "ret": fill / p["entry_price"] - 1,
-                       "net_ret": net_return(p["entry_price"], fill),
+                       "ret": fill / p["entry_price"] - 1, "net_ret": net_ret,
                        "hold": hold, "reason": reason})
+        recent_wins.append(net_ret > 0)
 
     for i, d in enumerate(sim_dates):
         bull = True if regime_bull is None else bool(regime_bull.get(d, True))
@@ -588,7 +612,10 @@ def run_backtest(top_n=None, rebalance=5, cfg=None, data=None, quiet=False,
         # 4) 再平衡日：依今日收盤評分選股 → 掛到明日開盤進場
         #    （持倉上限與 portfolio.record_entries() 的風控守門員一致）
         gi = pos_idx[d]
-        entry_ok = bull or not cfg.get("market_filter_block_entries", False)
+        market_ok = bull or not cfg.get("market_filter_block_entries", False)
+        # 訊號品質偵測+動態縮手（見 _adaptive_throttle_blocked 註解）：出場規則不受
+        # 影響，已有部位照樣正常出場，只是暫停再加碼新倉。
+        entry_ok = market_ok and not _adaptive_throttle_blocked(recent_wins, cfg)
         if entry_ok and (gi - start_i) % rebalance == 0:
             free_slots = max_open - len(open_pos) - len(pending_entries) + len(pending_exits)
             if free_slots > 0:

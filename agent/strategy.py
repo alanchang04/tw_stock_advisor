@@ -94,6 +94,14 @@ STRATEGY = {
     # None=不設上限；設數值＝任一族群持倉數不得超過 max_open_positions×此比例。
     "sector_exposure_cap": 0.6,
 
+    # 訊號品質偵測+動態縮手（2026-07-20，診斷2021/2024兩個「指數被權值股拉漲、
+    # 個股池卻無趨勢」的異常虧損年份後新增）：待10年A/B驗證後決定是否設為預設，
+    # 見 scripts/adaptive_throttle_ab.py。False=關閉，維持原行為。
+    "adaptive_throttle_enabled": False,
+    "adaptive_throttle_lookback": 10,      # 看最近幾筆平倉的勝率
+    "adaptive_throttle_min_trades": 10,    # 累積到這麼多筆平倉紀錄才開始判斷（避免暖身期誤觸發）
+    "adaptive_throttle_win_rate": 0.20,    # 最近勝率低於這個門檻 → 暫停開新倉（已有部位不受影響）
+
     # ── 出場規則：基本 ──
     # 2026-07-09 出場改為「趨勢騎乘」（E4，walk-forward 勝出）：核心出場是下面的
     # 死亡交叉（MA5 跌破 MA20＝短期趨勢轉弱才走），只要 5/20 趨勢還在就抱著，
