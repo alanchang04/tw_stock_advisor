@@ -7,6 +7,8 @@ agent/stock_selector.py
   3. 加入籌碼面過濾
   4. 回傳候選股票清單供 LLM 分析
 """
+from collections import Counter
+
 import pandas as pd
 from datetime import date, timedelta
 from loguru import logger
@@ -167,6 +169,46 @@ def _live_factor_maps(cfg: dict) -> dict:
         "invest_streak": inv_streak.loc[last].to_dict() if last in inv_streak.index else {},
         "invest_new_entry": new_entry.loc[last].to_dict() if last in new_entry.index else {},
     }
+
+
+def _held_ai_sector_counts() -> Counter:
+    """目前持倉中的AI部位（source='ai'），各族群各持有幾檔——族群曝險上限查詢用。"""
+    counts = Counter()
+    try:
+        with get_session() as session:
+            held = session.execute(text("""
+                SELECT i.name_zh FROM positions p
+                JOIN stock_industry_map m ON m.stock_id = p.stock_id
+                JOIN industries i ON i.code = m.industry_code
+                WHERE p.status = 'open' AND COALESCE(p.source, 'ai') = 'ai'
+            """)).fetchall()
+        for r in held:
+            if r[0]:
+                counts[r[0]] += 1
+    except Exception as e:
+        logger.warning(f"族群曝險上限：查詢目前持倉族群失敗（視為無持倉）: {e}")
+    return counts
+
+
+def _apply_sector_cap(df: pd.DataFrame, sector_counts: Counter, top_n: int,
+                      max_per_sector: int) -> pd.DataFrame:
+    """
+    純函式（2026-07-20，SPEC_QUANT_UPGRADE.md P3決策3補接live）：df 已依score排序，
+    sector_counts 是「目前已持有+已選入」的族群計數起始值（會被就地更新），逐檔檢查
+    加入是否讓某個族群超過 max_per_sector，超過就跳過換下一名遞補，直到選滿top_n
+    或候選池用盡——跟 agent/backtest.py run_backtest() 裡驗證過的邏輯同一個語意。
+    """
+    picked_idx = []
+    for idx, row in df.iterrows():
+        if len(picked_idx) >= top_n:
+            break
+        sec = row.get("industry")
+        if sec and sector_counts[sec] >= max_per_sector:
+            continue
+        picked_idx.append(idx)
+        if sec:
+            sector_counts[sec] += 1
+    return df.loc[picked_idx].reset_index(drop=True)
 
 
 def get_candidate_stocks(
@@ -376,9 +418,18 @@ def get_candidate_stocks(
 
     # 綜合評分：統一使用 strategy.score_candidates（與回測共用同一份邏輯）
     df["score"] = score_candidates(df, cfg)
-
     df = df.sort_values("score", ascending=False)
-    candidates = df.head(top_n).reset_index(drop=True)
+
+    # 族群曝險上限（2026-07-20，SPEC_QUANT_UPGRADE.md P3決策3；10年回測驗證的
+    # sector_exposure_cap 補接到即時推薦——之前只有回測有這段邏輯，每日實際推薦
+    # 沒吃到，造成線上/回測不一致）：跟回測同一個門檻語意，把「目前已持有的AI部位」
+    # 也算進族群計數，不是只看這次候選池，才會是真正的投資組合層級上限。
+    cap = cfg.get("sector_exposure_cap")
+    if cap and "industry" in df.columns:
+        candidates = _apply_sector_cap(df, _held_ai_sector_counts(), top_n,
+                                       max(1, round(cfg.get("max_open_positions", 10) * cap)))
+    else:
+        candidates = df.head(top_n).reset_index(drop=True)
 
     # P0-3 資料一致性檢查（SPEC_REASONING_LAYER）：法人資料日期必須跟上股價最新日，
     # 且候選不得全為 0（2026-07-13 並發事故：另一 pipeline backfill 途中讀到全 0，

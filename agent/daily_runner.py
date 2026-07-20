@@ -120,6 +120,11 @@ def run_daily_recommendation(with_entries: bool = True):
             hot_sector_names = candidates["industry"].unique().tolist()
             # debate_bull / debate_bear / judge 三段在 llm_advisor 內部各自記錄
             result = generate_recommendations(candidates_text, hot_sector_names)
+            try:
+                from agent.llm_ab_tracking import record_daily_picks
+                record_daily_picks(eval_date, candidates, result, pick_top_n=_ST.get("pick_top_n", 5))
+            except Exception as e:
+                logger.warning(f"LLM A/B量測記錄失敗（不影響正式推薦流程）: {e}")
             if result:
                 save_recommendations(result)
                 picks = [{"stock_id": r["stock_id"], "reason": r.get("reason", "")}

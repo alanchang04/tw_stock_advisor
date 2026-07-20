@@ -76,6 +76,50 @@ def _trend_factors(stock_id: str) -> dict:
         return {"rs20": None, "stack_days": None, "invest_streak": None}
 
 
+def _ai_selection_score(stock_id: str, cfg: dict = STRATEGY) -> dict:
+    """
+    2026-07-20 新增：套用「每日AI選股」用的同一套候選篩選+評分邏輯
+    （stock_selector.get_candidate_stocks → strategy.score_candidates），對使用者
+    指定的單一股票回報：有沒有進入候選池、目前分數、在當日全市場候選裡的排名/
+    百分位、若被硬否決規則排除是哪一條。刻意重用同一份函式而不是另外寫一份簡化版，
+    確保「個股隨選分析」跟「每日自動推薦」的判斷邏輯是同一套，不會兩邊看法不一致。
+
+    族群曝險上限（sector_exposure_cap）這裡刻意關閉：那是「目前投資組合裡這個族群
+    是否已經滿了」的暫時性限制，會隨當天持倉狀態變動；個股分析要看的是「這檔股票
+    本身的分數/排名」這種相對穩定的資訊，不該因為組合層的暫時限制而每天忽高忽低。
+    """
+    from agent.stock_selector import get_candidate_stocks
+    try:
+        raw_cfg = {**cfg, "sector_exposure_cap": None}
+        universe = get_candidate_stocks([], top_n=99999, cfg=raw_cfg)
+    except Exception as e:
+        logger.warning(f"AI選股評分計算失敗（略過）: {e}")
+        return {"ok": False, "in_universe": False, "veto_reason": None,
+               "score": None, "rank": None, "total_candidates": None,
+               "percentile_rank": None, "would_make_top_n": None}
+
+    hard_excluded = {r["stock_id"]: r["hard_veto_reason"]
+                     for r in (universe.attrs.get("hard_excluded") or [])}
+    total = len(universe)
+    if stock_id in hard_excluded:
+        return {"ok": True, "in_universe": False, "veto_reason": hard_excluded[stock_id],
+               "score": None, "rank": None, "total_candidates": total,
+               "percentile_rank": None, "would_make_top_n": False}
+    if universe.empty or stock_id not in universe["stock_id"].values:
+        return {"ok": True, "in_universe": False, "veto_reason": None,
+               "score": None, "rank": None, "total_candidates": total,
+               "percentile_rank": None, "would_make_top_n": False}
+
+    row = universe[universe["stock_id"] == stock_id].iloc[0]
+    rank = int((universe["score"] >= row["score"]).sum())   # 1 = 全市場最高分
+    return {
+        "ok": True, "in_universe": True, "veto_reason": None,
+        "score": float(row["score"]), "rank": rank, "total_candidates": total,
+        "percentile_rank": round(1 - (rank - 1) / total, 3) if total else None,
+        "would_make_top_n": rank <= cfg.get("pick_top_n", 5),
+    }
+
+
 def _revenue_yoy(stock_id: str) -> float | None:
     with get_session() as s:
         row = s.execute(text("""
@@ -136,7 +180,7 @@ def _recent_news(stock_id: str, days: int = 30, limit: int = 5) -> list[dict]:
 
 
 def _build_synthesis_prompt(stock_id: str, basic: dict, trend: dict, rev_yoy, regime: dict,
-                            inst: dict, news: list[dict]) -> tuple[str, str]:
+                            inst: dict, news: list[dict], ai_score: dict | None = None) -> tuple[str, str]:
     ma_cross = {1: "黃金交叉", -1: "死亡交叉", 0: "無"}.get(basic["signal_ma_cross"], "無")
     breakout = {1: "突破壓力", -1: "跌破支撐", 0: "無"}.get(basic["signal_breakout"], "無")
     lines = [
@@ -145,6 +189,17 @@ def _build_synthesis_prompt(stock_id: str, basic: dict, trend: dict, rev_yoy, re
         f"RSI {basic.get('rsi14') or 0:.1f}｜MACD柱{'正' if (basic.get('macd_hist') or 0) > 0 else '負'}｜"
         f"單日訊號：均線{ma_cross}/突破{breakout}（僅供進出場時機參考，非選股主因）",
     ]
+    if ai_score and ai_score.get("ok"):
+        if ai_score.get("in_universe"):
+            lines.append(f"AI選股系統評分：第 {ai_score['rank']}/{ai_score['total_candidates']} 名"
+                         f"（贏過全市場 {ai_score['percentile_rank']*100:.0f}% 候選股，"
+                         f"套用跟每日自動推薦完全相同的評分公式）"
+                         + ("｜目前分數足以進入每日實際推薦名單" if ai_score.get("would_make_top_n")
+                            else "｜分數尚不足以進入每日實際推薦名單"))
+        elif ai_score.get("veto_reason"):
+            lines.append(f"AI選股系統：目前被空方硬否決規則排除（{ai_score['veto_reason'].strip('；')}）")
+        else:
+            lines.append("AI選股系統：目前不在候選池內（未通過流動性/RSI等基本篩選門檻）")
     tr = []
     if trend.get("rs20") is not None:
         tr.append(f"相對強度 RS20 全市場第 {trend['rs20']*100:.0f} 百分位")
@@ -182,6 +237,9 @@ def _build_synthesis_prompt(stock_id: str, basic: dict, trend: dict, rev_yoy, re
    對面立場最強的論點——不是各打五十大板，是要求你不能只講單一面向。
 3. 若資料缺失（查無法人資料/查無新聞），要在 data_gaps 明確列出，不可假裝沒有風險。
 4. verdict 是綜合判斷後的整體傾向，不是簡單多數決。
+5. 若上面有「AI選股系統評分」這行，那是系統每天自動選股用的同一套評分公式算出來的
+   真實排名，不是另外編的——分數/排名跟你自己的定性判斷如果衝突（例如排名很後面但
+   你覺得故事很好），要在分析裡明確指出這個落差，不能忽略不提。
 
 回覆格式（只回JSON，不要其他文字）：
 {
@@ -231,6 +289,20 @@ def analyze_stock(stock_id: str) -> dict:
         rec.payload = regime
         _record("market_regime", rec.summary, rec.payload)
 
+    with run.stage("ai_selection_score") as rec:
+        ai_score = _ai_selection_score(stock_id)
+        if not ai_score.get("ok"):
+            rec.summary = "AI選股評分計算失敗（略過，其他段落不受影響）"
+        elif ai_score["in_universe"]:
+            rec.summary = (f"AI選股評分：第{ai_score['rank']}/{ai_score['total_candidates']}名"
+                           f"（贏過{ai_score['percentile_rank']*100:.0f}%候選股）")
+        elif ai_score.get("veto_reason"):
+            rec.summary = f"被空方硬否決規則排除：{ai_score['veto_reason'].strip('；')}"
+        else:
+            rec.summary = "目前不在候選池內（未通過基本篩選門檻）"
+        rec.payload = ai_score
+        _record("ai_selection_score", rec.summary, rec.payload)
+
     with run.stage("institutional_flow") as rec:
         inst = _institutional_flow(stock_id)
         if inst["ok"]:
@@ -250,7 +322,7 @@ def analyze_stock(stock_id: str) -> dict:
     with run.stage("synthesis") as rec:
         from agent.llm_advisor import _ask, _parse_json
         system_prompt, user_prompt = _build_synthesis_prompt(
-            stock_id, basic, trend, rev_yoy, regime, inst, news)
+            stock_id, basic, trend, rev_yoy, regime, inst, news, ai_score)
         raw = _ask(system_prompt, user_prompt, max_tokens=1200, rec=rec, json_mode=True)
         parsed = _parse_json(raw) if raw else None
         if parsed and not parsed.get("verdict"):

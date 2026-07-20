@@ -10,6 +10,7 @@ import sys
 from contextlib import contextmanager
 from datetime import date
 
+import pandas as pd
 import pytest
 from sqlalchemy import text
 
@@ -64,6 +65,94 @@ def test_prompt_no_news_says_so():
     _, user_p = sa._build_synthesis_prompt(
         "2330", _basic(), {}, None, {"bull": True, "ok": False}, {"ok": False}, [])
     assert "近30日查無相關報導" in user_p
+
+
+# ── AI選股評分套用到個股分析（2026-07-20新增：套用每日AI選股同一套邏輯）──────
+def test_prompt_includes_ai_score_when_in_universe():
+    ai_score = {"ok": True, "in_universe": True, "veto_reason": None,
+               "score": 8.5, "rank": 3, "total_candidates": 120,
+               "percentile_rank": 0.983, "would_make_top_n": True}
+    _, user_p = sa._build_synthesis_prompt(
+        "2330", _basic(), {}, None, {"bull": True, "ok": False}, {"ok": False}, [], ai_score)
+    assert "第 3/120 名" in user_p
+    assert "目前分數足以進入每日實際推薦名單" in user_p
+
+
+def test_prompt_includes_ai_score_veto_reason():
+    ai_score = {"ok": True, "in_universe": False, "veto_reason": "乖離月線15%以上；",
+               "score": None, "rank": None, "total_candidates": 120,
+               "percentile_rank": None, "would_make_top_n": False}
+    _, user_p = sa._build_synthesis_prompt(
+        "2330", _basic(), {}, None, {"bull": True, "ok": False}, {"ok": False}, [], ai_score)
+    assert "被空方硬否決規則排除" in user_p
+    assert "乖離月線15%以上" in user_p
+
+
+def test_prompt_includes_ai_score_not_in_pool():
+    ai_score = {"ok": True, "in_universe": False, "veto_reason": None,
+               "score": None, "rank": None, "total_candidates": 120,
+               "percentile_rank": None, "would_make_top_n": False}
+    _, user_p = sa._build_synthesis_prompt(
+        "2330", _basic(), {}, None, {"bull": True, "ok": False}, {"ok": False}, [], ai_score)
+    assert "不在候選池內" in user_p
+
+
+def test_prompt_without_ai_score_omits_section():
+    # ai_score=None（預設值）：不加這段，舊呼叫方式（沒傳這個參數）不受影響
+    _, user_p = sa._build_synthesis_prompt(
+        "2330", _basic(), {}, None, {"bull": True, "ok": False}, {"ok": False}, [])
+    assert "AI選股系統" not in user_p
+
+
+def test_ai_selection_score_ranks_and_computes_percentile(monkeypatch):
+    universe = pd.DataFrame({
+        "stock_id": ["9999", "2330", "1101"],
+        "score": [10.0, 8.0, 3.0],
+    })
+    universe.attrs["hard_excluded"] = []
+    monkeypatch.setattr("agent.stock_selector.get_candidate_stocks", lambda *a, **k: universe)
+    result = sa._ai_selection_score("2330", cfg={"pick_top_n": 5, "sector_exposure_cap": 0.6})
+    assert result["ok"] is True
+    assert result["in_universe"] is True
+    assert result["rank"] == 2
+    assert result["total_candidates"] == 3
+    assert result["would_make_top_n"] is True   # rank 2 <= pick_top_n 5
+
+
+def test_ai_selection_score_veto_reason_when_hard_excluded(monkeypatch):
+    universe = pd.DataFrame({"stock_id": ["9999"], "score": [10.0]})
+    universe.attrs["hard_excluded"] = [
+        {"stock_id": "2330", "stock_name": "台積電", "hard_veto_reason": "乖離月線15%以上；"}]
+    monkeypatch.setattr("agent.stock_selector.get_candidate_stocks", lambda *a, **k: universe)
+    result = sa._ai_selection_score("2330", cfg={"pick_top_n": 5})
+    assert result["ok"] is True
+    assert result["in_universe"] is False
+    assert "乖離月線" in result["veto_reason"]
+
+
+def test_ai_selection_score_not_in_pool_when_missing(monkeypatch):
+    universe = pd.DataFrame({"stock_id": ["9999"], "score": [10.0]})
+    universe.attrs["hard_excluded"] = []
+    monkeypatch.setattr("agent.stock_selector.get_candidate_stocks", lambda *a, **k: universe)
+    result = sa._ai_selection_score("2330", cfg={"pick_top_n": 5})
+    assert result["ok"] is True
+    assert result["in_universe"] is False
+    assert result["veto_reason"] is None
+
+
+def test_ai_selection_score_disables_sector_cap_for_stable_ranking(monkeypatch):
+    # sector_exposure_cap 應該被強制關閉（個股評分不該被暫時性的組合層限制影響）
+    captured_cfg = {}
+
+    def fake_get_candidates(industry_codes, top_n=99999, cfg=None):
+        captured_cfg.update(cfg or {})
+        df = pd.DataFrame({"stock_id": ["2330"], "score": [8.0]})
+        df.attrs["hard_excluded"] = []
+        return df
+
+    monkeypatch.setattr("agent.stock_selector.get_candidate_stocks", fake_get_candidates)
+    sa._ai_selection_score("2330", cfg={"pick_top_n": 5, "sector_exposure_cap": 0.6})
+    assert captured_cfg["sector_exposure_cap"] is None
 
 
 # ── analyze_stock 早退路徑：不存在的股票，不呼叫 LLM ────────────────
