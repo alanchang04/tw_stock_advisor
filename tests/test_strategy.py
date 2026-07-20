@@ -72,11 +72,15 @@ def test_trailing_stop_would_have_stopped_out_small_gain_at_same_pullback():
     assert ex and "移動停利" in reason
 
 
-# ── E4 趨勢騎乘出場的現行預設（鎖定 2026-07-09 上線設定）──────────────
-def test_death_cross_on_by_default():
-    # 現行預設 exit_on_death_cross=True：MA5(99) < MA20(100) → 出場
-    ex, reason = decide_exit(100, 105, 104, 99.0, 100.0, 5, cfg=cfg())
-    assert ex and "死亡交叉" in reason
+# ── E4 趨勢騎乘出場（2026-07-20 P3出場規則消融後改版：死亡交叉全時期開啟在
+#   10年資料上實測反而扣分——Sharpe 0.73(開)vs 0.95(只在熊市經bear_reenable_
+#   death_cross重開)，回撤幾乎不變，證明砍的是本來會續漲的波段，不是真的防下檔。
+#   見 scripts/exit_rule_ablation.py。牛市base預設關閉，熊市由 run_backtest 的
+#   bear_cfg 動態重開，這裡只測純函式 cfg() 這層（不含 bear_cfg 那層動態邏輯）──
+def test_death_cross_off_by_default():
+    # 現行預設 exit_on_death_cross=False：MA5(99) < MA20(100) 但規則已關，不出場
+    ex, _ = decide_exit(100, 105, 104, 99.0, 100.0, 5, cfg=cfg())
+    assert not ex
 
 def test_max_hold_disabled_by_default():
     # 現行預設 max_hold_days=0：抱再久也不因天數強制出場（趨勢還在就抱著）

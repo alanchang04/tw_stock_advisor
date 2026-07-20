@@ -53,7 +53,9 @@ STRATEGY = {
     "w_rev_accel": 1.0,    # 月營收年增 >20%（高成長加碼，升權）
     # 相對強度/多頭排列/投信連買（可回測核心因子）：
     "w_rs":           0.0,  # 相對強度（20日報酬全市場百分位）（P1：10~20日IC顯著負相關，歸零）
-    "w_trend_stack":  1.5,  # 多頭排列 MA5>MA20>MA60 持續天數——抓「已確認的趨勢」非今天剛交叉
+    "w_trend_stack":  0.8,  # 多頭排列 MA5>MA20>MA60 持續天數（P1：要60日以上才顯著，現行持有期
+                             # 跑不完，從1.5降權——2026-07-20修正：這裡先前commit漏改，10年A/B
+                             # 驗證的C組是0.8，之前誤留1.5，數字對不上見exit_rule_ablation重測）
     "w_invest_streak": 2.5, # 投信連續買超（含量體門檻）——「買氣」升權，追大戶的錢
 
     # ── 2026-07-15：中小型股×投信剛開始買（使用者要求）──
@@ -101,33 +103,45 @@ STRATEGY = {
     "max_hold_days":  0,      # 0=關閉時間停損：趨勢還在就一直抱，不因持有天數強制平倉
 
     # ── 出場規則：均線（趨勢騎乘核心）──
-    # 死亡交叉 MA5<MA20 = 短期趨勢轉弱，這是 E4 的主要出場訊號（跌破週線太敏感會把
-    # 飛天股剁成碎片＝E5，實測全期只 +50% 且抱不住大波段；死亡交叉較穩、抱得住、
-    # 全期 +126% 贏 0050，回撤 -28.7% 比舊版 -36% 好）。
-    "exit_on_death_cross": True,   # MA5 跌破 MA20（死亡交叉）→ 出場（趨勢騎乘主要出場）
+    # 2026-07-20 P3出場規則消融（10年資料，scripts/exit_rule_ablation.py）推翻了
+    # 2026-07-09的舊結論：死亡交叉「全時期開啟」實測反而扣分（Sharpe 0.73 vs 拔掉後
+    # 0.71~0.95，回撤幾乎不變，證明它砍的是本來會續漲的波段，不是真的在防下檔——
+    # 下檔已經由停損+移動停利守住）。三組乾淨對照：全開0.73／全關0.71／
+    # 只在熊市重開(下面這個設定)0.95——熊市重開最佳，牛市讓飛天股用移動停利抱到底，
+    # 熊市才用死叉當趨勢轉弱的提早示警。改成 False，靠 bear_reenable_death_cross
+    # 在熊市日用 bear_cfg 動態重新打開（見 agent/backtest.py run_backtest）。
+    "exit_on_death_cross": False,  # 牛市關閉（消融驗證扣分）；熊市由 bear_reenable_death_cross 重開
     "exit_below_ma20":     False,  # 收盤跌破 MA20 → 出場（關閉，交給死亡交叉）
     "exit_below_ma5":      False,  # 收盤跌破 MA5 → 出場（關閉，太敏感會剁碎飛天股）
 
     # ── 出場規則：KD 高檔死叉 + MACD 同步轉負 ──
-    "exit_kd_macd":   True,   # 啟用此規則
+    # 2026-07-20 P3消融：10年回測裡拔掉這條，結果與baseline逐位元組相同（連交易筆數
+    # 都一樣）——代表這條規則的觸發條件在10年真實資料裡從未先於其他規則觸發過，
+    # 是死代碼，關閉（見 exit_rule_ablation.py 結果）。
+    "exit_kd_macd":   False,
     "kd_overbought":  80,     # K 值需在此閾值以上才算「高檔」
 
     # ── 出場規則：跌破前波低點 ──
-    "exit_swing_low":      True,
+    # 2026-07-20 P3消融：同上，10年回測裡從未觸發過，關閉。
+    "exit_swing_low":      False,
     "swing_low_window":    5,    # 左右各幾根確認樞紐
     "swing_low_lookback":  30,   # 往回看幾根 K 棒找樞紐
 
     # ── 出場規則：跌破前 N 根 K 棒實體棒底部 ──
-    "exit_body_break":     True,
+    # 2026-07-20 P3消融：同上，10年回測裡從未觸發過，關閉。
+    "exit_body_break":     False,
     "body_break_candles":  3,    # 參考最近幾根
 
     # ── 出場規則：跌破最近大 K 棒底部 ──
-    "exit_large_candle":      True,
+    # 2026-07-20 P3消融：同上，10年回測裡從未觸發過，關閉。
+    "exit_large_candle":      False,
     "large_candle_pct":       0.03,   # 實體漲跌幅 ≥ 3% 才算大 K 棒
     "large_candle_lookback":  20,     # 往回看幾根
 
     # ── 出場規則：長上引線爆量 ──
-    "exit_upper_wick":    True,
+    # 2026-07-20 P3消融：10年回測裡從未觸發過，關閉（沿用同一組門檻常數給
+    # hard_veto_upper_wick——那是進場前的否決規則，跟這條出場規則彼此獨立）。
+    "exit_upper_wick":    False,
     "upper_wick_ratio":   0.6,    # 上引線 ≥ 振幅 60%
     "high_volume_ratio":  2.5,    # 成交量 ≥ 均量 2.5 倍
     "volume_avg_days":    20,     # 均量計算天數（由 portfolio 傳入）
