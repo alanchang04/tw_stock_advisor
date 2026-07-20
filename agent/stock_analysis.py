@@ -76,28 +76,28 @@ def _trend_factors(stock_id: str) -> dict:
         return {"rs20": None, "stack_days": None, "invest_streak": None}
 
 
-def _ai_selection_score(stock_id: str, cfg: dict = STRATEGY) -> dict:
+def get_full_scored_universe(cfg: dict = STRATEGY):
     """
-    2026-07-20 新增：套用「每日AI選股」用的同一套候選篩選+評分邏輯
-    （stock_selector.get_candidate_stocks → strategy.score_candidates），對使用者
-    指定的單一股票回報：有沒有進入候選池、目前分數、在當日全市場候選裡的排名/
-    百分位、若被硬否決規則排除是哪一條。刻意重用同一份函式而不是另外寫一份簡化版，
-    確保「個股隨選分析」跟「每日自動推薦」的判斷邏輯是同一套，不會兩邊看法不一致。
+    2026-07-20 新增：算一次「今天全市場、套用AI選股完整篩選+評分邏輯」的候選池
+    （stock_selector.get_candidate_stocks → strategy.score_candidates），回傳依分數
+    排序的完整 DataFrame（不是只有top_n）。給需要「對多檔股票分別查排名」的呼叫端
+    （個股隨選分析、追蹤清單買點判斷）共用同一次計算，不要每檔股票各自重算一次
+    全市場——那是同一份運算，重複算沒有意義，只會拖慢+浪費查詢。
 
     族群曝險上限（sector_exposure_cap）這裡刻意關閉：那是「目前投資組合裡這個族群
-    是否已經滿了」的暫時性限制，會隨當天持倉狀態變動；個股分析要看的是「這檔股票
-    本身的分數/排名」這種相對穩定的資訊，不該因為組合層的暫時限制而每天忽高忽低。
+    是否已經滿了」的暫時性限制，會隨當天持倉狀態變動；查詢個股/清單分數要看的是
+    「這檔股票本身的分數/排名」這種相對穩定的資訊，不該被組合層的暫時限制影響。
     """
     from agent.stock_selector import get_candidate_stocks
-    try:
-        raw_cfg = {**cfg, "sector_exposure_cap": None}
-        universe = get_candidate_stocks([], top_n=99999, cfg=raw_cfg)
-    except Exception as e:
-        logger.warning(f"AI選股評分計算失敗（略過）: {e}")
-        return {"ok": False, "in_universe": False, "veto_reason": None,
-               "score": None, "rank": None, "total_candidates": None,
-               "percentile_rank": None, "would_make_top_n": None}
+    raw_cfg = {**cfg, "sector_exposure_cap": None}
+    return get_candidate_stocks([], top_n=99999, cfg=raw_cfg)
 
+
+def rank_in_universe(stock_id: str, universe, cfg: dict = STRATEGY) -> dict:
+    """
+    純函式：從 get_full_scored_universe() 算好的候選池裡，查單一股票的分數/排名/
+    百分位/是否被硬否決排除。回傳格式跟 _ai_selection_score() 一致（歷史相容）。
+    """
     hard_excluded = {r["stock_id"]: r["hard_veto_reason"]
                      for r in (universe.attrs.get("hard_excluded") or [])}
     total = len(universe)
@@ -118,6 +118,23 @@ def _ai_selection_score(stock_id: str, cfg: dict = STRATEGY) -> dict:
         "percentile_rank": round(1 - (rank - 1) / total, 3) if total else None,
         "would_make_top_n": rank <= cfg.get("pick_top_n", 5),
     }
+
+
+def _ai_selection_score(stock_id: str, cfg: dict = STRATEGY) -> dict:
+    """
+    套用「每日AI選股」同一套候選篩選+評分邏輯，對單一股票查詢——只查一檔股票時的
+    便利包裝（内部算一次全市場候選池）。要對多檔股票各自查詢時，改用
+    get_full_scored_universe()算一次+rank_in_universe()逐檔查，避免每檔都重算
+    一次全市場（見 data_pipeline/analysis/watchlist_advisor.py 的用法）。
+    """
+    try:
+        universe = get_full_scored_universe(cfg)
+    except Exception as e:
+        logger.warning(f"AI選股評分計算失敗（略過）: {e}")
+        return {"ok": False, "in_universe": False, "veto_reason": None,
+               "score": None, "rank": None, "total_candidates": None,
+               "percentile_rank": None, "would_make_top_n": None}
+    return rank_in_universe(stock_id, universe, cfg)
 
 
 def _revenue_yoy(stock_id: str) -> float | None:

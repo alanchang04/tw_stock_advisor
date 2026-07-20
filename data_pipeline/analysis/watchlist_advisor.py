@@ -3,17 +3,23 @@ data_pipeline/analysis/watchlist_advisor.py
 
 追蹤清單每日買點判斷（波段視角，數週~數月）。
 
-訊號與權重沿用 agent/strategy.py 的 STRATEGY（單一策略中樞）：
-  - 均線黃金交叉 (signal_ma_cross)      → w_ma_cross
-  - 突破 20 日高 (signal_breakout)      → w_breakout
-  - MACD 柱 > 0                         → w_macd_pos
-  - 近 5 日三大法人淨買超               → w_inst_buy
-  - 投信連 3 日買超                     → +1.5（聰明資金訊號）
-  - RSI 50~65 甜蜜帶                    → w_rsi_sweet
-  - 現價 ≤ 目標價（若有設）             → 額外標註
+2026-07-20修正真bug：原本的計分公式手動疊加 w_ma_cross/w_breakout/w_macd_pos/
+w_inst_buy/w_rsi_sweet 這5個STRATEGY權重，但這幾個權重從2026-07-15策略重構後
+就已經全部降到0（改用相對強度/多頭排列/投信連買等新因子），沒有人回頭改這裡——
+扣掉唯一還有效的「投信連3買+1.5分」，分數永遠不夠格觸發🟡(2.0分)或🟢(4.0分)，
+這個功能上線後事實上不可能發出任何買點訊號，不管股票好壞都一樣，一直卡在「⚪觀望」。
 
-分數 ≥ 4.0 → 🟢 買點浮現；≥ 2.0 → 🟡 接近買點；否則 ⚪ 觀望。
-結果寫回 user_watchlist.last_signal / signal_date，回傳 🟢 彙總（Telegram 用）。
+改用 agent.stock_analysis.get_full_scored_universe()+rank_in_universe()——跟每日
+AI選股、個股隨選分析共用同一套完整評分邏輯（相對強度/多頭排列/投信連買/新進場/
+月營收年增等），不再手動維護一份會過期的簡化版權重。買點判斷改用「在當日全市場
+候選裡的百分位排名」而不是絕對分數（分數尺度會隨STRATEGY權重調整而變，百分位
+排名才是跨時間穩定的判準）：
+  會進入今日實際推薦名單(would_make_top_n) → 🟢 買點浮現
+  百分位 ≥ YELLOW_PERCENTILE（前30%強）     → 🟡 接近買點
+  被空方硬否決規則排除                       → 🔴 空方否決訊號
+  其餘（含未過流動性/RSI等基礎門檻）         → ⚪ 觀望
+
+結果寫回 watchlist_items.last_signal / signal_date，回傳 🟢 彙總（Telegram 用）。
 """
 from __future__ import annotations
 from datetime import date
@@ -25,14 +31,9 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 from database.connection import get_session
 from agent.strategy import STRATEGY
+from agent.stock_analysis import get_full_scored_universe, rank_in_universe
 
-INVEST_STREAK_BONUS = 1.5   # 投信連 3 日買超加分
-GREEN_THRESHOLD  = 4.0
-YELLOW_THRESHOLD = 2.0
-# 同 smart_money.py 的量體下限修正：純「連3天」不設量體下限會被雜訊觸發
-# （曾實測 3 天總共只買 3 張的股票也算「連買」）。30張 ≈ smart_money 100張/15天
-# 門檻的等比例縮小版（3天窗口）。
-MIN_STREAK_TOTAL_LOTS = 30
+YELLOW_PERCENTILE = 0.70   # 百分位 ≥ 這個門檻 → 🟡 接近買點（贏過全市場候選前30%強）
 
 
 def evaluate_watchlist(target_date: date = None) -> str | None:
@@ -55,92 +56,56 @@ def evaluate_watchlist(target_date: date = None) -> str | None:
     if not items:
         return None
 
-    # 每支股票的基礎訊號只算一次（多清單共用）
     stock_ids = sorted({r[1] for r in items})
     names = {r[1]: r[2] for r in items}
     logger.info(f"=== 追蹤清單買點判斷：{len(items)} 項（{len(stock_ids)} 檔不重複）===")
+
+    try:
+        universe = get_full_scored_universe(STRATEGY)
+    except Exception as e:
+        logger.warning(f"追蹤清單買點判斷：全市場評分計算失敗（略過本次）: {e}")
+        return None
+
+    # 現價/RSI：即使股票沒進候選池（未過流動性/RSI等基礎門檻）也要能顯示現況，
+    # 不能只在有評分時才更新——用 DISTINCT ON 一次查完每檔的最新一筆
+    with get_session() as s:
+        px_rows = s.execute(text("""
+            SELECT DISTINCT ON (p.stock_id) p.stock_id, p.trade_date, p.close, t.rsi14
+            FROM daily_prices p
+            LEFT JOIN technical_indicators t ON t.stock_id = p.stock_id AND t.trade_date = p.trade_date
+            WHERE p.stock_id = ANY(:ids) AND p.close > 0 AND p.trade_date <= :td
+            ORDER BY p.stock_id, p.trade_date DESC
+        """), {"ids": stock_ids, "td": target_date}).fetchall()
+    px_map = {r[0]: {"trade_date": r[1], "close": float(r[2]), "rsi": r[3]} for r in px_rows}
+
+    # 每支股票的分數/排名只算一次（多清單共用）
     base_signals: dict[str, dict] = {}
-    green_alerts = []
-
     for sid in stock_ids:
-        name = names[sid]
-        target_price = None   # 目標價為清單項目層級，稍後逐項判斷
-        with get_session() as s:
-            # 最新技術指標 + 收盤
-            row = s.execute(text("""
-                SELECT p.trade_date, p.close,
-                       t.rsi14, t.macd_hist, t.signal_ma_cross, t.signal_breakout
-                FROM daily_prices p
-                LEFT JOIN technical_indicators t
-                    ON t.stock_id = p.stock_id AND t.trade_date = p.trade_date
-                WHERE p.stock_id = :sid AND p.close > 0 AND p.trade_date <= :td
-                ORDER BY p.trade_date DESC LIMIT 1
-            """), {"sid": sid, "td": target_date}).fetchone()
-            if row is None:
-                continue
-            trade_date, close, rsi, macd_hist, ma_cross, breakout = row
-            close = float(close)
-
-            # 近 5 交易日法人 + 投信近 3 日是否連買
-            inst = s.execute(text("""
-                SELECT COALESCE(SUM(total_net),0),
-                       COUNT(*) FILTER (WHERE invest_net > 0)
-                FROM (
-                    SELECT total_net, invest_net FROM institutional_trading
-                    WHERE stock_id = :sid AND trade_date <= :td
-                    ORDER BY trade_date DESC LIMIT 5
-                ) t5
-            """), {"sid": sid, "td": target_date}).fetchone()
-            inst_5d_net = float(inst[0] or 0)
-            streak3 = s.execute(text("""
-                SELECT COUNT(*) FILTER (WHERE invest_net > 0),
-                       COALESCE(SUM(invest_net) FILTER (WHERE invest_net > 0), 0)
-                FROM (
-                    SELECT invest_net FROM institutional_trading
-                    WHERE stock_id = :sid AND trade_date <= :td
-                    ORDER BY trade_date DESC LIMIT 3
-                ) t3
-            """), {"sid": sid, "td": target_date}).fetchone()
-            # 天數=3 且累計量達標才算「連買」；純天數會被雜訊觸發
-            # （曾實測3天總共只買3張的股票也符合舊版「連3買」條件）
-            invest_streak3 = (streak3[0] == 3
-                              and float(streak3[1]) / 1000 >= MIN_STREAK_TOTAL_LOTS)
-
-        # ── 計分 ────────────────────────────────────────────────
-        score, hits = 0.0, []
-        if ma_cross and float(ma_cross) > 0:
-            score += STRATEGY["w_ma_cross"]; hits.append("均線黃金交叉")
-        if breakout and float(breakout) > 0:
-            score += STRATEGY["w_breakout"]; hits.append("突破20日高")
-        if macd_hist is not None and float(macd_hist) > 0:
-            score += STRATEGY["w_macd_pos"]; hits.append("MACD翻正")
-        if inst_5d_net > 0:
-            score += STRATEGY["w_inst_buy"]; hits.append("法人5日買超")
-        if invest_streak3:
-            score += INVEST_STREAK_BONUS; hits.append("投信連3買")
-        if rsi is not None and 50 <= float(rsi) <= 65:
-            score += STRATEGY["w_rsi_sweet"]; hits.append(f"RSI甜蜜帶({float(rsi):.0f})")
-
-        base_signals[sid] = {"score": score, "hits": hits, "close": close,
-                             "rsi": rsi, "trade_date": trade_date}
+        px = px_map.get(sid)
+        if px is None:
+            continue
+        base_signals[sid] = {**px, "ai": rank_in_universe(sid, universe, STRATEGY)}
 
     # 逐清單項目寫回（目標價是項目層級，逐項判斷）
+    green_alerts = []
     for list_id, sid, name, target_price, list_name, username in items:
         base = base_signals.get(sid)
         if base is None:
             continue
-        score, hits = base["score"], base["hits"]
-        close, rsi, trade_date = base["close"], base["rsi"], base["trade_date"]
+        close, rsi, trade_date, ai = base["close"], base["rsi"], base["trade_date"], base["ai"]
 
         at_target = target_price is not None and close <= float(target_price)
         target_txt = "、已到目標價" if at_target else ""
 
-        if score >= GREEN_THRESHOLD:
-            signal = f"🟢 買點浮現（{score:.1f}分）：{'、'.join(hits)}{target_txt}"
+        if ai.get("veto_reason"):
+            signal = f"🔴 空方否決訊號：{ai['veto_reason'].strip('；')}{target_txt}"
+        elif ai.get("in_universe") and ai.get("would_make_top_n"):
+            signal = (f"🟢 買點浮現（AI選股第{ai['rank']}/{ai['total_candidates']}名，"
+                     f"贏過{ai['percentile_rank']*100:.0f}%候選股）{target_txt}")
             green_alerts.append(f"  {sid} {name}：{signal}｜現價 {close:.2f}"
                                 f"（{username}／{list_name}）")
-        elif score >= YELLOW_THRESHOLD:
-            signal = f"🟡 接近買點（{score:.1f}分）：{'、'.join(hits)}{target_txt}"
+        elif ai.get("in_universe") and (ai.get("percentile_rank") or 0) >= YELLOW_PERCENTILE:
+            signal = f"🟡 接近買點（贏過{ai['percentile_rank']*100:.0f}%候選股）{target_txt}"
         else:
             rsi_txt = f"RSI {float(rsi):.0f}" if rsi is not None else "RSI —"
             signal = f"⚪ 觀望（現價 {close:.2f}，{rsi_txt}）{target_txt}"
