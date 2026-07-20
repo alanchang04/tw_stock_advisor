@@ -179,12 +179,21 @@ def mode_daily(source: str = "openapi"):
 
 
 def _weekly_review_text() -> str:
-    """週末策略回顧：跑回測，回傳精簡摘要文字（供 Telegram）。"""
+    """週末策略回顧：跑回測，回傳精簡摘要文字（供 Telegram）。
+
+    2026-07-20修正真實事故：這裡原本呼叫 run_backtest() 不帶 start_date，
+    _load() 對 daily_prices/technical_indicators/institutional_trading 三張表
+    做無 WHERE 無 LIMIT 的全表查詢——這個每週五排程的小功能，把 Neon 免費層
+    5GB/月的網路傳輸配額燒穿，導致整個 production DB 斷線（詳見
+    docs/SPEC_QUANT_UPGRADE.md §2.8）。週報只需要近期表現摘要，不需要全歷史，
+    限制半年窗大幅縮小傳輸量（_load 內部會再往前多抓120天當指標暖身緩衝）。
+    """
     import io, contextlib
     try:
         from agent.backtest import run_backtest
+        recent_start = date.today() - timedelta(days=180)
         with contextlib.redirect_stdout(io.StringIO()):
-            tdf = run_backtest()
+            tdf = run_backtest(start_date=recent_start)
         if tdf is None or len(tdf) == 0:
             return "📈 週末策略回顧：回測資料不足"
         win = (tdf["ret"] > 0).mean() * 100

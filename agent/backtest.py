@@ -37,32 +37,43 @@ from agent.strategy import (STRATEGY, score_candidates, decide_exit, split_adjus
 
 
 # ── 載入資料（一次全載入記憶體，避免每個日期重複查 DB）───────────
-def _load(parquet_dir: str | None = None) -> dict:
-    """parquet_dir 給定時改讀本機 parquet（跨週期歷史回測用，見 _load_parquet）。"""
+def _load(parquet_dir: str | None = None, since=None) -> dict:
+    """parquet_dir 給定時改讀本機 parquet（跨週期歷史回測用，見 _load_parquet）。
+
+    since（date，選配，只影響直連 Neon 這條路徑）：只查這天以後的價量/技術指標/
+    法人資料。2026-07-20修正一個真實事故：`run_pipeline.py _weekly_review_text()`
+    每週五排程呼叫 `run_backtest()` 沒帶這個參數，對 daily_prices/technical_indicators/
+    institutional_trading 三張表都是無 WHERE、無 LIMIT 的全表查詢——production DB
+    的網路傳輸配額(Neon免費層5GB/月)因此被按週推播的小功能吃光，見
+    docs/SPEC_QUANT_UPGRADE.md §2.8。近期摘要用途不需要全歷史，帶 since 大幅縮小
+    傳輸量；不帶（None）維持原行為，跨週期研究/回測仍讀全表。
+    """
     if parquet_dir:
         return _load_parquet(parquet_dir)
+    date_filter = " WHERE trade_date >= :since" if since else ""
+    params = {"since": since} if since else {}
     with get_session() as s:
         prices = pd.DataFrame(
-            s.execute(text("""
+            s.execute(text(f"""
                 SELECT stock_id, trade_date, open, close, volume, turnover, change_pct
-                FROM daily_prices
-            """)).fetchall(),
+                FROM daily_prices{date_filter}
+            """), params).fetchall(),
             columns=["stock_id", "trade_date", "open", "close", "volume", "turnover", "change_pct"],
         )
         tech = pd.DataFrame(
-            s.execute(text("""
+            s.execute(text(f"""
                 SELECT stock_id, trade_date, ma5, ma20, ma60, rsi14, macd_hist,
                        signal_ma_cross, signal_breakout
-                FROM technical_indicators
-            """)).fetchall(),
+                FROM technical_indicators{date_filter}
+            """), params).fetchall(),
             columns=["stock_id", "trade_date", "ma5", "ma20", "ma60", "rsi14",
                      "macd_hist", "signal_ma_cross", "signal_breakout"],
         )
         inst = pd.DataFrame(
-            s.execute(text("""
+            s.execute(text(f"""
                 SELECT stock_id, trade_date, total_net, foreign_net, invest_net
-                FROM institutional_trading
-            """)).fetchall(),
+                FROM institutional_trading{date_filter}
+            """), params).fetchall(),
             columns=["stock_id", "trade_date", "total_net", "foreign_net", "invest_net"],
         )
         imap = pd.DataFrame(
@@ -420,7 +431,11 @@ def run_backtest(top_n=None, rebalance=5, cfg=None, data=None, quiet=False,
     if not quiet:
         logger.info("=== 回測開始（進場評分 + strategy 出場規則，不含 LLM）===")
     if data is None:
-        data = _load(parquet_dir=parquet_dir)
+        # 直連 Neon 時，若呼叫端只在乎 start_date 之後的區間（如週報摘要），帶
+        # since 讓 _load() 只查這段+120天緩衝（MA60/60日動能等指標需要的暖身期），
+        # 大幅縮小網路傳輸量。parquet_dir 給定時走本機檔案，不受影響。
+        since = (start_date - timedelta(days=120)) if (start_date and not parquet_dir) else None
+        data = _load(parquet_dir=parquet_dir, since=since)
     closes = data["prices"].pivot_table(index="trade_date", columns="stock_id", values="close")
     closes = closes.where(closes > 0)   # close<=0 為資料瑕疵(停牌/無成交)，視為缺值
     div_events = data.get("dividends")
