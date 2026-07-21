@@ -119,7 +119,7 @@ def run_daily_recommendation(with_entries: bool = True):
             candidates_text = format_candidates_for_llm(candidates)
             hot_sector_names = candidates["industry"].unique().tolist()
             # debate_bull / debate_bear / judge 三段在 llm_advisor 內部各自記錄
-            result = generate_recommendations(candidates_text, hot_sector_names)
+            result = generate_recommendations(candidates_text, hot_sector_names, candidates)
             try:
                 from agent.llm_ab_tracking import record_daily_picks
                 record_daily_picks(eval_date, candidates, result, pick_top_n=_ST.get("pick_top_n", 5))

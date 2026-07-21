@@ -262,10 +262,15 @@ def apply_judge_guardrail(result: dict, bear_data: dict | None) -> tuple[dict, l
     return result, actions
 
 
-def generate_recommendations(candidates_text: str, hot_sectors: list[str]) -> dict:
+def generate_recommendations(candidates_text: str, hot_sectors: list[str],
+                              candidates=None) -> dict:
     """
     呼叫 LLM 產生推薦報告（DEBATE_MODE 時先跑多空辯論，裁決時附上兩方觀點）
     回傳解析後的 dict
+
+    candidates: 選配，候選股票 DataFrame（跟 candidates_text 是同一份資料格式化前
+    的版本）。給了就會跑 agent.citation_check 引用驗證，幫每筆推薦標記
+    grounding_flags（Phase C1，純規則檢查，不額外呼叫 LLM，只標記不攔截）。
     """
     if not candidates_text:
         logger.error("沒有候選股票資料")
@@ -322,11 +327,17 @@ def generate_recommendations(candidates_text: str, hot_sectors: list[str]) -> di
                     # 裁決問責 guardrail（程式檢查，不信任 LLM 自覺）：
                     # 被 VETO 且無具體駁回的入選股 → 剔除並以 backups 遞補
                     result, guard_actions = apply_judge_guardrail(result, bear_data)
+                    # 引用驗證（Phase C1）：標記理由裡候選資料找不到對應的數字，
+                    # 只加註記不影響裁決結果
+                    from agent.citation_check import annotate_recommendations
+                    result = annotate_recommendations(result, candidates)
                     picks = [r.get("stock_id", "?") for r in result["recommendations"]]
                     _blocked = [a for a in guard_actions if a["action"] == "剔除"]
+                    _flagged = [r["stock_id"] for r in result["recommendations"] if r.get("grounding_flags")]
                     rec.summary = (f"裁決選出 {len(picks)} 檔：{', '.join(picks)}"
                                    + (f"（🚫 guardrail 攔截 {len(_blocked)} 檔："
-                                      f"{', '.join(a['stock_id'] for a in _blocked)}）" if _blocked else ""))
+                                      f"{', '.join(a['stock_id'] for a in _blocked)}）" if _blocked else "")
+                                   + (f"（🔍 引用可疑 {len(_flagged)} 檔：{', '.join(_flagged)}）" if _flagged else ""))
                     rec.payload = {"result": result,
                                    "debate_used": bool(debate_section),
                                    "guardrail_actions": guard_actions,
@@ -512,7 +523,10 @@ def format_report(result: dict) -> str:
             f"   {rec.get('reason', '')}",
             f"   🔑 {signals}",
             f"   ⚠️  {rec.get('risk_note', '')}",
-            "",
         ]
+        if rec.get("grounding_flags"):
+            flags_txt = "、".join(str(v) for v in rec["grounding_flags"])
+            lines.append(f"   🔍 理由中有數字候選資料查無對應（可能算錯/幻覺，僅供留意）：{flags_txt}")
+        lines.append("")
 
     return "\n".join(lines)

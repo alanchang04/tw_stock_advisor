@@ -1962,6 +1962,9 @@ elif page == "🔍 決策軌跡":
                                    for s2 in (_rc.get("key_signals") or []))
                     _risk = (f"<div><span class='dt-chip o'>⚠ {_esc(_rc.get('risk_note'))}</span></div>"
                              if _rc.get("risk_note") else "")
+                    _gf = _rc.get("grounding_flags") or []
+                    _risk += (f"<div><span class='dt-chip o'>🔍 引用可疑數字（候選資料查無對應）："
+                              f"{_esc('、'.join(str(v) for v in _gf))}</span></div>" if _gf else "")
                     # 裁決問責：對空方異議的逐條回應（接受/駁回+理由）
                     _oas = ""
                     for _oa in (_rc.get("objections_addressed") or []):
