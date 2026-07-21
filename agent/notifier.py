@@ -368,12 +368,14 @@ def _stock_snapshot(sid: str, user: dict) -> str:
 
 
 def _today_digest() -> str:
-    from data_pipeline.analysis.daily_digest import get_latest_digest
+    from data_pipeline.analysis.daily_digest import get_latest_digest, digest_age_days
     latest = get_latest_digest()
     if not latest:
         return "📋 近期尚無市場彙整（每日 21:00 pipeline 跑完後自動產生）"
     d, text_ = latest
-    return f"📋 {d} 市場情報每日彙整\n\n{text_}"
+    age = digest_age_days(d)
+    stale = f"\n⚠️ 這是 {age} 天前的彙整，非今日最新（今日資料蒐集可能中斷）" if age > 0 else ""
+    return f"📋 {d} 市場情報每日彙整{stale}\n\n{text_}"
 
 
 def _today_recommend() -> str:

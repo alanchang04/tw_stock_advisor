@@ -325,7 +325,10 @@ def mode_pipeline(source: str = "openapi", with_entries: bool = True, review: bo
             # 每日彙整用「獨立訊息」推播（內容較長，併進主報告會被 4000 字上限截斷）
             if info.get("digest"):
                 from agent.notifier import send_telegram
-                send_telegram(f"📋 {info['digest_date']} 市場情報每日彙整\n\n{info['digest']}")
+                from data_pipeline.analysis.daily_digest import digest_age_days
+                age = digest_age_days(info["digest_date"])
+                stale = f"\n⚠️ 這是 {age} 天前的彙整，非今日最新（今日資料蒐集可能中斷）" if age > 0 else ""
+                send_telegram(f"📋 {info['digest_date']} 市場情報每日彙整{stale}\n\n{info['digest']}")
             if practice_msg:
                 from agent.notifier import send_telegram
                 send_telegram(practice_msg)

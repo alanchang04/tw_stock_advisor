@@ -33,6 +33,18 @@ def get_latest_digest(days: int = 5) -> tuple[date, str] | None:
     return (row[0], row[1]) if row else None
 
 
+def digest_age_days(digest_date: date, as_of: date = None) -> int:
+    """
+    彙整日期距離『現在』幾天。get_latest_digest() 有5天內回退機制——若當天彙整
+    生成失敗（例如資料來源中斷），會悄悄回退顯示最近一次成功的舊彙整，先前使用者
+    誤把這個回退當成「系統認錯日期」的bug回報過。所有顯示端都要用這個算出天數差，
+    非0時明確標示「N天前」，不能讓使用者以為是當天資料。
+    """
+    if as_of is None:
+        as_of = tw_today()
+    return (as_of - digest_date).days
+
+
 def generate_daily_digest(target_date: date = None) -> str | None:
     """
     彙整當日所有情報，用 Gemini 生成精簡每日總結。

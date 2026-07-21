@@ -882,7 +882,12 @@ elif page == "📰 市場情報":
     digest_row = load_daily_digest()
     if digest_row:
         digest_date, digest_text = digest_row
-        with st.expander(f"📋 {digest_date} 市場情報彙整（AI 自動生成）", expanded=True):
+        from data_pipeline.analysis.daily_digest import digest_age_days
+        age = digest_age_days(digest_date)
+        title = f"📋 {digest_date} 市場情報彙整（AI 自動生成）" + (f" ⚠️ {age}天前" if age > 0 else "")
+        with st.expander(title, expanded=True):
+            if age > 0:
+                st.warning(f"這是 {age} 天前的彙整，非今日最新（今日資料蒐集可能中斷）")
             st.markdown(digest_text)
     else:
         st.info("彙整尚未生成（每日 21:00 pipeline 跑完後自動產生）")
