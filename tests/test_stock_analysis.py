@@ -94,7 +94,7 @@ def test_prompt_includes_ai_score_not_in_pool():
                "percentile_rank": None, "would_make_top_n": False}
     _, user_p = sa._build_synthesis_prompt(
         "2330", _basic(), {}, None, {"bull": True, "ok": False}, {"ok": False}, [], ai_score)
-    assert "不在候選池內" in user_p
+    assert "不在每日選股候選池內" in user_p
 
 
 def test_prompt_without_ai_score_omits_section():
@@ -102,6 +102,90 @@ def test_prompt_without_ai_score_omits_section():
     _, user_p = sa._build_synthesis_prompt(
         "2330", _basic(), {}, None, {"bull": True, "ok": False}, {"ok": False}, [])
     assert "AI選股系統" not in user_p
+
+
+# ── 2026-07-22 國巨事件後的修正：措辭/乖離/接刀紀律/籌碼量級 ──────────────
+def _crashed_basic():
+    # 國巨型態：收盤670遠低於MA20 927（月線下-27.7%），暴跌接刀
+    return dict(stock_name="國巨*", industry="電子零組件業", trade_date=date(2026, 7, 21),
+               close=670.0, change_pct=6.35, rsi14=35.7, macd_hist=-51.0,
+               ma5=714.6, ma20=927.15, ma60=710.18, signal_ma_cross=0, signal_breakout=0)
+
+
+def test_prompt_shows_ma_deviation_for_falling_knife():
+    # 舊prompt完全沒把MA值給LLM看，暴跌股在月線下-27.7%這種訊號看不到
+    _, user_p = sa._build_synthesis_prompt(
+        "2327", _crashed_basic(), {"rs20": 0.0124, "stack_days": 0.0}, 38.9,
+        {"bull": True, "ok": True, "close": 102.5, "ma60": 101.0}, {"ok": False}, [])
+    assert "跌破月線MA20" in user_p
+    assert "乖離-27.7%" in user_p or "乖離-27.6%" in user_p
+
+
+def test_prompt_rs20_wording_is_unambiguous_for_weak_stock():
+    # rs20=0.0124 舊寫法「全市場第1百分位」會被讀成「第一名=最強」，改成明講「極弱」
+    _, user_p = sa._build_synthesis_prompt(
+        "2327", _crashed_basic(), {"rs20": 0.0124, "stack_days": 0.0}, 38.9,
+        {"bull": True, "ok": False}, {"ok": False}, [])
+    assert "贏過全市場1%的股票" in user_p
+    assert "極弱" in user_p
+    assert "第 1 百分位" not in user_p   # 不再用會被讀反的舊措辭
+
+
+def test_prompt_flags_broken_trend_structure():
+    # stack_days=0 時舊版整條靜默省略，讓「趨勢已破」看不出來
+    _, user_p = sa._build_synthesis_prompt(
+        "2327", _crashed_basic(), {"rs20": 0.0124, "stack_days": 0.0}, 38.9,
+        {"bull": True, "ok": False}, {"ok": False}, [])
+    assert "非多頭排列" in user_p
+
+
+def test_prompt_shows_20day_net_not_just_streak():
+    # 籌碼要給近20日淨額，避免「連買1日」蓋過「近20日狂賣」
+    inst = {"ok": True, "invest_streak_days": 1, "invest_streak_lots": 217.0,
+            "foreign_streak_days": 0, "foreign_streak_lots": 0.0,
+            "invest_total_lots": -14500.0, "foreign_total_lots": -8200.0,
+            "latest_date": date(2026, 7, 21)}
+    _, user_p = sa._build_synthesis_prompt(
+        "2327", _crashed_basic(), {"rs20": 0.0124}, 38.9,
+        {"bull": True, "ok": False}, {"ok": False}, [], None, )
+    # 用有 inst 的版本
+    _, user_p = sa._build_synthesis_prompt(
+        "2327", _crashed_basic(), {"rs20": 0.0124}, 38.9,
+        {"bull": True, "ok": False}, inst, [])
+    assert "投信近20日淨賣超-14500張" in user_p
+    assert "連買1日" in user_p
+
+
+def test_system_prompt_has_falling_knife_discipline():
+    sys_p, _ = sa._build_synthesis_prompt(
+        "2327", _crashed_basic(), {}, None, {"bull": True, "ok": False}, {"ok": False}, [])
+    assert "接刀" in sys_p
+    assert "不應該給 positive" in sys_p
+
+
+# ── 引用驗證 _synthesis_grounding_flags ──────────────────────────────
+def test_grounding_flags_fabricated_number():
+    inst = {"ok": True, "invest_streak_days": 1, "invest_streak_lots": 217.0,
+            "foreign_streak_days": 0, "foreign_streak_lots": 0.0,
+            "invest_total_lots": -14500.0, "foreign_total_lots": -8200.0}
+    parsed = {"bull_points": [{"point": "投信近20日買超99999張顯示認同"}],
+              "bear_points": []}
+    flags = sa._synthesis_grounding_flags(
+        _crashed_basic(), {"rs20": 0.0124}, 38.9, inst, None, parsed)
+    assert len(flags) == 1
+    assert 99999.0 in flags[0]["numbers"]
+
+
+def test_grounding_does_not_flag_legit_numbers_or_window_label():
+    inst = {"ok": True, "invest_streak_days": 1, "invest_streak_lots": 217.0,
+            "foreign_streak_days": 0, "foreign_streak_lots": 0.0,
+            "invest_total_lots": -14500.0, "foreign_total_lots": -8200.0}
+    # 全部是真實數字 + 「近20日」時間窗標籤（不該被誤判）
+    parsed = {"bull_points": [{"point": "月營收年增38.9%"}],
+              "bear_points": [{"point": "投信近20日淨賣14500張、乖離月線-27.7%"}]}
+    flags = sa._synthesis_grounding_flags(
+        _crashed_basic(), {"rs20": 0.0124}, 38.9, inst, None, parsed)
+    assert flags == []
 
 
 def test_ai_selection_score_ranks_and_computes_percentile(monkeypatch):

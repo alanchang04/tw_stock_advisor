@@ -46,7 +46,8 @@ def tx(monkeypatch):
 
 
 def _seed_watchlist_stock(tx, sid: str, close: float, rsi: float = 55.0,
-                          target_price: float | None = None, username="testuser"):
+                          target_price: float | None = None, username="testuser",
+                          ma20: float | None = None):
     """建最小可用的 user → watchlist → watchlist_item → stock → 價量/指標 資料鏈。"""
     tx.execute(text("""
         INSERT INTO users (username, password_hash, role) VALUES (:u, 'x', 'user')
@@ -71,10 +72,10 @@ def _seed_watchlist_stock(tx, sid: str, close: float, rsi: float = 55.0,
         ON CONFLICT (stock_id, trade_date) DO UPDATE SET close = EXCLUDED.close
     """), {"s": sid, "d": today, "c": close})
     tx.execute(text("""
-        INSERT INTO technical_indicators (stock_id, trade_date, rsi14)
-        VALUES (:s, :d, :r)
-        ON CONFLICT (stock_id, trade_date) DO UPDATE SET rsi14 = EXCLUDED.rsi14
-    """), {"s": sid, "d": today, "r": rsi})
+        INSERT INTO technical_indicators (stock_id, trade_date, rsi14, ma20)
+        VALUES (:s, :d, :r, :ma20)
+        ON CONFLICT (stock_id, trade_date) DO UPDATE SET rsi14 = EXCLUDED.rsi14, ma20 = EXCLUDED.ma20
+    """), {"s": sid, "d": today, "r": rsi, "ma20": ma20})
 
     tx.execute(text("""
         INSERT INTO watchlist_items (list_id, stock_id, target_price)
@@ -172,3 +173,37 @@ def test_target_price_annotation_when_reached(tx, monkeypatch):
     sig = tx.execute(text("SELECT last_signal FROM watchlist_items WHERE stock_id=:s"),
                      {"s": sid}).scalar()
     assert "已到目標價" in sig
+
+
+def test_falling_knife_watch_is_flagged_not_plain_neutral(tx, monkeypatch):
+    # 國巨型態：跌破月線10%以上，不在候選池(in_universe=False,veto_reason=None)——
+    # 舊版會落到跟盤整股一樣的中性⚪觀望，藏住接刀風險。現在應明講趨勢偏弱、勿接刀。
+    sid = "TESTWL06"
+    _seed_watchlist_stock(tx, sid, close=670.0, rsi=35.0, ma20=927.0)  # 月線下-27.7%
+    monkeypatch.setattr(wa, "get_full_scored_universe", lambda cfg: _fake_universe())
+    monkeypatch.setattr(wa, "rank_in_universe", lambda s, u, cfg: {
+        "ok": True, "in_universe": False, "veto_reason": None,
+        "score": None, "rank": None, "total_candidates": 100,
+        "percentile_rank": None, "would_make_top_n": False})
+
+    wa.evaluate_watchlist(date.today())
+    sig = tx.execute(text("SELECT last_signal FROM watchlist_items WHERE stock_id=:s"),
+                     {"s": sid}).scalar()
+    assert "趨勢偏弱" in sig and "勿接刀" in sig
+    assert "跌破月線 -27%" in sig or "跌破月線 -28%" in sig
+
+
+def test_target_price_reached_but_falling_knife_still_warns(tx, monkeypatch):
+    # 「已到目標價」但其實是接刀——不能只報喜訊，要同時警示趨勢偏弱
+    sid = "TESTWL07"
+    _seed_watchlist_stock(tx, sid, close=670.0, rsi=35.0, ma20=927.0, target_price=700.0)
+    monkeypatch.setattr(wa, "get_full_scored_universe", lambda cfg: _fake_universe())
+    monkeypatch.setattr(wa, "rank_in_universe", lambda s, u, cfg: {
+        "ok": True, "in_universe": False, "veto_reason": None,
+        "score": None, "rank": None, "total_candidates": 100,
+        "percentile_rank": None, "would_make_top_n": False})
+
+    wa.evaluate_watchlist(date.today())
+    sig = tx.execute(text("SELECT last_signal FROM watchlist_items WHERE stock_id=:s"),
+                     {"s": sid}).scalar()
+    assert "趨勢偏弱" in sig and "已到目標價" in sig

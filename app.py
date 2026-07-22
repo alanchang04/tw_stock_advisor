@@ -1605,6 +1605,13 @@ elif page == "🔎 個股分析":
                 st.markdown(_dt_card("dt-warn", "⚠️", "資料缺口",
                                      "<br>".join(_dt_esc(g) for g in _gaps)),
                             unsafe_allow_html=True)
+            _gflags = _pl_s.get("grounding_flags") or []
+            if _gflags:
+                _body = "<br>".join(
+                    f"「{_dt_esc(g.get('point'))}」→ 查無對應：{_dt_esc('、'.join(str(v) for v in g.get('numbers') or []))}"
+                    for g in _gflags)
+                st.markdown(_dt_card("dt-bad", "🔍", "引用驗證：以下數字在系統資料裡找不到對應（可能是 AI 掰的，別採信）",
+                                     _body), unsafe_allow_html=True)
         st.caption(_sa_meta("synthesis") or "")
         st.caption(f"run_id: {_result['run_id'][:8]}…（完整紀錄可查 execution_log，kind=stock_analysis）")
 

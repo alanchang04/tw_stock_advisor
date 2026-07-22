@@ -66,17 +66,21 @@ def evaluate_watchlist(target_date: date = None) -> str | None:
         logger.warning(f"追蹤清單買點判斷：全市場評分計算失敗（略過本次）: {e}")
         return None
 
-    # 現價/RSI：即使股票沒進候選池（未過流動性/RSI等基礎門檻）也要能顯示現況，
-    # 不能只在有評分時才更新——用 DISTINCT ON 一次查完每檔的最新一筆
+    # 現價/RSI/月線：即使股票沒進候選池（未過流動性/RSI等基礎門檻）也要能顯示現況，
+    # 不能只在有評分時才更新——用 DISTINCT ON 一次查完每檔的最新一筆。
+    # 2026-07-22 加 ma20：暴跌接刀股（如國巨）會在候選篩選前就被RSI/流動性擋掉、
+    # veto_reason=None，落到⚪觀望，跟盤整股顯示一樣的中性訊號、藏住「正在跌破月線」
+    # 的風險。抓月線算乖離，⚪觀望時明講趨勢偏弱，不要讓觀望看起來像沒事。
     with get_session() as s:
         px_rows = s.execute(text("""
-            SELECT DISTINCT ON (p.stock_id) p.stock_id, p.trade_date, p.close, t.rsi14
+            SELECT DISTINCT ON (p.stock_id) p.stock_id, p.trade_date, p.close, t.rsi14, t.ma20
             FROM daily_prices p
             LEFT JOIN technical_indicators t ON t.stock_id = p.stock_id AND t.trade_date = p.trade_date
             WHERE p.stock_id = ANY(:ids) AND p.close > 0 AND p.trade_date <= :td
             ORDER BY p.stock_id, p.trade_date DESC
         """), {"ids": stock_ids, "td": target_date}).fetchall()
-    px_map = {r[0]: {"trade_date": r[1], "close": float(r[2]), "rsi": r[3]} for r in px_rows}
+    px_map = {r[0]: {"trade_date": r[1], "close": float(r[2]), "rsi": r[3],
+                     "ma20": float(r[4]) if r[4] is not None else None} for r in px_rows}
 
     # 每支股票的分數/排名只算一次（多清單共用）
     base_signals: dict[str, dict] = {}
@@ -93,6 +97,8 @@ def evaluate_watchlist(target_date: date = None) -> str | None:
         if base is None:
             continue
         close, rsi, trade_date, ai = base["close"], base["rsi"], base["trade_date"], base["ai"]
+        ma20 = base.get("ma20")
+        dev20 = ((close - ma20) / ma20 * 100) if (ma20 and ma20 > 0) else None
 
         at_target = target_price is not None and close <= float(target_price)
         target_txt = "、已到目標價" if at_target else ""
@@ -106,9 +112,14 @@ def evaluate_watchlist(target_date: date = None) -> str | None:
                                 f"（{username}／{list_name}）")
         elif ai.get("in_universe") and (ai.get("percentile_rank") or 0) >= YELLOW_PERCENTILE:
             signal = f"🟡 接近買點（贏過{ai['percentile_rank']*100:.0f}%候選股）{target_txt}"
+        elif dev20 is not None and dev20 <= -10:
+            # 跌破月線10%以上＝暴跌接刀，不是中性觀望——即使已到「目標價」也是接刀，明講
+            signal = (f"⚪ 觀望但趨勢偏弱（現價 {close:.2f}，跌破月線 {dev20:.0f}%，"
+                     f"下跌未止勿接刀）{target_txt}")
         else:
             rsi_txt = f"RSI {float(rsi):.0f}" if rsi is not None else "RSI —"
-            signal = f"⚪ 觀望（現價 {close:.2f}，{rsi_txt}）{target_txt}"
+            below = "，仍在月線下方" if (dev20 is not None and dev20 < 0) else ""
+            signal = f"⚪ 觀望（現價 {close:.2f}，{rsi_txt}{below}）{target_txt}"
 
         with get_session() as s:
             s.execute(text("""
