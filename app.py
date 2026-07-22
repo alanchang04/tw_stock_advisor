@@ -244,13 +244,16 @@ def load_open_positions() -> list[dict]:
 
 @st.cache_data(ttl=300)
 def load_institutional(days: int = 5, top_n: int = 20, col: str = "total_net") -> pd.DataFrame:
+    # 2026-07-22 修1000×單位bug：institutional_trading.*_net 單位是「股」，這裡原本
+    # 直接 SUM 卻把欄位標成「(張)」，法人動向頁與首頁Top5的數字都被灌大1000倍
+    # （南亞近5日171,783,000股被顯示成「171,783,000張」，正確是171,783張）。÷1000轉張。
     cutoff = (date.today() - timedelta(days=days + 3)).strftime("%Y-%m-%d")
     with get_session() as s:
         rows = s.execute(text(f"""
             SELECT i.stock_id, st.stock_name,
-                   SUM(i.{col})::bigint      AS net,
-                   SUM(ABS(i.{col}))::bigint AS turnover,
-                   COUNT(*)                  AS days
+                   ROUND(SUM(i.{col}) / 1000.0)::bigint      AS net,
+                   ROUND(SUM(ABS(i.{col})) / 1000.0)::bigint AS turnover,
+                   COUNT(*)                                  AS days
             FROM institutional_trading i
             JOIN stocks st ON st.stock_id = i.stock_id
             WHERE i.trade_date >= :c
@@ -682,7 +685,7 @@ elif page == "🏦 法人動向":
         with get_session() as s:
             rows_sell = s.execute(text(f"""
                 SELECT i.stock_id, st.stock_name,
-                       SUM(i.{db_col})::bigint AS net
+                       ROUND(SUM(i.{db_col}) / 1000.0)::bigint AS net
                 FROM institutional_trading i
                 JOIN stocks st ON st.stock_id = i.stock_id
                 WHERE i.trade_date >= :c
@@ -1116,14 +1119,20 @@ elif page == "🧠 聰明資金":
                         COUNT(*) FILTER (WHERE invest_net < 0)              AS 賣超天數,
                         -- invest_net 單位為股，÷1000 轉成張
                         ROUND(COALESCE(SUM(invest_net) FILTER (WHERE invest_net > 0), 0) / 1000.0) AS 累計買超張,
+                        ROUND(SUM(invest_net) / 1000.0)                     AS 淨買超張,
                         ROUND(MAX(invest_net) / 1000.0)                     AS 單日峰值張,
                         MAX(trade_date) FILTER (WHERE invest_net > 0)       AS 最後買超日
                     FROM w
                     GROUP BY stock_id
                     HAVING
-                        (COUNT(*) FILTER (WHERE invest_net > 0) >= :min_days
-                         AND SUM(invest_net) FILTER (WHERE invest_net > 0) >= :min_total * 1000)
-                        OR MAX(invest_net) >= :min_s * 1000
+                        -- 2026-07-22 修：跟 smart_money.py 同一個bug——要求整段淨買(SUM>0)，
+                        -- 否則散落幾天綠K的淨賣股(國巨/群創型態)會被當成投信買超列出。
+                        SUM(invest_net) > 0
+                        AND (
+                            (COUNT(*) FILTER (WHERE invest_net > 0) >= :min_days
+                             AND SUM(invest_net) FILTER (WHERE invest_net > 0) >= :min_total * 1000)
+                            OR MAX(invest_net) >= :min_s * 1000
+                        )
                     ORDER BY 買超天數 DESC, 累計買超張 DESC
                     LIMIT 50
                 """), {"days": days, "min_days": min_days, "min_s": min_single_v,
