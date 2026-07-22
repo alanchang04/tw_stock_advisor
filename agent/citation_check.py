@@ -112,3 +112,27 @@ def annotate_recommendations(result: dict, candidates: pd.DataFrame | None) -> d
                 continue
             item["grounding_flags"] = check_grounding(row, item.get("reason", ""))
     return result
+
+
+def annotate_debate_coverage(result: dict, bull_pack: dict | None) -> dict:
+    """幫 result['recommendations'] 每筆標記是否曾被多方研究員主張過
+    （not_debated=True 代表沒有）。
+
+    2026-07-21 真實案例：裁決結果裡出現玉山金，使用者一度以為是幻覺——追查後
+    數字全部真實存在於候選資料（check_grounding驗證通過），只是：(1) 多方只從
+    20檔候選挑5檔主張，玉山金沒被選中；(2) 空方也沒對它提異議（沉默，不代表
+    「沒看到」）；(3) 決策軌跡頁UI只顯示候選池前8名，玉山金排在候選池外沒被
+    顯示。裁決本來就看得到完整候選資料、被系統提示要求「從候選名單挑最值得
+    關注的5支」，不是只能選多方主張過的股票，所以這是設計允許的行為，不是bug——
+    但代表這筆推薦少了一層辯論雙方的檢視。這裡不攔截、只標記，讓使用者自己判斷
+    要不要對「未經辯論」的推薦更謹慎。backups不標記（backups本來就是裁決自己
+    找的候補，多方不太可能主張過，標記了也沒有額外資訊量）。
+    """
+    if not result or not bull_pack:
+        return result
+    bull_picks = {str(p.get("stock_id")) for p in (bull_pack.get("data") or {}).get("picks", [])}
+    if not bull_picks:
+        return result
+    for item in result.get("recommendations") or []:
+        item["not_debated"] = str(item.get("stock_id")) not in bull_picks
+    return result

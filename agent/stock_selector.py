@@ -539,7 +539,14 @@ def format_candidates_for_llm(df: pd.DataFrame, news_map: dict | None = None) ->
         if mom is not None:
             trend.append(f"60日動能 {mom*100:+.0f}%")
         if trend:
-            blk.append("  趨勢結構：" + "｜".join(trend))
+            line = "  趨勢結構：" + "｜".join(trend)
+            # 2026-07-22：P1因子IC研究（10年資料）測出RS20/60日動能在現行持有期(10~20日)
+            # 是負相關（追高風險，會反向），STRATEGY權重已歸零（w_rs=w_momentum=0，不影響
+            # 選股評分），但這裡的原始數字仍會給LLM看到——沒有這行提醒，LLM會把它們當成
+            # 一般利多引用（多頭排列天數沒有這個問題，經IC驗證是正向、仍保留權重0.8）。
+            if rs is not None or mom is not None:
+                line += "（提醒：RS20/60日動能經統計研究證實與後續報酬負相關，勿當作買進理由的主要依據，僅多頭排列天數建議採信）"
+            blk.append(line)
 
         yoy = _f(row.get("rev_yoy"))
         if yoy is not None:

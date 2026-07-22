@@ -15,6 +15,7 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agent.citation_check import (
+    annotate_debate_coverage,
     annotate_recommendations,
     check_grounding,
     expected_numbers,
@@ -106,3 +107,36 @@ def test_annotate_recommendations_noop_when_candidates_none():
     result = {"recommendations": [{"stock_id": "5434", "reason": "x"}]}
     out = annotate_recommendations(result, None)
     assert "grounding_flags" not in out["recommendations"][0]
+
+
+def test_annotate_debate_coverage_flags_pick_bull_never_argued_for():
+    # 2026-07-21 真實案例重演：玉山金(2884)在候選資料裡、裁決選中了，但多方只
+    # 主張了另外5檔，玉山金不在其中——應該被標記not_debated=True
+    result = {"recommendations": [
+        {"stock_id": "2059", "reason": "..."},
+        {"stock_id": "2884", "reason": "..."},
+    ]}
+    bull_pack = {"data": {"picks": [{"stock_id": "2059"}, {"stock_id": "1303"},
+                                     {"stock_id": "2615"}, {"stock_id": "3479"},
+                                     {"stock_id": "2395"}]}}
+    out = annotate_debate_coverage(result, bull_pack)
+    assert out["recommendations"][0]["not_debated"] is False
+    assert out["recommendations"][1]["not_debated"] is True
+
+
+def test_annotate_debate_coverage_noop_when_bull_pack_missing():
+    result = {"recommendations": [{"stock_id": "2884", "reason": "..."}]}
+    out = annotate_debate_coverage(result, None)
+    assert "not_debated" not in out["recommendations"][0]
+    out2 = annotate_debate_coverage(result, {"data": None})
+    assert "not_debated" not in out2["recommendations"][0]
+
+
+def test_annotate_debate_coverage_does_not_touch_backups():
+    result = {
+        "recommendations": [{"stock_id": "2059", "reason": "..."}],
+        "backups": [{"stock_id": "2330", "reason": "..."}],
+    }
+    bull_pack = {"data": {"picks": [{"stock_id": "2059"}]}}
+    out = annotate_debate_coverage(result, bull_pack)
+    assert "not_debated" not in out["backups"][0]

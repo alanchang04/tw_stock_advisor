@@ -17,7 +17,7 @@ import streamlit as st
 from sqlalchemy import text
 
 from database.connection import get_session
-from agent.strategy import decide_exit, STRATEGY
+from agent.strategy import decide_exit, suggest_shares, STRATEGY
 
 # ══════════════════════════════════════════════════════════════════
 #  頁面設定
@@ -121,12 +121,19 @@ def db_status() -> dict:
         with get_session() as s:
             last  = s.execute(text("SELECT MAX(trade_date) FROM daily_prices")).scalar()
             sc    = s.execute(text("SELECT COUNT(*) FROM stocks WHERE is_active=true")).scalar()
-            pos_c = s.execute(text("SELECT COUNT(*) FROM positions WHERE status='open'")).scalar()
+            # 2026-07-22：這裡原本不分來源混算open_pos，首頁「持倉中」metric會把AI持倉跟
+            # 使用者自己手動記的持倉混在一起，跟頁面下方只顯示AI持倉的圖表對不上——分開算。
+            ai_pos_c = s.execute(text(
+                "SELECT COUNT(*) FROM positions WHERE status='open' AND COALESCE(source,'ai')='ai'"
+            )).scalar()
+            manual_pos_c = s.execute(text(
+                "SELECT COUNT(*) FROM positions WHERE status='open' AND source='manual'"
+            )).scalar()
             sig_t = s.execute(text(
                 "SELECT COUNT(*) FROM market_signals WHERE signal_date = CURRENT_DATE"
             )).scalar()
         return {"ok": True, "last_date": last, "stocks": sc,
-                "open_pos": pos_c, "signals_today": sig_t}
+                "open_pos": ai_pos_c, "manual_pos": manual_pos_c, "signals_today": sig_t}
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
@@ -213,11 +220,17 @@ def load_open_positions() -> list[dict]:
             )
 
             pct = (close / entry_price - 1) * 100
+            # 2026-07-22：AI持倉的實際張數目前沒有存進DB（positions.shares只有手動倉在用），
+            # 這裡用跟下單當時同一套1%風險法則(suggest_shares)反推「照現在資金設定，
+            # 這張單大概會買多少股」，換算成金額損益——不是精確的歷史成交量，是可視化用估計值。
+            est_shares = suggest_shares(entry_price, cfg=STRATEGY)
+            pnl_dollar = (close - entry_price) * est_shares
             result.append({
                 "股號": sid, "名稱": str(name),
                 "進場日": str(entry_date),
                 "成本": entry_price, "現價": close,
                 "損益%": round(pct, 2),
+                "損益$（估）": round(pnl_dollar),
                 "持有(日)": hold,
                 "MA5": round(ma5, 2) if ma5 else None,
                 "MA20": round(ma20, 2) if ma20 else None,
@@ -272,6 +285,9 @@ def load_stock_ohlcv(sid: str, days: int = 120) -> pd.DataFrame:
 
 @st.cache_data(ttl=300)
 def load_closed_positions() -> pd.DataFrame:
+    # 2026-07-22：原本沒過濾來源，🔄歷史績效頁號稱是「AI每筆已平倉交易」的績效，
+    # 但這裡其實會把使用者自己手動記的已平倉持倉也混進去，污染AI實際表現的統計——
+    # 跟首頁持倉數混AI/手動是同一類問題，這裡也補上過濾。
     with get_session() as s:
         rows = s.execute(text("""
             SELECT p.stock_id, st.stock_name,
@@ -280,13 +296,20 @@ def load_closed_positions() -> pd.DataFrame:
                    p.return_pct, p.exit_reason,
                    (p.exit_date - p.entry_date) AS hold_days
             FROM positions p JOIN stocks st ON st.stock_id = p.stock_id
-            WHERE p.status = 'closed'
+            WHERE p.status = 'closed' AND COALESCE(p.source, 'ai') = 'ai'
             ORDER BY p.exit_date DESC
         """)).fetchall()
     df = pd.DataFrame(rows, columns=[
         "股號","名稱","進場日","進場價","出場日","出場價","報酬%","出場原因","持有天數"
     ])
     df["報酬%"] = pd.to_numeric(df["報酬%"], errors="coerce")
+    if not df.empty:
+        # 損益$（估）：跟開倉部位同一套邏輯，用目前資金設定反推張數，不是實際歷史成交量
+        from agent.strategy import suggest_shares
+        df["損益$（估）"] = [
+            round((float(r["出場價"]) - float(r["進場價"])) * suggest_shares(float(r["進場價"]), cfg=STRATEGY))
+            for _, r in df.iterrows()
+        ]
     return df
 
 
@@ -422,11 +445,13 @@ if page == "📊 首頁":
     positions = load_open_positions()
     exit_cnt  = sum(1 for p in positions if p["_exit"])
 
-    c1, c2, c3, c4 = st.columns(4)
+    c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("資料截止日",   str(status["last_date"]))
     c2.metric("追蹤股票數",   f"{status['stocks']:,} 檔")
-    c3.metric("持倉中",       f"{status['open_pos']} 檔")
-    c4.metric("出場訊號",     f"{exit_cnt} 檔",
+    c3.metric("AI持倉中",     f"{status['open_pos']} 檔")
+    c4.metric("手動持倉",     f"{status.get('manual_pos', 0)} 檔",
+              help="自己記的持倉（📦持倉追蹤頁「我的持倉」分頁），不算進下面的AI持倉統計")
+    c5.metric("出場訊號",     f"{exit_cnt} 檔",
               delta="需注意" if exit_cnt else None, delta_color="inverse")
 
     if exit_cnt:
@@ -437,16 +462,20 @@ if page == "📊 首頁":
     # 持倉摘要
     if positions:
         st.subheader("持倉概況")
+        st.caption("損益$為估計值：用目前資金設定（1%風險法則）反推張數，"
+                   "不是實際歷史成交量——目的是看出「%數差不多，賺的錢差很多」的規模差異")
         df = pd.DataFrame([{k: v for k, v in p.items() if k != "_exit"} for p in positions])
-        avg_ret = df["損益%"].mean()
-        best    = df.loc[df["損益%"].idxmax()]
-        worst   = df.loc[df["損益%"].idxmin()]
-        b1, b2, b3 = st.columns(3)
-        b1.metric("平均損益",  f"{avg_ret:+.1f}%")
-        b2.metric("最佳持倉",  f"{best['名稱']} {best['損益%']:+.1f}%")
-        b3.metric("最差持倉",  f"{worst['名稱']} {worst['損益%']:+.1f}%")
+        avg_ret     = df["損益%"].mean()
+        total_pnl   = df["損益$（估）"].sum()
+        best        = df.loc[df["損益%"].idxmax()]
+        worst       = df.loc[df["損益%"].idxmin()]
+        b1, b2, b3, b4 = st.columns(4)
+        b1.metric("平均損益",    f"{avg_ret:+.1f}%")
+        b2.metric("總損益$（估）", f"{total_pnl:+,.0f}")
+        b3.metric("最佳持倉",    f"{best['名稱']} {best['損益%']:+.1f}%")
+        b4.metric("最差持倉",    f"{worst['名稱']} {worst['損益%']:+.1f}%")
 
-        # 損益長條圖
+        # 損益長條圖（同時標%數跟估計金額，避免「%數差不多但賺的錢差很多」被忽略）
         fig = px.bar(
             df.sort_values("損益%"),
             x="損益%", y="名稱",
@@ -455,9 +484,11 @@ if page == "📊 首頁":
             color_continuous_scale=["#e74c3c", "#ecf0f1", "#2ecc71"],
             color_continuous_midpoint=0,
             text="損益%",
-            title="各持倉損益%",
+            custom_data=["損益$（估）"],
+            title="各持倉損益%（懸停看估計金額）",
         )
-        fig.update_traces(texttemplate="%{text:+.1f}%", textposition="outside")
+        fig.update_traces(texttemplate="%{text:+.1f}%", textposition="outside",
+                          hovertemplate="%{y}：%{x:+.1f}%｜約 %{customdata[0]:+,.0f} 元<extra></extra>")
         fig.update_layout(height=300, margin=dict(l=0, r=0, t=40, b=0),
                           coloraxis_showscale=False)
         st.plotly_chart(fig, use_container_width=True)
@@ -495,9 +526,11 @@ elif page == "📦 持倉追蹤":
                     return ["background-color: rgba(231, 76, 60, 0.25)"] * len(row)
                 return [""] * len(row)
 
+            st.caption("損益$（估）：用目前資金設定反推張數估算，非實際歷史成交量")
             st.dataframe(
                 df.style.apply(row_style, axis=1)
                   .format({"成本": "{:.2f}", "現價": "{:.2f}", "損益%": "{:+.2f}%",
+                           "損益$（估）": "{:+,.0f}",
                            "MA5": "{:.2f}", "MA20": "{:.2f}"}, na_rep="—"),
                 use_container_width=True, hide_index=True
             )
@@ -750,11 +783,16 @@ elif page == "📉 個股走勢":
 elif page == "🔄 歷史績效":
     st.title("🔄 歷史績效")
 
-    # 策略版本過濾：2026-07-04 起採用新策略（關均線出場+動能+營收因子），
-    # 舊策略交易保留當對照組，但觀察期評估預設只看新策略進場的交易
-    STRATEGY_V2_DATE = date(2026, 7, 5)
+    # 策略版本過濾：2026-07-20 是最近一次策略大改的定案日（P1因子IC重新配權+出場規則
+    # 消融+熊市擋新倉設為預設+族群曝險上限，見agent/strategy.py），也是「有熊市防護」
+    # 的真正分界線。2026-07-22修正：這裡原本切在07-05，那個日期之後、07-20之前進場的
+    # 交易用的其實是還沒防熊市的舊版策略（會一直買然後停損殺出），混進「新策略」績效
+    # 裡會讓現在這版看起來比實際更差——之前用07-05這個舊分界線是2026-07-04出場規則
+    # 改版時定的，後來策略又大改了好幾次，沒有跟著更新。
+    STRATEGY_V2_DATE = date(2026, 7, 20)
     era = st.radio("評估範圍",
-                   [f"🆕 新策略（{STRATEGY_V2_DATE} 後進場）", "📜 全部歷史（含舊策略）"],
+                   [f"🆕 現行策略（{STRATEGY_V2_DATE} 後進場，含熊市擋新倉防護）",
+                    "📜 全部歷史（含舊策略，舊策略無熊市防護，僅供對照）"],
                    horizontal=True)
 
     df = load_closed_positions()
@@ -785,13 +823,18 @@ elif page == "🔄 歷史績效":
     g_loss = abs(df.loc[~wins, "報酬%"].sum())
     pf = g_win / g_loss if g_loss > 0 else float("inf")
 
-    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    total_pnl_dollar = df["損益$（估）"].sum() if "損益$（估）" in df.columns else None
+
+    c1, c2, c3, c4, c5, c6, c7 = st.columns(7)
     c1.metric("總交易筆數", len(df))
     c2.metric("勝率",       f"{win_r:.0f}%")
     c3.metric("平均報酬",   f"{avg_r:+.2f}%")
     c4.metric("平均持有",   f"{avg_h:.1f} 天")
     c5.metric("獲利因子",   f"{pf:.2f}", help="總獲利÷總虧損，>1.5 較穩健")
     c6.metric("最大回撤",   f"{mdd:.1f}pp", help="逐筆累計報酬曲線的最大回落（百分點）")
+    if total_pnl_dollar is not None:
+        c7.metric("總損益$（估）", f"{total_pnl_dollar:+,.0f}",
+                  help="用目前資金設定反推每筆張數估算，不是實際歷史成交量")
 
     t1, t2, t3 = st.tabs(["📈 累計績效 vs 大盤", "📊 報酬分布", "📋 交易紀錄"])
 
@@ -857,8 +900,9 @@ elif page == "🔄 歷史績效":
         styler = df.style
         _elementwise = getattr(styler, "map", None) or styler.applymap
         st.dataframe(
-            _elementwise(color_ret, subset=["報酬%"])
-              .format({"進場價": "{:.2f}", "出場價": "{:.2f}", "報酬%": "{:+.2f}%"},
+            _elementwise(color_ret, subset=[c for c in ["報酬%", "損益$（估）"] if c in df.columns])
+              .format({"進場價": "{:.2f}", "出場價": "{:.2f}", "報酬%": "{:+.2f}%",
+                       "損益$（估）": "{:+,.0f}"},
                       na_rep="—"),
             use_container_width=True, hide_index=True,
         )
@@ -1869,7 +1913,14 @@ elif page == "🔍 決策軌跡":
                                   _esc(_row_fs["summary"] or "") + (f"<br>{_hot}" if _hot else ""),
                                   f"<span class='dt-num'>{_i(_row_fs['duration_ms'])/1000:.1f}s</span>"),
                             unsafe_allow_html=True)
-                for _c in (_pl_fs.get("top_candidates") or [])[:8]:
+                _all_cands = _pl_fs.get("top_candidates") or []
+                # 2026-07-22修正：原本只顯示前8檔，但完整candidates_text是把全部（通常
+                # 20檔）都餵給多方/空方/裁決三個LLM——只顯示前8會讓使用者以為排名較後面
+                # 的候選「不在資料裡」，之前玉山金(排名14)出現在裁決結果卻不在這裡顯示，
+                # 讓使用者誤以為是幻覺，其實它從頭到尾都在候選資料裡，只是沒被UI列出來。
+                # 改成全部顯示、包在可捲動區塊裡，跟多空辯論欄位一致的呈現方式。
+                _cand_cards = []
+                for _c in _all_cands:
                     _chips = []
                     if _c.get("rs20") is not None:
                         _chips.append(f"<span class='dt-chip g'>RS {float(_c['rs20'])*100:.0f} 百分位</span>")
@@ -1879,12 +1930,13 @@ elif page == "🔍 決策軌跡":
                         _chips.append(f"<span class='dt-chip'>營收 {float(_c['rev_yoy']):+.0f}%</span>")
                     if _c.get("invest_streak"):
                         _chips.append(f"<span class='dt-chip'>投信連買 {float(_c['invest_streak']):.0f} 日</span>")
-                    st.markdown(_card("dt-info", "",
+                    _cand_cards.append(_card("dt-info", "",
                                       f"{_esc(_c.get('stock_id'))} {_esc(_c.get('stock_name') or '')}",
                                       "".join(_chips),
-                                      f"<span class='dt-badge'>{float(_c.get('score') or 0):.2f} 分</span>"),
-                                unsafe_allow_html=True)
-                st.caption("※ 來源信心分數見上方「資料品質檢查」卡；固定公式(1-近30日觸發次數/10)，非學習模型")
+                                      f"<span class='dt-badge'>{float(_c.get('score') or 0):.2f} 分</span>"))
+                st.markdown(f"<div class='dt-scroll'>{''.join(_cand_cards)}</div>", unsafe_allow_html=True)
+                st.caption(f"※ 共 {len(_all_cands)} 檔候選（多空辯論與裁決看到的是完整這份清單，非只有上面顯示的）。"
+                           "來源信心分數見上方「資料品質檢查」卡；固定公式(1-近30日觸發次數/10)，非學習模型")
 
         # ── 02 多空辯論（結構化優先，散文 fallback）────────────────
         with colB:
@@ -1965,6 +2017,9 @@ elif page == "🔍 決策軌跡":
                     _gf = _rc.get("grounding_flags") or []
                     _risk += (f"<div><span class='dt-chip o'>🔍 引用可疑數字（候選資料查無對應）："
                               f"{_esc('、'.join(str(v) for v in _gf))}</span></div>" if _gf else "")
+                    if _rc.get("not_debated"):
+                        _risk += ("<div><span class='dt-chip o'>⚡ 未經多方主張，"
+                                  "由裁決直接從候選資料選出（少一層辯論檢視）</span></div>")
                     # 裁決問責：對空方異議的逐條回應（接受/駁回+理由）
                     _oas = ""
                     for _oa in (_rc.get("objections_addressed") or []):
