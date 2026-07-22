@@ -58,14 +58,23 @@ def _invest_buying(session) -> list[dict]:
             COUNT(*)  FILTER (WHERE invest_net < 0)                          AS sell_days,
             -- invest_net 單位為股，÷1000 轉成張
             ROUND(SUM(invest_net) FILTER (WHERE invest_net > 0) / 1000.0)    AS total_bought,
+            ROUND(SUM(invest_net) / 1000.0)                                  AS net_lots,
             ROUND(MAX(invest_net) / 1000.0)                                  AS peak_day,
             MAX(trade_date) FILTER (WHERE invest_net > 0)                    AS last_buy_date
         FROM window_
         GROUP BY stock_id
         HAVING
-            (COUNT(*) FILTER (WHERE invest_net > 0) >= :min_days
-             AND SUM(invest_net) FILTER (WHERE invest_net > 0) >= :min_total_shares)
-            OR MAX(invest_net) >= :min_single_shares
+            -- 2026-07-22 修真bug：原本只看「買超天數/正日累計」，沒有要求投信在這段
+            -- 期間是「淨買」——實測全市場268檔命中裡有73檔(27%)其實是淨賣，最誇張的
+            -- 群創(3481)顯示「投信買超6天1539張」但實際淨賣75811張，國巨(2327)也是
+            -- 「投信買超10天」但淨賣14322張。這種散落幾天綠K的淨賣股被貼上「主力建倉」
+            -- 是嚴重誤導。加 SUM(invest_net) > 0 要求整段淨買，才符合「聰明資金建倉」原意。
+            SUM(invest_net) > 0
+            AND (
+                (COUNT(*) FILTER (WHERE invest_net > 0) >= :min_days
+                 AND SUM(invest_net) FILTER (WHERE invest_net > 0) >= :min_total_shares)
+                OR MAX(invest_net) >= :min_single_shares
+            )
         ORDER BY buy_days DESC, total_bought DESC NULLS LAST
         LIMIT 60
     """), {
@@ -196,7 +205,8 @@ def run_smart_money_analysis() -> int:
             "title":   (f"⭐【雙確認】{inv['stock_id']} {inv['stock_name']} "
                         f"— 投信連買{inv['buy_days']}日 + {etf['etf_name']}{action}"),
             "summary": (f"投信近{LOOKBACK_DAYS}日買超 {inv['buy_days']} 天，"
-                        f"累計 {(inv['total_bought'] or 0):,.0f} 張（峰值 {(inv['peak_day'] or 0):,.0f} 張）；"
+                        f"淨買 {(inv.get('net_lots') or 0):,.0f} 張（正日累計 {(inv['total_bought'] or 0):,.0f} 張，"
+                        f"峰值 {(inv['peak_day'] or 0):,.0f} 張）；"
                         f"{etf['etf_name']}({etf['etf_id']}) {action} {etf['detected_date']}"
                         + (f"，權重 {weight_str}" if weight_str else "")),
             "stocks":  [inv["stock_id"]],
@@ -210,8 +220,8 @@ def run_smart_money_analysis() -> int:
             "source":  "投信買超",
             "title":   (f"【投信】{inv['stock_id']} {inv['stock_name']} "
                         f"— 近{LOOKBACK_DAYS}日買超 {inv['buy_days']} 天"),
-            "summary": (f"累計買超 {(inv['total_bought'] or 0):,.0f} 張，"
-                        f"單日峰值 {(inv['peak_day'] or 0):,.0f} 張，"
+            "summary": (f"近{LOOKBACK_DAYS}日淨買 {(inv.get('net_lots') or 0):,.0f} 張"
+                        f"（正日累計 {(inv['total_bought'] or 0):,.0f} 張，單日峰值 {(inv['peak_day'] or 0):,.0f} 張），"
                         f"最後買超日 {inv['last_buy_date']}"),
             "stocks":  [inv["stock_id"]],
         })
