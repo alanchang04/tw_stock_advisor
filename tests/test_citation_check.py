@@ -111,17 +111,47 @@ def test_annotate_recommendations_noop_when_candidates_none():
 
 def test_annotate_debate_coverage_flags_pick_bull_never_argued_for():
     # 2026-07-21 真實案例重演：玉山金(2884)在候選資料裡、裁決選中了，但多方只
-    # 主張了另外5檔，玉山金不在其中——應該被標記not_debated=True
-    result = {"recommendations": [
-        {"stock_id": "2059", "reason": "..."},
-        {"stock_id": "2884", "reason": "..."},
-    ]}
+    # 主張了另外5檔，玉山金不在其中，裁決自己的backups(台積電/神達)也完全沒用——
+    # 應該被標記not_debated=True且更嚴重的bypassed_backups=True
+    result = {
+        "recommendations": [
+            {"stock_id": "2059", "reason": "..."},
+            {"stock_id": "2884", "reason": "..."},
+        ],
+        "backups": [{"stock_id": "2330"}, {"stock_id": "3706"}],
+    }
     bull_pack = {"data": {"picks": [{"stock_id": "2059"}, {"stock_id": "1303"},
                                      {"stock_id": "2615"}, {"stock_id": "3479"},
                                      {"stock_id": "2395"}]}}
     out = annotate_debate_coverage(result, bull_pack)
     assert out["recommendations"][0]["not_debated"] is False
+    assert out["recommendations"][0]["bypassed_backups"] is False
     assert out["recommendations"][1]["not_debated"] is True
+    assert out["recommendations"][1]["bypassed_backups"] is True
+
+
+def test_annotate_debate_coverage_not_bypassed_when_pick_is_in_own_backups():
+    # 沒被多方主張，但裁決至少是從自己列的backups遞補的——不算「跳過backups」
+    result = {
+        "recommendations": [{"stock_id": "2330", "reason": "..."}],
+        "backups": [{"stock_id": "2330"}, {"stock_id": "3706"}],
+    }
+    bull_pack = {"data": {"picks": [{"stock_id": "2059"}]}}
+    out = annotate_debate_coverage(result, bull_pack)
+    assert out["recommendations"][0]["not_debated"] is True
+    assert out["recommendations"][0]["bypassed_backups"] is False
+
+
+def test_annotate_debate_coverage_not_bypassed_when_backups_empty():
+    # backups本身是空的（沒東西可以跳過），不該誤標bypassed_backups
+    result = {
+        "recommendations": [{"stock_id": "2884", "reason": "..."}],
+        "backups": [],
+    }
+    bull_pack = {"data": {"picks": [{"stock_id": "2059"}]}}
+    out = annotate_debate_coverage(result, bull_pack)
+    assert out["recommendations"][0]["not_debated"] is True
+    assert out["recommendations"][0]["bypassed_backups"] is False
 
 
 def test_annotate_debate_coverage_noop_when_bull_pack_missing():

@@ -2017,7 +2017,10 @@ elif page == "🔍 決策軌跡":
                     _gf = _rc.get("grounding_flags") or []
                     _risk += (f"<div><span class='dt-chip o'>🔍 引用可疑數字（候選資料查無對應）："
                               f"{_esc('、'.join(str(v) for v in _gf))}</span></div>" if _gf else "")
-                    if _rc.get("not_debated"):
+                    if _rc.get("bypassed_backups"):
+                        _risk += ("<div><span class='dt-chip o'>🧨 未經多方主張，且裁決跳過自己列的"
+                                  "backups直接從候選資料另挑（判斷前後不一致，多留意）</span></div>")
+                    elif _rc.get("not_debated"):
                         _risk += ("<div><span class='dt-chip o'>⚡ 未經多方主張，"
                                   "由裁決直接從候選資料選出（少一層辯論檢視）</span></div>")
                     # 裁決問責：對空方異議的逐條回應（接受/駁回+理由）

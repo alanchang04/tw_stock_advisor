@@ -115,24 +115,39 @@ def annotate_recommendations(result: dict, candidates: pd.DataFrame | None) -> d
 
 
 def annotate_debate_coverage(result: dict, bull_pack: dict | None) -> dict:
-    """幫 result['recommendations'] 每筆標記是否曾被多方研究員主張過
-    （not_debated=True 代表沒有）。
+    """幫 result['recommendations'] 每筆標記兩級「少了哪層檢視」的旗標：
+      not_debated      — 沒被多方研究員主張過（可能是裁決自己從候選池挑的，
+                          設計上允許，不代表有問題）
+      bypassed_backups — 更嚴重：不只沒被多方主張過，連裁決自己列的backups
+                          都跳過沒用（backups非空的前提下）
 
     2026-07-21 真實案例：裁決結果裡出現玉山金，使用者一度以為是幻覺——追查後
     數字全部真實存在於候選資料（check_grounding驗證通過），只是：(1) 多方只從
     20檔候選挑5檔主張，玉山金沒被選中；(2) 空方也沒對它提異議（沉默，不代表
     「沒看到」）；(3) 決策軌跡頁UI只顯示候選池前8名，玉山金排在候選池外沒被
     顯示。裁決本來就看得到完整候選資料、被系統提示要求「從候選名單挑最值得
-    關注的5支」，不是只能選多方主張過的股票，所以這是設計允許的行為，不是bug——
-    但代表這筆推薦少了一層辯論雙方的檢視。這裡不攔截、只標記，讓使用者自己判斷
-    要不要對「未經辯論」的推薦更謹慎。backups不標記（backups本來就是裁決自己
-    找的候補，多方不太可能主張過，標記了也沒有額外資訊量）。
+    關注的5支」，不是只能選多方主張過的股票，所以not_debated本身是設計允許的
+    行為，不是bug。
+
+    但深入查那次真實資料發現一個更值得留意的地方：裁決自己交出的backups是
+    [台積電(候選池分數排名第8)、神達(第6)]——分數都比玉山金(第14)高，理論上該
+    優先遞補這兩個，裁決卻完全沒用、也沒交代原因，直接跳到候選池另外挑。這代表
+    裁決同一次JSON輸出內部不一致（列了backups卻不用），跟07-13「裁決照抄多方、
+    無視空方VETO」是同一種「LLM自己講的話沒有算數」模式，比單純的not_debated
+    更該留意——所以拆成bypassed_backups獨立標記，不跟not_debated混在一起。
+
+    這裡都只標記、不攔截：backups該不該優先用，我們並不知道答案（backups也只是
+    裁決隨手列的次選，沒有實測驗證過真的比較好），要求裁決在提示裡自己交代理由
+    （見SYSTEM_PROMPT規則5）+程式標記起來，是問責，不是限制它的判斷自由。
     """
     if not result or not bull_pack:
         return result
     bull_picks = {str(p.get("stock_id")) for p in (bull_pack.get("data") or {}).get("picks", [])}
     if not bull_picks:
         return result
+    backup_ids = {str(b.get("stock_id")) for b in (result.get("backups") or [])}
     for item in result.get("recommendations") or []:
-        item["not_debated"] = str(item.get("stock_id")) not in bull_picks
+        sid = str(item.get("stock_id"))
+        item["not_debated"] = sid not in bull_picks
+        item["bypassed_backups"] = bool(item["not_debated"] and backup_ids and sid not in backup_ids)
     return result
