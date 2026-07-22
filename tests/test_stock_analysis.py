@@ -163,6 +163,71 @@ def test_system_prompt_has_falling_knife_discipline():
     assert "不應該給 positive" in sys_p
 
 
+# ── 關鍵價位 _price_levels（2026-07-22，使用者要求補「需要留意的價位」）─────────
+def _fake_session_returning(rows):
+    from contextlib import contextmanager
+
+    class _Res:
+        def __init__(self, r): self._r = r
+        def fetchall(self): return self._r
+
+    class _Sess:
+        def __init__(self, r): self._r = r
+        def execute(self, *a, **k): return _Res(self._r)
+
+    @contextmanager
+    def _cm():
+        yield _Sess(rows)
+    return _cm
+
+
+def test_price_levels_classifies_support_and_resistance(monkeypatch):
+    # 近期 high/low：max high≈760、min low≈620；現價670
+    rows = [(760.0, 700.0), (745.0, 628.0), (740.0, 620.0)] * 8   # 24筆，>=20
+    monkeypatch.setattr(sa, "get_session", _fake_session_returning(rows))
+    basic = {"close": 670.0, "ma5": 714.6, "ma20": 927.15, "ma60": 710.18}
+    lv = sa._price_levels("2327", basic)
+    assert lv["ok"] is True
+    # 壓力全部 > 現價，支撐全部 < 現價
+    assert all(r["price"] >= 670 for r in lv["resistances"])
+    assert all(s["price"] < 670 for s in lv["supports"])
+    # 壓力依「最靠近現價」排序（遞增）；季線710.18 應是最近的壓力
+    assert lv["resistances"] == sorted(lv["resistances"], key=lambda x: x["price"])
+    assert abs(lv["resistances"][0]["price"] - 710.18) < 5
+    # dist_pct 方向正確：壓力為正、支撐為負
+    assert lv["resistances"][0]["dist_pct"] > 0
+    assert lv["supports"][0]["dist_pct"] < 0
+
+
+def test_price_levels_merges_nearby_levels(monkeypatch):
+    # 季線710.18 與 近期高710 很接近（<1.5%），應合併成同一關卡（標籤用＋串）
+    rows = [(711.0, 620.0)] * 20
+    monkeypatch.setattr(sa, "get_session", _fake_session_returning(rows))
+    basic = {"close": 670.0, "ma5": None, "ma20": None, "ma60": 710.18}
+    lv = sa._price_levels("2327", basic)
+    merged = [r for r in lv["resistances"] if "＋" in r["label"]]
+    assert merged, "相近的季線與近期高應合併成一個關卡"
+
+
+def test_prompt_includes_key_levels_section(monkeypatch):
+    levels = {"ok": True, "close": 670.0,
+              "resistances": [{"label": "季線MA60", "price": 710.18, "dist_pct": 6.0}],
+              "supports": [{"label": "近20日低", "price": 628.22, "dist_pct": -6.2}]}
+    _, user_p = sa._build_synthesis_prompt(
+        "2327", _crashed_basic(), {"rs20": 0.0124}, 38.9,
+        {"bull": True, "ok": False}, {"ok": False}, [], None, levels)
+    assert "關鍵價位" in user_p
+    assert "季線MA60 710.18" in user_p
+    assert "近20日低 628.22" in user_p
+
+
+def test_system_prompt_requires_levels_and_invalidation():
+    sys_p, _ = sa._build_synthesis_prompt(
+        "2327", _crashed_basic(), {}, None, {"bull": True, "ok": False}, {"ok": False}, [])
+    assert "key_levels" in sys_p
+    assert "invalidation" in sys_p
+
+
 # ── 引用驗證 _synthesis_grounding_flags ──────────────────────────────
 def test_grounding_flags_fabricated_number():
     inst = {"ok": True, "invest_streak_days": 1, "invest_streak_lots": 217.0,

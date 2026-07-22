@@ -202,8 +202,62 @@ def _recent_news(stock_id: str, days: int = 30, limit: int = 5) -> list[dict]:
     return [{"date": r[0], "type": r[1], "title": r[2], "sentiment": r[3], "url": r[4]} for r in rows]
 
 
+def _price_levels(stock_id: str, basic: dict, lookback: int = 60) -> dict:
+    """
+    量化計算「支撐/壓力關鍵價位」（2026-07-22 新增，使用者要求補上「需要留意的價位」）。
+    純規則計算、不靠LLM（跟乖離/引用驗證同一個philosophy：數字要能查證，不能讓LLM掰）。
+    給波段操作者「這檔現在該盯哪些價位」：
+      - MA5/MA20(月線)/MA60(季線)：最常被當動態支撐/壓力的均線
+      - 近20日、近lookback日的波段高低點：前高=壓力、前低=支撐
+    每個價位標成支撐（低於現價）或壓力（高於現價），附距現價%。相近的價位（1.5%內）
+    合併成同一個關卡，避免列一堆擠在一起的數字。
+    """
+    close = basic.get("close")
+    if not close or close <= 0:
+        return {"ok": False}
+    with get_session() as s:
+        rows = s.execute(text("""
+            SELECT high, low FROM daily_prices
+            WHERE stock_id = :sid AND close > 0 AND high > 0
+            ORDER BY trade_date DESC LIMIT :n
+        """), {"sid": stock_id, "n": lookback}).fetchall()
+    highs = [float(r[0]) for r in rows if r[0] is not None]
+    lows = [float(r[1]) for r in rows if r[1] is not None]
+
+    cand: list[tuple[str, float]] = []
+    for label, v in (("5日線", basic.get("ma5")), ("月線MA20", basic.get("ma20")),
+                     ("季線MA60", basic.get("ma60"))):
+        if v:
+            cand.append((label, float(v)))
+    if len(highs) >= 20:
+        cand.append(("近20日高", max(highs[:20])))
+        cand.append(("近20日低", min(lows[:20])))
+    if highs:
+        cand.append((f"近{len(highs)}日高", max(highs)))
+        cand.append((f"近{len(lows)}日低", min(lows)))
+
+    # 相近價位（1.5%內）合併成同一關卡，標籤用「＋」串起來
+    cand.sort(key=lambda x: x[1])
+    merged: list[tuple[list[str], float]] = []
+    for label, v in cand:
+        if merged and abs(v - merged[-1][1]) / close <= 0.015:
+            merged[-1][0].append(label)
+        else:
+            merged.append(([label], v))
+
+    def _fmt(labels, v):
+        return {"label": "＋".join(labels), "price": round(v, 2),
+                "dist_pct": round((v - close) / close * 100, 1)}
+
+    supports = [_fmt(lbls, v) for lbls, v in merged if v < close]
+    supports.sort(key=lambda x: -x["price"])          # 最靠近現價的支撐排前面
+    resistances = [_fmt(lbls, v) for lbls, v in merged if v >= close]
+    resistances.sort(key=lambda x: x["price"])        # 最靠近現價的壓力排前面
+    return {"ok": True, "close": round(close, 2), "supports": supports, "resistances": resistances}
+
+
 def _synthesis_grounding_flags(basic: dict, trend: dict, rev_yoy, inst: dict,
-                               ai_score: dict, parsed: dict) -> list[dict]:
+                               ai_score: dict, parsed: dict, levels: dict | None = None) -> list[dict]:
     """
     引用驗證（2026-07-22，比照選股引擎的 citation_check）：檢查 LLM 在 bull/bear
     論點裡帶單位（%/日/張）複述的數字，能不能在我們實際給它的資料裡找到對應——
@@ -247,6 +301,9 @@ def _synthesis_grounding_flags(basic: dict, trend: dict, rev_yoy, inst: dict,
         add(ai_score.get("rank"), 0); add(ai_score.get("total_candidates"), 0)
         if ai_score.get("percentile_rank") is not None:
             add(ai_score["percentile_rank"] * 100, 0)
+    if levels and levels.get("ok"):
+        for lv in (levels.get("supports") or []) + (levels.get("resistances") or []):
+            add(lv.get("dist_pct"))      # 各關鍵價位距現價% 也是合法可引用的數字
     expected_abs = {abs(e) for e in expected}
 
     flagged = []
@@ -261,7 +318,8 @@ def _synthesis_grounding_flags(basic: dict, trend: dict, rev_yoy, inst: dict,
 
 
 def _build_synthesis_prompt(stock_id: str, basic: dict, trend: dict, rev_yoy, regime: dict,
-                            inst: dict, news: list[dict], ai_score: dict | None = None) -> tuple[str, str]:
+                            inst: dict, news: list[dict], ai_score: dict | None = None,
+                            levels: dict | None = None) -> tuple[str, str]:
     ma_cross = {1: "黃金交叉", -1: "死亡交叉", 0: "無"}.get(basic["signal_ma_cross"], "無")
     breakout = {1: "突破壓力", -1: "跌破支撐", 0: "無"}.get(basic["signal_breakout"], "無")
     close = basic.get("close")
@@ -334,6 +392,15 @@ def _build_synthesis_prompt(stock_id: str, basic: dict, trend: dict, rev_yoy, re
     else:
         lines.append("相關新聞：近30日查無相關報導")
 
+    # 關鍵價位（2026-07-22 新增）：程式算好的支撐/壓力，餵給LLM讓它的判斷有具體
+    # 價位可講（進場/停損/目標要參考這些關卡），不是空泛講「偏空」。
+    if levels and levels.get("ok"):
+        def _lv_str(items):
+            return "｜".join(f"{it['label']} {it['price']:.2f}（{it['dist_pct']:+.1f}%）" for it in items) or "—"
+        lines.append(f"關鍵價位（程式計算，現價 {levels['close']:.2f}）：")
+        lines.append(f"  上方壓力：{_lv_str(levels.get('resistances') or [])}")
+        lines.append(f"  下方支撐：{_lv_str(levels.get('supports') or [])}")
+
     user_prompt = "\n".join(lines) + "\n\n請根據以上資料，對這檔股票做綜合分析，嚴格按指定JSON格式回覆。"
     system_prompt = """你是台股分析師，要對使用者指定的單一股票做綜合研判。你要幫做波段的
 使用者判斷「現在這檔值不值得進場」，不是幫已經套牢的人找安慰——要務實、要看當下。
@@ -358,6 +425,11 @@ def _build_synthesis_prompt(stock_id: str, basic: dict, trend: dict, rev_yoy, re
 7. **籌碼要看量級與趨勢，不是只看方向**：「投信連買1日+200張」在一檔近20日被法人淨賣
    幾千張的股票上，是狂賣後的單日反彈，不是「法人認同」。請比較「近20日淨額」與「目前
    連買」兩個數字後再論斷，小量級的單日訊號不可當成強力買盤。
+8. **要給可操作的價位（重要）**：波段操作者需要知道「該盯哪些價位、什麼情況會改變判斷」。
+   請用上面「關鍵價位」那幾個程式算好的支撐/壓力（不要自己另外編價位，要用列出來的），
+   填寫 key_levels（該留意的支撐/壓力，含用途說明）與 invalidation（什麼價位或條件會
+   讓你這個 verdict 失效，例如「若帶量站回月線XXX則翻中性/偏多」「若跌破支撐XXX則加速
+   趕底」）。這兩欄要具體到價位數字，不能空泛。
 
 回覆格式（只回JSON，不要其他文字）：
 {
@@ -365,6 +437,8 @@ def _build_synthesis_prompt(stock_id: str, basic: dict, trend: dict, rev_yoy, re
   "verdict_reason": "一句話說明整體判斷（30字以內）",
   "bull_points": [{"point": "具體論點", "evidence_fields": ["rs20","invest_streak"]}],
   "bear_points": [{"point": "具體論點", "evidence_fields": ["rsi14"]}],
+  "key_levels": ["該留意的價位＋用途，例：季線710為關鍵支撐，跌破恐再下探；月線927為上方壓力"],
+  "invalidation": "什麼價位/條件會推翻上面的 verdict（要具體到數字）",
   "data_gaps": ["資料缺失項目，沒有缺失則為空陣列"],
   "summary": "整體摘要（80字以內）"
 }"""
@@ -437,15 +511,29 @@ def analyze_stock(stock_id: str) -> dict:
         rec.payload = {"news": news} if news else None
         _record("news_context", rec.summary, rec.payload)
 
+    with run.stage("price_levels") as rec:
+        levels = _price_levels(stock_id, basic)
+        if levels.get("ok"):
+            _r = levels.get("resistances") or []
+            _s = levels.get("supports") or []
+            rec.summary = (f"上方壓力 {len(_r)} 個"
+                           + (f"（最近 {_r[0]['label']} {_r[0]['price']:.2f}）" if _r else "（無，已在近期高點上緣）")
+                           + f"｜下方支撐 {len(_s)} 個"
+                           + (f"（最近 {_s[0]['label']} {_s[0]['price']:.2f}）" if _s else "（無，已破近期低點）"))
+        else:
+            rec.summary = "價位資料不足"
+        rec.payload = levels
+        _record("price_levels", rec.summary, rec.payload)
+
     with run.stage("synthesis") as rec:
         from agent.llm_advisor import _ask, _parse_json
         system_prompt, user_prompt = _build_synthesis_prompt(
-            stock_id, basic, trend, rev_yoy, regime, inst, news, ai_score)
-        raw = _ask(system_prompt, user_prompt, max_tokens=1200, rec=rec, json_mode=True)
+            stock_id, basic, trend, rev_yoy, regime, inst, news, ai_score, levels)
+        raw = _ask(system_prompt, user_prompt, max_tokens=1400, rec=rec, json_mode=True)
         parsed = _parse_json(raw) if raw else None
         if parsed and not parsed.get("verdict"):
             parsed = None
-        grounding = _synthesis_grounding_flags(basic, trend, rev_yoy, inst, ai_score, parsed) if parsed else []
+        grounding = _synthesis_grounding_flags(basic, trend, rev_yoy, inst, ai_score, parsed, levels) if parsed else []
         _sfx = f"（🔍 {len(grounding)} 句引用數字查無對應）" if grounding else ""
         rec.summary = (f"判讀：{parsed.get('verdict')}｜{parsed.get('verdict_reason', '')}{_sfx}"
                        if parsed else ("LLM 輸出無法解析" if raw else "LLM 呼叫失敗"))

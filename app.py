@@ -1532,15 +1532,29 @@ elif page == "🔎 個股分析":
         basic, trend, rev_yoy = _pl.get("basic", {}), _pl.get("trend", {}), _pl.get("rev_yoy")
         _chips = []
         if trend.get("rs20") is not None:
-            _chips.append(f"<span class='dt-chip g'>RS {trend['rs20']*100:.0f} 百分位</span>")
+            # 2026-07-22：原本一律綠chip寫「RS X 百分位」，國巨rs20=0.0124會顯示成綠色
+            # 「RS 1 百分位」誤導成強勢。改成標強弱+依強弱給色（弱給橘色警示）。
+            _rs = trend["rs20"] * 100
+            _st = "極弱" if _rs < 20 else ("偏弱" if _rs < 40 else ("中等" if _rs < 60 else ("偏強" if _rs < 80 else "極強")))
+            _cls = "g" if _rs >= 60 else ("o" if _rs < 40 else "")
+            _chips.append(f"<span class='dt-chip {_cls}'>相對強度 贏過{_rs:.0f}%（{_st}）</span>")
         if trend.get("stack_days"):
             _chips.append(f"<span class='dt-chip'>多頭排列 {trend['stack_days']:.0f} 日</span>")
+        else:
+            _chips.append("<span class='dt-chip o'>非多頭排列</span>")
         if rev_yoy is not None:
             _chips.append(f"<span class='dt-chip'>營收 {rev_yoy:+.0f}%</span>")
+        # 乖離月線：跌破月線一定幅度＝接刀警示
+        _c, _m20 = basic.get("close"), basic.get("ma20")
+        _dev = ((_c - _m20) / _m20 * 100) if (_c and _m20) else None
+        _dev_html = ""
+        if _dev is not None:
+            _dev_cls = "o" if _dev <= -10 else ("g" if _dev >= 0 else "")
+            _dev_html = f"<span class='dt-chip {_dev_cls}'>乖離月線 {_dev:+.0f}%</span>"
         _body = (f"收盤 {basic.get('close')}　{basic.get('change_pct') or 0:+.2f}%<br>"
                  f"RSI {basic.get('rsi14') or 0:.1f}｜MACD柱"
                  f"{'正' if (basic.get('macd_hist') or 0) > 0 else '負'}<br>"
-                 + "".join(_chips))
+                 + "".join(_chips) + _dev_html)
         st.markdown(_dt_card("dt-ok", "📦", f"{basic.get('stock_name','')}（{basic.get('industry','')}）",
                              _body), unsafe_allow_html=True)
 
@@ -1601,6 +1615,26 @@ elif page == "🔎 個股分析":
             st.markdown(f"<div class='dt-verdict'>{_verdict_icon} <b>{_dt_esc(_parsed.get('verdict'))}</b>"
                         f"　{_dt_esc(_parsed.get('verdict_reason'))}<br>"
                         f"{_dt_esc(_parsed.get('summary'))}</div>", unsafe_allow_html=True)
+
+            # 關鍵價位（程式算好的支撐/壓力，權威數字；LLM的key_levels/invalidation當解讀）
+            _pl_lv, _ = _sa_stage("price_levels")
+            if _pl_lv.get("ok"):
+                def _lv_line(items, arrow):
+                    return "<br>".join(
+                        f"{arrow} <b>{it['price']:.2f}</b>（{it['dist_pct']:+.1f}%）"
+                        f"<span class='dt-num'>{_dt_esc(it['label'])}</span>" for it in items) or "<i>—</i>"
+                _body_lv = (f"<div style='color:#d9a441'>上方壓力</div>{_lv_line(_pl_lv.get('resistances') or [], '⬆')}"
+                            f"<div style='color:#34a06b;margin-top:.4rem'>下方支撐</div>{_lv_line(_pl_lv.get('supports') or [], '⬇')}")
+                st.markdown(_dt_card("dt-info", "📏", f"關鍵價位（現價 {_pl_lv.get('close'):.2f}）", _body_lv),
+                            unsafe_allow_html=True)
+            _klev = _parsed.get("key_levels") or []
+            if _klev:
+                st.markdown(_dt_card("dt-info", "🎯", "該留意的價位（AI 解讀）",
+                                     "<br>".join(f"・{_dt_esc(k)}" for k in _klev)), unsafe_allow_html=True)
+            if _parsed.get("invalidation"):
+                st.markdown(_dt_card("dt-warn", "🔄", "什麼情況會推翻此判斷",
+                                     _dt_esc(_parsed.get("invalidation"))), unsafe_allow_html=True)
+
             for p in _parsed.get("bull_points") or []:
                 _ev = "".join(f"<span class='dt-chip g'>{_dt_esc(e)}</span>" for e in (p.get("evidence_fields") or []))
                 st.markdown(_dt_card("dt-ok", "🐂", "多方論點", f"{_dt_esc(p.get('point'))}<br>{_ev}"),
