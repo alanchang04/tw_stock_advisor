@@ -271,17 +271,27 @@ def mode_pipeline(source: str = "openapi", with_entries: bool = True, review: bo
                 try:
                     from agent.stock_selector import get_practice_candidates
                     pc = get_practice_candidates(top_n=20)
+                    _pool = (pc.attrs.get("setup_pool_size") if pc is not None else None)
                     if pc is not None and not pc.empty:
-                        lines = [f"🎯 練習軌：今日 20 盲盒（{date.today()}，純量化不含LLM/新聞）"]
+                        lines = [f"🎯 練習軌：波段進場型態（{date.today()}，純量化不含LLM/新聞）"]
+                        if _pool is not None:
+                            lines.append(f"今日全市場有 {_pool} 檔走到「盤整→帶量紅K突破」，"
+                                         f"下列為 AI 因子排序後前 {len(pc)} 檔：")
                         for i, r in enumerate(pc.itertuples(), 1):
                             lines.append(f"  {i}. {r.stock_id} {r.stock_name}（{r.industry}）"
                                         f" 收盤{r.close:.1f}")
-                        lines.append("\n只看代號進TradingView，開20MA+成交量，自己找突破箱型的進出場點。")
+                        lines.append("\n只看代號進TradingView，開20MA+成交量，自己判斷進出場點。")
                         hard = pc.attrs.get("hard_excluded") or []
                         if hard:
                             lines.append(f"（另有 {len(hard)} 檔因乖離月線過遠/帶量長上引線被規則排除）")
                         practice_msg = "\n".join(lines)
-                    rec.summary = f"篩出 {0 if pc is None else len(pc)} 檔"
+                    elif _pool == 0 or (pc is not None and pc.empty):
+                        # 「今天沒有」本身就是資訊（市場沒有攻擊性），不要靜默跳過
+                        practice_msg = (f"🎯 練習軌（{date.today()}）：今日全市場沒有股票走到"
+                                        f"「盤整→帶量紅K突破」的型態，無進場候選。")
+                    rec.summary = (f"型態池 {_pool} 檔 → 取前 {0 if pc is None else len(pc)} 檔"
+                                   if _pool is not None else
+                                   f"篩出 {0 if pc is None else len(pc)} 檔（型態資料不可用，退回分數排序）")
                 except Exception as e:
                     logger.error(f"練習軌篩選失敗: {e}")
                     rec.summary = f"失敗：{e}"

@@ -551,3 +551,79 @@ def test_short_ratio_missing_values_are_neutral():
     s = score_candidates(_sr_df([0.01, float("nan"), 0.5]), _sr_cfg(1.0))
     assert s.notna().all()
     assert s.iloc[0] > s.iloc[2]                                   # 有值的仍照方向排
+
+
+# ── 波段進場型態 compute_swing_setup（2026-07-23，練習軌用）────────────
+# 構造：前20日寬幅震盪(100~110) → 近5日窄幅盤整(~100) → 第26日帶量紅K突破
+_N = 26
+_IDX = pd.date_range("2026-01-01", periods=_N, freq="D")
+_HI = [110]*20 + [101, 101.5, 101, 101.2, 101] + [106]
+_LO = [100]*20 + [99, 99.5, 99, 99.2, 99] + [100.5]
+_OP = [105]*20 + [100, 100.5, 100, 100.5, 100] + [100.8]
+_CL = [105]*20 + [100, 101, 100.5, 101, 100.5] + [105.8]
+_VO = [5000]*20 + [1000]*5 + [3000]
+
+
+def _panel(v):
+    return pd.DataFrame({"X": v}, index=_IDX)
+
+
+def _setup(op=None, hi=None, lo=None, cl=None, vo=None, ma20=None, ma60=None, cfg=None):
+    from agent.strategy import compute_swing_setup
+    return compute_swing_setup(
+        _panel(op or _OP), _panel(hi or _HI), _panel(lo or _LO), _panel(cl or _CL),
+        _panel(vo or _VO), ma20 if ma20 is not None else _panel([98]*_N),
+        ma60 if ma60 is not None else _panel([95]*_N), cfg)["X"]
+
+
+def test_swing_setup_triggers_only_on_breakout_day():
+    m = _setup()
+    assert m.sum() == 1 and bool(m.iloc[-1]), "應只在突破當日觸發"
+
+
+def test_swing_setup_rejects_low_breakout_volume():
+    assert not _setup(vo=[5000]*20 + [1000]*5 + [1100]).any()      # 僅1.1倍量
+
+
+def test_swing_setup_rejects_close_inside_box():
+    # 沒突破箱頂（收在盤整區間內）＝不是突破
+    assert not _setup(cl=[105]*20 + [100, 101, 100.5, 101, 100.5] + [101.0]).any()
+
+
+def test_swing_setup_rejects_long_upper_wick():
+    # 衝高回落（長上影線）方向與型態相反，是出貨不是突破
+    assert not _setup(hi=[110]*20 + [101, 101.5, 101, 101.2, 101] + [112]).any()
+
+
+def test_swing_setup_rejects_black_candle():
+    assert not _setup(op=[105]*20 + [100, 100.5, 100, 100.5, 100] + [106.5]).any()
+
+
+def test_swing_setup_rejects_downtrend():
+    """趨勢過濾：10年消融證實這是最有價值的一條（關掉後 CAR20 0.40%→0.05%）。"""
+    assert not _setup(ma20=_panel([120]*_N), ma60=_panel([130]*_N)).any()
+
+
+def test_swing_setup_conditions_are_toggleable():
+    """每條都要能關掉——回測消融靠這個逐條驗證哪個真的有用。"""
+    assert not _setup(ma20=_panel([120]*_N), ma60=_panel([130]*_N)).any()
+    assert _setup(ma20=_panel([120]*_N), ma60=_panel([130]*_N),
+                  cfg={"require_trend": False}).any()
+
+
+def test_swing_setup_realigns_mismatched_panels():
+    """欄位/日期沒對齊時要自動 reindex，不能丟 'identically-labeled' 例外——
+    接進即時路徑時實際踩過，型態被靜默降級成純分數排序。"""
+    from agent.strategy import compute_swing_setup
+    ma_short = pd.DataFrame({"X": [98]*_N, "Y": [98]*_N}, index=_IDX)   # 多一欄
+    m = compute_swing_setup(_panel(_OP), _panel(_HI), _panel(_LO), _panel(_CL),
+                            _panel(_VO), ma_short, _panel([95]*_N))
+    assert list(m.columns) == ["X"] and bool(m["X"].iloc[-1])
+
+
+def test_swing_setup_defaults_match_ablation_evidence():
+    """預設值由 10 年消融決定：量縮/相對振幅實測會讓 CAR 變差，故預設關閉。"""
+    from agent.strategy import SWING_SETUP_CFG
+    assert SWING_SETUP_CFG["require_vol_dryup"] is False
+    assert not SWING_SETUP_CFG["contraction_ratio"]
+    assert SWING_SETUP_CFG["require_trend"] is True      # 最有價值的一條，必須開

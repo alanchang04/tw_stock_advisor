@@ -455,6 +455,116 @@ def compute_factor_matrices(closes, ma5p, ma20p, ma60p, invest):
 
 
 # ══════════════════════════════════════════════════════════════════
+#  波段進場型態：盤整量縮 → 帶量紅K突破（2026-07-23）
+#
+#  使用者提的原始構想：「最近5天盤整並且剛出現帶量紅K棒，量為近5日均量1.5倍」。
+#  這個型態有正式名稱與文獻：波動收縮後擴張——Darvas 箱型突破、VCP
+#  (Volatility Contraction Pattern)、NR7/inside-bar breakout，台股講的「盤久必動」
+#  「量先價行」是同一件事。
+#
+#  在原構想上補了四個條件（每個都可獨立開關，方便回測逐條驗證哪個真的有用）：
+#   1. **盤整期間要量縮**（原構想沒有，但可能是更關鍵的那半）：完整型態是
+#      「量縮盤整(浮額洗清) → 量增突破」。盤整期間若是大量，那是出貨不是洗盤。
+#   2. **盤整用相對振幅**而非絕對%：近5日箱型幅度 ÷ 近20日箱型幅度。3% 振幅對
+#      高波動股是窄、對牛皮股是寬，用相對值每檔自動以自己的波動為基準。
+#      隨機漫步下這個比值期望約 sqrt(5/20)=0.5，故預設要求 ≤0.5（明顯比隨機更緊）。
+#   3. **紅K品質**：只要求「收>開」的話，帶長上影線的衝高回落（出貨）也會過關，
+#      方向正好相反。要求收盤落在當日振幅上緣（預設上緣1/3內）。
+#   4. **要突破箱頂**：否則盤整區間「中間」的一根紅K也算，那不是突破。
+#   另加趨勢背景過濾：下跌趨勢中的突破失敗率高很多（國巨那個教訓：暴跌中的反彈
+#   不是突破）。要求站上季線或 MA20>MA60。
+#
+#  ⚠️ 這是「進場時機」偵測，不是評分因子——它回答「今天這檔是不是剛好走到可進場的
+#  位置」，跟 rs20/rev_yoy 那種「這檔好不好」是不同維度。用途見
+#  stock_selector.get_practice_candidates()。
+# ══════════════════════════════════════════════════════════════════
+# 預設值由 10 年事件研究的條件消融決定（scripts/run_swing_setup_study.py），不是憑感覺：
+#   關掉趨勢過濾   → CAR20 0.40%→0.05%、CAR60 0.80%→0.04%  ⇒ 最有價值，保留
+#   關掉突破箱頂   → CAR20 0.40%→0.25%                      ⇒ 有貢獻，保留
+#   關掉突破帶量   → CAR20 0.40%→0.39%                      ⇒ 邊際，保留（型態定義的一部分）
+#   關掉收盤上緣   → CAR20 0.40%→0.40%                      ⇒ 無差異，保留（排除衝高回落仍合理）
+#   關掉盤整量縮   → CAR20 0.40%→0.56%  **變好**            ⇒ 關掉（我原本以為這是關鍵，錯了）
+#   關掉相對振幅   → CAR20 0.40%→0.49%  **變好**            ⇒ 關掉
+SWING_SETUP_CFG = {
+    "consol_days":        5,     # 盤整觀察天數（箱型）
+    "contraction_ratio":  0,     # 0＝關閉（消融顯示開啟反而讓 CAR 變差）
+    "base_days":          20,    # 相對基準天數
+    "require_vol_dryup":  False, # 關閉（同上，開啟反而變差）
+    "breakout_vol_mult":  1.5,   # 突破日量 ≥ 近N日均量 × 此倍數
+    "require_box_break":  True,  # 收盤要突破箱頂（前N日最高）
+    "close_top_frac":     0.33,  # 收盤要落在當日振幅上緣此比例內（0.33＝上緣1/3）
+    "require_red":        True,  # 收 > 開
+    "require_trend":      True,  # 站上季線 或 MA20>MA60（消融證實最有價值的一條）
+}
+
+
+def compute_swing_setup(opens, highs, lows, closes, volumes, ma20, ma60,
+                        cfg: dict = None) -> pd.DataFrame:
+    """
+    回傳布林矩陣（日期×股票）：當日是否觸發「盤整量縮 → 帶量紅K突破」。
+    所有輸入為「日期×股票」的 pivot，需已對齊同一 index/columns。
+
+    每個條件都能用 cfg 關掉（設 False / 0），回測時可逐條消融看哪個真的有貢獻。
+    """
+    c = {**SWING_SETUP_CFG, **(cfg or {})}
+    n, base = int(c["consol_days"]), int(c["base_days"])
+
+    # 全部對齊 closes 的 index/columns（跟 compute_factor_matrices 同一個慣例）。
+    # 呼叫端傳進來的 pivot 不一定同形狀——技術指標表跟股價表的股票/日期集合會有差，
+    # 沒對齊的話 DataFrame 比較會丟 "Can only compare identically-labeled" 直接炸掉
+    # （2026-07-23 接進即時路徑時實際踩到，型態被靜默降級成分數排序）。
+    idx, cols = closes.index, closes.columns
+    def _al(df):
+        return df.reindex(index=idx, columns=cols)
+    opens, highs, lows = _al(opens), _al(highs), _al(lows)
+    volumes, ma20, ma60 = _al(volumes), _al(ma20), _al(ma60)
+
+    # 箱型：用「不含今天」的前 n 日，今天才是突破日
+    box_hi = highs.rolling(n).max().shift(1)
+    box_lo = lows.rolling(n).min().shift(1)
+    base_hi = highs.rolling(base).max().shift(1)
+    base_lo = lows.rolling(base).min().shift(1)
+
+    cond = pd.DataFrame(True, index=closes.index, columns=closes.columns)
+
+    # 1) 盤整＝相對振幅收縮
+    if c["contraction_ratio"]:
+        box_w = (box_hi - box_lo)
+        base_w = (base_hi - base_lo).where(lambda x: x > 0)
+        cond &= ((box_w / base_w) <= float(c["contraction_ratio"])).fillna(False)
+
+    # 2) 盤整期間量縮（浮額洗清），不是放量盤整（出貨）
+    vol_n = volumes.rolling(n).mean().shift(1)
+    if c["require_vol_dryup"]:
+        vol_base = volumes.rolling(base).mean().shift(1)
+        cond &= (vol_n < vol_base).fillna(False)
+
+    # 3) 突破日帶量
+    if c["breakout_vol_mult"]:
+        cond &= (volumes >= vol_n * float(c["breakout_vol_mult"])).fillna(False)
+
+    # 4) 收盤突破箱頂
+    if c["require_box_break"]:
+        cond &= (closes > box_hi).fillna(False)
+
+    # 5) 紅K
+    if c["require_red"]:
+        cond &= (closes > opens).fillna(False)
+
+    # 6) 收盤在當日振幅上緣（排除衝高回落的長上影線＝出貨）
+    if c["close_top_frac"]:
+        rng = (highs - lows).where(lambda x: x > 0)
+        pos = (closes - lows) / rng                      # 0=最低, 1=最高
+        cond &= (pos >= 1 - float(c["close_top_frac"])).fillna(False)
+
+    # 7) 趨勢背景：下跌趨勢中的突破失敗率高很多
+    if c["require_trend"]:
+        cond &= ((closes > ma60) | (ma20 > ma60)).fillna(False)
+
+    return cond
+
+
+# ══════════════════════════════════════════════════════════════════
 #  投信「新進場」（2026-07-15，使用者要求：中小型股×投信剛開始買）
 #  跟上面的 inv_streak 方向刻意相反：inv_streak 獎勵「已經連買很多天、
 #  累計量體夠大」的股票（追蹤大戶已確立的部位）；這裡要抓的是「連買

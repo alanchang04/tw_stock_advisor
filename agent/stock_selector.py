@@ -132,12 +132,14 @@ def _live_factor_maps(cfg: dict) -> dict:
     （rs20 需 21 天、stack/streak 有封頂，載多也只是取最後一列）。
     """
     with get_session() as session:
+        # 2026-07-23 加 open/high/low/volume：波段進場型態（compute_swing_setup）需要
+        # 完整 K 棒與量，練習軌用。多抓 4 個欄位的成本很小（同一次查詢、同樣的列數）。
         px = pd.DataFrame(session.execute(text("""
-            SELECT stock_id, trade_date, close FROM daily_prices
+            SELECT stock_id, trade_date, close, open, high, low, volume FROM daily_prices
             WHERE trade_date >= (SELECT MIN(trade_date) FROM (
                 SELECT DISTINCT trade_date FROM daily_prices ORDER BY trade_date DESC LIMIT 70) d)
               AND close > 0
-        """)).fetchall(), columns=["stock_id", "trade_date", "close"])
+        """)).fetchall(), columns=["stock_id", "trade_date", "close", "open", "high", "low", "volume"])
         tk = pd.DataFrame(session.execute(text("""
             SELECT stock_id, trade_date, ma5, ma20, ma60 FROM technical_indicators
             WHERE trade_date >= (SELECT MIN(trade_date) FROM (
@@ -162,12 +164,27 @@ def _live_factor_maps(cfg: dict) -> dict:
     rs20, stack_days, inv_streak = compute_factor_matrices(closes, ma5p, ma20p, ma60p, invest)
     new_entry = compute_new_entry_flag(invest.reindex(index=closes.index, columns=closes.columns),
                                        cfg.get("new_entry_min_lots", 50))
+    # 波段進場型態（2026-07-23，練習軌用）：盤整→帶量紅K突破。
+    # 跟回測共用 strategy.compute_swing_setup 同一份邏輯，確保線上=研究。
+    from agent.strategy import compute_swing_setup
+    def _p(col):
+        return px.pivot_table(index="trade_date", columns="stock_id", values=col).reindex(
+            index=closes.index, columns=closes.columns)
+    try:
+        swing = compute_swing_setup(_p("open"), _p("high"), _p("low"), closes, _p("volume"),
+                                    ma20p, ma60p, cfg.get("swing_setup"))
+    except Exception as e:
+        logger.warning(f"波段型態計算失敗（練習軌本次不套型態濾網）: {e}")
+        swing = None
+
     last = closes.index.max()
     return {
         "rs20":          rs20.loc[last].to_dict() if last in rs20.index else {},
         "stack_days":    stack_days.loc[last].to_dict() if last in stack_days.index else {},
         "invest_streak": inv_streak.loc[last].to_dict() if last in inv_streak.index else {},
         "invest_new_entry": new_entry.loc[last].to_dict() if last in new_entry.index else {},
+        "swing_setup":   (swing.loc[last].to_dict()
+                          if swing is not None and last in swing.index else {}),
     }
 
 
@@ -460,12 +477,44 @@ def get_candidate_stocks(
 
 def get_practice_candidates(top_n: int = 20) -> pd.DataFrame:
     """
-    人類交易員練習軌（2026-07-15）：純量化、不進 LLM，每日輸出前 top_n 檔給使用者自己
-    用純線圖（20MA+成交量）練手動判斷進出場。重用 get_candidate_stocks 的篩選/因子計算，
-    只是換一份權重與門檻（PRACTICE_CFG，見 agent/strategy.py）——跟 AI 軌完全獨立。
+    人類交易員練習軌——2026-07-23 依使用者要求改成「波段進場型態」導向。
+
+    **改版原因**：舊版是「用另一組權重取分數前 20 名」，給的是「分數最高的股票」，
+    但這些股票可能處在走勢的任何位置（已噴一大段、半山腰、剛回檔都有）。使用者要練的
+    是「波段進場時機」，所以改成先用型態濾出「今天剛好走到可進場位置」的股票，
+    再用 AI 選股因子排序。
+
+    **10年事件研究驗證**（scripts/run_swing_setup_study.py + 排序測試）：
+      型態池本身          CAR20 +0.64%  CAR60 +1.18%
+      型態池→AI因子前20   CAR20 +1.17%  CAR60 +2.18%   ← 排序有真實鑑別力，CAR幾乎翻倍
+    且與 AI 主軌只有 14.5% 重疊（40天裡有17天完全不重疊）——這是**互補的另一個維度**，
+    不是同一份名單換排法：AI 只問「這檔好不好」（品質），型態問「今天能不能進」（時機）。
+
+    ⚠️ 誠實標注：CAR20 的 1.17% 只略高於來回摩擦成本約 1.07%，平均持有 15.5 天正落在
+    這個邊緣地帶；CAR40/60 才明顯覆蓋成本。這是相對大盤的超額報酬，不是含停損/部位
+    控管/滑價的完整回測。當「練手感的候選池」用很合格，當「照單下車的訊號」要保守。
     """
-    from agent.strategy import PRACTICE_CFG
-    return get_candidate_stocks([], top_n=top_n, cfg=PRACTICE_CFG)
+    from agent.strategy import STRATEGY
+    # 用 AI 軌的因子權重排序（使用者指定），但族群上限關掉——那是投資組合層的
+    # 暫時限制，跟「今天有哪些股票走到進場位置」無關
+    cfg = {**STRATEGY, "sector_exposure_cap": None}
+    df = get_candidate_stocks([], top_n=99999, cfg=cfg)
+    if df is None or df.empty:
+        return df
+
+    setup = (_live_factor_maps(cfg) or {}).get("swing_setup") or {}
+    if not setup:
+        logger.warning("波段型態資料不可用，練習軌退回「純分數排序」模式")
+        out = df.head(top_n).reset_index(drop=True)
+        out.attrs["setup_pool_size"] = None
+        return out
+
+    hit = df["stock_id"].map(lambda s: bool(setup.get(s)))
+    pool = df[hit]
+    out = pool.head(top_n).reset_index(drop=True)          # df 已依分數排序
+    out.attrs["setup_pool_size"] = int(len(pool))          # 今天全市場有幾檔走到這個型態
+    out.attrs["hard_excluded"] = df.attrs.get("hard_excluded")
+    return out
 
 
 def _recent_news_map(stock_ids: list[str], days: int = 30, per_stock: int = 3) -> dict:

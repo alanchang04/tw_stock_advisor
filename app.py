@@ -1734,11 +1734,12 @@ elif page == "🔎 個股分析":
 #  Page 8.5：練習軌——每日 20 盲盒（純量化，不進 LLM）
 # ══════════════════════════════════════════════════════════════════
 elif page == "🎯 練習軌":
-    st.title("🎯 練習軌：每日 20 盲盒")
-    st.caption("純量化篩選，完全不經過 LLM——用來練「波段操作、40%勝率也能小賠大賺」的量化心態，"
-               "不是給你抄的答案。建議流程：只看代號進 TradingView，只開 20MA 和成交量，"
-               "隱藏新聞與籌碼，自己找「20MA上方橫盤5-10天、今天帶量紅K突破箱型」的股票；"
-               "停損守突破K棒低點或月線（取低者）、停利沿20MA抱到跌破。")
+    st.title("🎯 練習軌：波段進場型態")
+    st.caption("純量化篩選，完全不經過 LLM。2026-07-23 改版：先用型態濾出「今天剛好走到"
+               "可進場位置」的股票（近5日盤整 → 今日帶量紅K突破箱頂、收盤在當日上緣、"
+               "且趨勢站得住），再用 AI 選股因子排序。"
+               "建議流程：只看代號進 TradingView，只開 20MA 和成交量，隱藏新聞與籌碼，"
+               "自己判斷進出場；停損守突破K棒低點或月線（取低者）、停利沿20MA抱到跌破。")
 
     from agent.stock_selector import get_practice_candidates
     if st.button("🔄 重新整理今日清單", use_container_width=False):
@@ -1748,9 +1749,28 @@ elif page == "🎯 練習軌":
             st.session_state["practice_candidates"] = get_practice_candidates(top_n=20)
     _pc = st.session_state["practice_candidates"]
 
+    _pool = _pc.attrs.get("setup_pool_size") if _pc is not None else None
     if _pc is None or _pc.empty:
-        st.warning("今日無符合門檻的候選股票（收盤≥15元、近5日均成交金額≥2億、站上月線）。")
+        st.warning("今日全市場沒有股票走到「盤整 → 帶量紅K突破」的型態，因此沒有進場候選。"
+                   "這本身就是資訊：代表今天市場沒有攻擊性，不是系統壞了。")
         st.stop()
+
+    if _pool is not None:
+        st.info(f"📐 今日全市場有 **{_pool}** 檔走到此型態，下列為 AI 因子排序後的前 "
+                f"**{len(_pc)}** 檔。數量每天不同是正常的——這是「事件」不是「排名」，"
+                f"沒有硬湊 20 檔（湊數會直接毀掉訊號意義）。")
+    else:
+        st.warning("⚠️ 型態資料本次不可用，已退回「純分數排序」模式——下列**不是**型態篩選結果。")
+
+    with st.expander("這個型態的 10 年驗證數據（誠實版）", expanded=False):
+        st.markdown(
+            "- 型態池本身：CAR20 **+0.64%**、CAR60 **+1.18%**\n"
+            "- 型態池 → AI 因子排序前20：CAR20 **+1.17%**、CAR60 **+2.18%**（排序確實有鑑別力）\n"
+            "- 與 AI 主軌只有 **14.5%** 重疊（40天裡17天完全不重疊）→ 這是互補的另一個維度\n"
+            "- **但**：CAR20 的 1.17% 只略高於來回摩擦成本約 1.07%，而平均持有 15.5 天正落在"
+            "這個邊緣地帶；CAR40/60 才明顯覆蓋成本。\n"
+            "- CAR＝相對大盤等權平均的超額報酬，**不是**含停損/部位控管/滑價的完整回測。\n\n"
+            "→ 當「練手感的候選池」很合格；當「照單下單的訊號」請保守看待。")
 
     _show = _pc.copy()
     _show.insert(0, "排名", range(1, len(_show) + 1))
