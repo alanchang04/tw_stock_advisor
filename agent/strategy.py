@@ -89,6 +89,18 @@ STRATEGY = {
     "w_etf_accum": 1.0,          # 近期有幾檔主動式ETF加碼/新增（輔助佐證，非硬性門檻）
     "etf_accum_lookback_days": 10,
 
+    # ── 券資比（融券餘額/融資餘額，2026-07-23）──
+    # 10年IC研究（scripts/run_margin_factor_report.py）：測了5個融資融券衍生因子，
+    # **只有這一個有料**——h20 |ICIR| 0.252、h60 0.372，優於現行仍在用的
+    # foreign_buy(0.168)/stack_days(0.148)，t值-12.4/-18.1 高度顯著，且隨持有期
+    # 拉長而增強（跟最強的 rev_yoy 同型態）。IC 為**負**＝券資比越低後續報酬越好，
+    # 故計分時取反向（見 score_candidates）。
+    # 反面發現：實務界最愛講的「融資餘額大增＝散戶追高＝反指標」在10年資料上
+    # 幾乎沒有預測力（|ICIR| 僅0.01~0.09），沒有納入。
+    # ⚠️ 預設 0＝不啟用。IC 只是必要非充分條件（ICIR加權那次就是 IC 合理但 A/B 沒
+    # 勝出），要先過 10年 A/B（scripts/backtest_ab_short_ratio.py）才改預設。
+    "w_short_ratio": 0.0,
+
     # ── 流動性 OR 閘門（2026-07-15）：成交金額達標，或投信新進場+較低流動性下限也放行 ──
     "allow_new_entry_alt_gate": True,   # AI 軌開啟；PRACTICE_CFG 會覆寫成 False
     "alt_min_turnover_avg5": 30_000_000,  # 替代路徑的流動性下限（3千萬/日，比主門檻低但非0）
@@ -614,6 +626,15 @@ def score_candidates(df: pd.DataFrame, cfg: dict = STRATEGY) -> pd.Series:
     if "etf_accum_count" in df.columns and cfg.get("w_etf_accum", 0) > 0:
         ec = pd.to_numeric(df["etf_accum_count"], errors="coerce").fillna(0)
         s += (ec.clip(0, 2) / 2.0) * cfg["w_etf_accum"]
+
+    # ── 券資比（2026-07-23，預設0＝不啟用，見 STRATEGY 註解）──
+    # IC 為負（券資比越高後續報酬越差）→ 取 1-百分位排名當分數，低券資比才拿高分。
+    # 用排序而非原始比值：券資比分佈極度右偏（多數股接近0、少數極高），
+    # 直接用數值會被少數極端值主導。缺值填中性 0.5，不獎不罰。
+    if "short_ratio" in df.columns and cfg.get("w_short_ratio", 0) > 0:
+        sr = pd.to_numeric(df["short_ratio"], errors="coerce")
+        if sr.notna().sum() >= 2:
+            s += (1.0 - sr.rank(pct=True).fillna(0.5)) * cfg["w_short_ratio"]
     return s
 
 

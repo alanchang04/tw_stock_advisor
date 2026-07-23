@@ -195,10 +195,21 @@ def _load_parquet(parquet_dir: str) -> dict:
                 div[c] = pd.to_numeric(div[c], errors="coerce")
         div["ex_date"] = pd.to_datetime(div["ex_date"]).dt.date
 
+    # 融資融券（選配，2026-07-23）：只有 short_ratio(券資比) 通過 IC 檢驗
+    # （見 scripts/run_margin_factor_report.py 與 SPEC_QUANT_UPGRADE.md §5.5）。
+    # 檔案不存在時優雅降級為 None，w_short_ratio 自然不生效，舊資料照跑。
+    margin = _p("margin.parquet")
+    if margin is not None and not margin.empty:
+        for c in ["margin_balance", "short_balance"]:
+            if c in margin.columns:
+                margin[c] = pd.to_numeric(margin[c], errors="coerce")
+        margin["trade_date"] = pd.to_datetime(margin["trade_date"]).dt.date
+
     logger.info(f"從 parquet 載入：股價 {len(prices)} 列、法人 {len(inst)} 列、"
                 f"技術指標 {len(tech)} 列、除權息 {len(div)} 筆"
+                f"、融資融券 {0 if margin is None else len(margin)} 列"
                 f"（{'現算' if _p('technical.parquet') is None else '讀檔'}）")
-    return {"prices": prices, "tech": tech, "inst": inst,
+    return {"prices": prices, "tech": tech, "inst": inst, "margin": margin,
             "imap": imap, "inds": inds, "rev_map": rev_map, "dividends": div}
 
 
@@ -260,6 +271,17 @@ def _precompute_factors(data: dict, cfg: dict = STRATEGY) -> None:
     # 這個因子完全靠 institutional_trading，沒有ETF訊號那種資料量稀薄的問題。
     invest_r = invest.reindex(index=closes.index, columns=closes.columns)
     data["_new_entry"] = compute_new_entry_flag(invest_r, cfg.get("new_entry_min_lots", 50))
+
+    # 券資比（融券餘額/融資餘額，2026-07-23）：5個融資融券衍生因子裡唯一通過 IC 檢驗的
+    # （h20 |ICIR| 0.252、h60 0.372，優於現行仍在用的 foreign_buy/stack_days；IC 為負
+    # ＝低券資比後續報酬較好）。資料缺就不建這個矩陣，w_short_ratio 自然不生效。
+    margin = data.get("margin")
+    if margin is not None and not margin.empty:
+        m_bal = margin.pivot_table(index="trade_date", columns="stock_id", values="margin_balance")
+        s_bal = margin.pivot_table(index="trade_date", columns="stock_id", values="short_balance")
+        m_bal = m_bal.reindex(index=closes.index, columns=closes.columns)
+        s_bal = s_bal.reindex(index=closes.index, columns=closes.columns)
+        data["_short_ratio"] = s_bal / m_bal.where(m_bal > 0)
 
 
 # ── 某日（含當天）為止的熱門族群 ─────────────────────────────────
@@ -354,7 +376,8 @@ def _candidates_asof(data, d, industry_codes, top_n=5, cfg=None):
     # 趨勢/題材新因子：相對強度、多頭排列持續、投信連買、投信新進場
     # （O(1) 查預算矩陣的當日列；要先算好才能給下面的流動性OR閘門用 invest_new_entry）
     for col, key in [("rs20", "_rs20"), ("stack_days", "_stack_days"),
-                     ("invest_streak", "_inv_streak"), ("invest_new_entry", "_new_entry")]:
+                     ("invest_streak", "_inv_streak"), ("invest_new_entry", "_new_entry"),
+                     ("short_ratio", "_short_ratio")]:
         mat = data.get(key)
         if mat is not None and d in mat.index:
             df[col] = df["stock_id"].map(mat.loc[d])

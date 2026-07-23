@@ -502,3 +502,52 @@ def test_oldest_era_is_catch_all():
     """最舊那筆要能接住任意早的日期，否則 strategy_era_for 會漏掉極早的交易。"""
     from agent.strategy import strategy_era_for
     assert strategy_era_for(date(2001, 1, 1)) is not None
+
+
+# ── 券資比 short_ratio（2026-07-23，IC過關、A/B待驗，預設0不啟用）─────────
+def _sr_df(ratios):
+    n = len(ratios)
+    return pd.DataFrame(dict(
+        stock_id=[str(i) for i in range(n)], signal_ma_cross=[0]*n, signal_breakout=[0]*n,
+        macd_hist=[0.0]*n, inst_net=[0]*n, foreign_net=[0]*n, rsi14=[60]*n,
+        short_ratio=ratios))
+
+
+def _sr_cfg(w):
+    """只留券資比一個因子，其餘歸零，方便單獨驗證它的行為。"""
+    return {**STRATEGY, "w_short_ratio": w, "w_rev_yoy": 0, "w_rev_accel": 0,
+            "w_invest_streak": 0, "w_invest_new_entry": 0, "w_foreign_buy": 0,
+            "w_trend_stack": 0, "w_etf_accum": 0}
+
+
+def test_short_ratio_default_off():
+    """IC 過關不等於可用，A/B 沒驗完前預設必須是 0（這條防止不小心開啟）。"""
+    assert STRATEGY.get("w_short_ratio") == 0.0
+
+
+def test_short_ratio_low_scores_higher():
+    """IC 為負＝券資比越低後續報酬越好，所以低券資比要拿高分（方向不能搞反）。"""
+    from agent.strategy import score_candidates
+    s = score_candidates(_sr_df([0.001, 0.05, 0.5]), _sr_cfg(1.0))
+    assert s.iloc[0] > s.iloc[1] > s.iloc[2]
+
+
+def test_short_ratio_zero_weight_has_no_effect():
+    from agent.strategy import score_candidates
+    s = score_candidates(_sr_df([0.001, 0.05, 0.5]), _sr_cfg(0.0))
+    assert (s == 0).all()
+
+
+def test_short_ratio_uses_rank_not_raw_value():
+    """券資比分佈極右偏，必須用排序；用原始值的話單一極端值會主導整個尺度。"""
+    from agent.strategy import score_candidates
+    normal = score_candidates(_sr_df([0.01, 0.02, 0.03]), _sr_cfg(1.0))
+    with_outlier = score_candidates(_sr_df([0.01, 0.02, 999.0]), _sr_cfg(1.0))
+    assert list(normal.round(6)) == list(with_outlier.round(6))   # 名次相同→分數相同
+
+
+def test_short_ratio_missing_values_are_neutral():
+    from agent.strategy import score_candidates
+    s = score_candidates(_sr_df([0.01, float("nan"), 0.5]), _sr_cfg(1.0))
+    assert s.notna().all()
+    assert s.iloc[0] > s.iloc[2]                                   # 有值的仍照方向排
