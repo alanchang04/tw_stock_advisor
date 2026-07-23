@@ -228,6 +228,39 @@ def test_system_prompt_requires_levels_and_invalidation():
     assert "invalidation" in sys_p
 
 
+# ── NaN 防呆（2026-07-22 線上實錘：顯示成「贏過nan%（極強）」）──────────────
+def test_num_helper_rejects_nan_and_none():
+    assert sa._num(float("nan")) is None
+    assert sa._num(None) is None
+    assert sa._num("abc") is None
+    assert sa._num(0.5) == 0.5
+    assert sa._num("3.5") == 3.5
+
+
+def test_prompt_does_not_print_nan_for_missing_rs20():
+    # rs20=NaN 時，舊寫法會印出「贏過全市場nan%」且強弱判斷掉到「極強」（最弱→最強）
+    nan = float("nan")
+    _, user_p = sa._build_synthesis_prompt(
+        "2327", _crashed_basic(), {"rs20": nan, "stack_days": nan}, nan,
+        {"bull": True, "ok": False}, {"ok": False}, [])
+    assert "nan" not in user_p.lower()
+    assert "相對強度RS20：資料不足" in user_p
+    assert "極強" not in user_p
+
+
+def test_price_levels_ignores_nan_moving_averages(monkeypatch):
+    nan = float("nan")
+    rows = [(760.0, 620.0)] * 20
+    monkeypatch.setattr(sa, "get_session", _fake_session_returning(rows))
+    basic = {"close": 670.0, "ma5": nan, "ma20": nan, "ma60": 710.18}
+    lv = sa._price_levels("2327", basic)
+    assert lv["ok"] is True
+    labels = [x["label"] for x in lv["resistances"] + lv["supports"]]
+    assert not any("5日線" in l or "月線" in l for l in labels)   # NaN 均線不該出現
+    assert any("季線" in l for l in labels)                        # 正常的季線要在
+    assert all(x["price"] == x["price"] for x in lv["resistances"] + lv["supports"])
+
+
 # ── 引用驗證 _synthesis_grounding_flags ──────────────────────────────
 def test_grounding_flags_fabricated_number():
     inst = {"ok": True, "invest_streak_days": 1, "invest_streak_lots": 217.0,

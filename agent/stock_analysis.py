@@ -32,6 +32,20 @@ from agent.strategy import STRATEGY
 INSTITUTIONAL_LOOKBACK_DAYS = 20
 
 
+def _num(v):
+    """轉成 float，None/非數字/NaN 一律回 None。
+
+    2026-07-22 線上實錘：資料不足時 rs20 會是 NaN，而 NaN 跟任何數字比較都是 False、
+    且 NaN 是 truthy——導致最弱的國巨被顯示成「相對強度 贏過nan%（極強）」（強弱判斷
+    一路掉到最後的 else）。凡是要拿來比較大小或格式化的因子值，都先過這個函式。
+    """
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return None if f != f else f      # NaN != NaN
+
+
 def _stock_basic(stock_id: str) -> dict | None:
     with get_session() as s:
         row = s.execute(text("""
@@ -212,7 +226,7 @@ def _price_levels(stock_id: str, basic: dict, lookback: int = 60) -> dict:
     每個價位標成支撐（低於現價）或壓力（高於現價），附距現價%。相近的價位（1.5%內）
     合併成同一個關卡，避免列一堆擠在一起的數字。
     """
-    close = basic.get("close")
+    close = _num(basic.get("close"))
     if not close or close <= 0:
         return {"ok": False}
     with get_session() as s:
@@ -221,14 +235,15 @@ def _price_levels(stock_id: str, basic: dict, lookback: int = 60) -> dict:
             WHERE stock_id = :sid AND close > 0 AND high > 0
             ORDER BY trade_date DESC LIMIT :n
         """), {"sid": stock_id, "n": lookback}).fetchall()
-    highs = [float(r[0]) for r in rows if r[0] is not None]
-    lows = [float(r[1]) for r in rows if r[1] is not None]
+    highs = [x for x in (_num(r[0]) for r in rows) if x is not None]
+    lows = [x for x in (_num(r[1]) for r in rows) if x is not None]
 
     cand: list[tuple[str, float]] = []
     for label, v in (("5日線", basic.get("ma5")), ("月線MA20", basic.get("ma20")),
                      ("季線MA60", basic.get("ma60"))):
+        v = _num(v)       # NaN 是 truthy，不擋掉會被當成合法價位（比較又全 False → 靜默消失）
         if v:
-            cand.append((label, float(v)))
+            cand.append((label, v))
     if len(highs) >= 20:
         cand.append(("近20日高", max(highs[:20])))
         cand.append(("近20日低", min(lows[:20])))
@@ -353,19 +368,24 @@ def _build_synthesis_prompt(stock_id: str, basic: dict, trend: dict, rev_yoy, re
         else:
             lines.append("AI選股系統：⚠️目前不在每日選股候選池內（未通過流動性/RSI/趨勢等基本篩選門檻）——代表這檔不符合系統的進場條件")
     tr = []
-    rs = trend.get("rs20")
+    rs = _num(trend.get("rs20"))
     if rs is not None:
         # 2026-07-22 修正措辭誤導：舊寫法「全市場第1百分位」會被讀成「第一名=最強」，
         # 但rs20=0.0124其實是「贏過全市場1%的股票＝最弱」。改成明講方向。
         rs_pct = rs * 100
         strength = "極弱" if rs_pct < 20 else ("偏弱" if rs_pct < 40 else ("中等" if rs_pct < 60 else ("偏強" if rs_pct < 80 else "極強")))
         tr.append(f"相對強度RS20：贏過全市場{rs_pct:.0f}%的股票（0=最弱,100=最強,此股屬{strength}）")
-    if trend.get("stack_days"):
-        tr.append(f"多頭排列(MA5>MA20>MA60)連續{trend['stack_days']:.0f}日")
+    else:
+        # NaN/缺值不可硬印（會變成「贏過nan%」，且NaN比較全False會誤判成最強）
+        tr.append("相對強度RS20：資料不足（不可據此論斷強弱）")
+    _sd = _num(trend.get("stack_days"))
+    if _sd:
+        tr.append(f"多頭排列(MA5>MA20>MA60)連續{_sd:.0f}日")
     else:
         tr.append("⚠️目前非多頭排列（MA5>MA20>MA60不成立，趨勢結構未站穩）")
-    if rev_yoy is not None:
-        tr.append(f"月營收年增{rev_yoy:+.1f}%")
+    _ry = _num(rev_yoy)
+    if _ry is not None:
+        tr.append(f"月營收年增{_ry:+.1f}%")
     lines.append("趨勢/基本面：" + "｜".join(tr))
 
     lines.append(f"大盤位階：{'多頭' if regime['bull'] else '空頭'}"

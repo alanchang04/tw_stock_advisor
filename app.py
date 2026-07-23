@@ -1530,25 +1530,40 @@ elif page == "🔎 個股分析":
                     unsafe_allow_html=True)
         _pl, _sum = _sa_stage("stock_context")
         basic, trend, rev_yoy = _pl.get("basic", {}), _pl.get("trend", {}), _pl.get("rev_yoy")
+        # NaN 防呆（2026-07-22 線上實錘）：資料不足時 rs20/stack_days/rev_yoy 會是 NaN，
+        # 而 NaN 跟任何數字比較都是 False、且 NaN 是 truthy——結果最弱的國巨被顯示成
+        # 「相對強度 贏過nan%（極強）」（一路掉到最後的 else 變成「極強」）。統一先擋掉。
+        def _num(v):
+            try:
+                f = float(v)
+            except (TypeError, ValueError):
+                return None
+            return None if f != f else f      # NaN → None
+
         _chips = []
-        if trend.get("rs20") is not None:
-            # 2026-07-22：原本一律綠chip寫「RS X 百分位」，國巨rs20=0.0124會顯示成綠色
-            # 「RS 1 百分位」誤導成強勢。改成標強弱+依強弱給色（弱給橘色警示）。
-            # 變數名不可用 _st！那是外層存 stages 的字典（_st = _result["stages"]），
-            # 命名撞到會把它蓋成字串，後面 _sa_stage() 的 _st.get() 直接 AttributeError
-            # 炸掉整頁——2026-07-22 上線後實際踩到過。
-            _rs = trend["rs20"] * 100
+        # 變數名不可用 _st！那是外層存 stages 的字典（_st = _result["stages"]），
+        # 命名撞到會把它蓋成字串，後面 _sa_stage() 的 _st.get() 直接 AttributeError
+        # 炸掉整頁——2026-07-22 上線後實際踩到過。
+        _rs_raw = _num(trend.get("rs20"))
+        if _rs_raw is not None:
+            # 原本一律綠chip寫「RS X 百分位」，國巨rs20=0.0124會顯示成綠色「RS 1 百分位」
+            # 誤導成強勢。改成標強弱+依強弱給色（弱給橘色警示）。
+            _rs = _rs_raw * 100
             _rs_label = "極弱" if _rs < 20 else ("偏弱" if _rs < 40 else ("中等" if _rs < 60 else ("偏強" if _rs < 80 else "極強")))
             _rs_cls = "g" if _rs >= 60 else ("o" if _rs < 40 else "")
             _chips.append(f"<span class='dt-chip {_rs_cls}'>相對強度 贏過{_rs:.0f}%（{_rs_label}）</span>")
-        if trend.get("stack_days"):
-            _chips.append(f"<span class='dt-chip'>多頭排列 {trend['stack_days']:.0f} 日</span>")
+        else:
+            _chips.append("<span class='dt-chip'>相對強度 資料不足</span>")
+        _sd = _num(trend.get("stack_days"))
+        if _sd:
+            _chips.append(f"<span class='dt-chip'>多頭排列 {_sd:.0f} 日</span>")
         else:
             _chips.append("<span class='dt-chip o'>非多頭排列</span>")
-        if rev_yoy is not None:
-            _chips.append(f"<span class='dt-chip'>營收 {rev_yoy:+.0f}%</span>")
+        _ry = _num(rev_yoy)
+        if _ry is not None:
+            _chips.append(f"<span class='dt-chip'>營收 {_ry:+.0f}%</span>")
         # 乖離月線：跌破月線一定幅度＝接刀警示
-        _c, _m20 = basic.get("close"), basic.get("ma20")
+        _c, _m20 = _num(basic.get("close")), _num(basic.get("ma20"))
         _dev = ((_c - _m20) / _m20 * 100) if (_c and _m20) else None
         _dev_html = ""
         if _dev is not None:
@@ -1620,8 +1635,16 @@ elif page == "🔎 個股分析":
                         f"{_dt_esc(_parsed.get('summary'))}</div>", unsafe_allow_html=True)
 
             # 關鍵價位（程式算好的支撐/壓力，權威數字；LLM的key_levels/invalidation當解讀）
+            # 2026-07-22：這段原本「沒資料就靜默不顯示」，結果雲端跑到舊版分析引擎時
+            # 整塊憑空消失、無從判斷原因。改成缺資料時明講，讓問題可診斷。
             _pl_lv, _ = _sa_stage("price_levels")
-            if _pl_lv.get("ok"):
+            if not _pl_lv:
+                st.markdown(_dt_card(
+                    "dt-warn", "📏", "關鍵價位：這份結果是舊版分析引擎產生的",
+                    "本次結果沒有 price_levels 段落。若剛更新過程式碼，Streamlit 只會重讀 app.py，"
+                    "已載入的 agent 模組不會自動更新——請到右下角 <b>Manage app → Reboot app</b> "
+                    "完整重啟，再重新按「開始分析」。"), unsafe_allow_html=True)
+            elif _pl_lv.get("ok"):
                 def _lv_line(items, arrow):
                     return "<br>".join(
                         f"{arrow} <b>{it['price']:.2f}</b>（{it['dist_pct']:+.1f}%）"
