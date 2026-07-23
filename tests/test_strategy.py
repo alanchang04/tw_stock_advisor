@@ -408,3 +408,63 @@ def test_score_rewards_etf_accum_count_capped():
     s = score_candidates(df, cfg(w_etf_accum=1.0))
     assert s.iloc[1] > s.iloc[0]
     assert s.iloc[2] == s.iloc[1] * 2   # 5檔封頂=2檔滿分，剛好是1檔的兩倍
+
+
+# ── ICIR 加權標準化合成（§5決策1，2026-07-23 A/B後不採用，但程式保留為 opt-in）──
+def _icir_cfg(**kw):
+    from agent.strategy import STRATEGY
+    return {**STRATEGY, "score_mode": "icir", **kw}
+
+
+def _icir_df(**cols):
+    base = dict(stock_id=["1111", "2222", "3333"],
+                signal_ma_cross=[0, 0, 0], signal_breakout=[0, 0, 0],
+                macd_hist=[0.0, 0.0, 0.0], inst_net=[0, 0, 0],
+                foreign_net=[0, 0, 0], rsi14=[60, 60, 60])
+    base.update(cols)
+    return pd.DataFrame(base)
+
+
+def test_default_score_mode_is_manual_not_icir():
+    """A/B 沒勝出 → 預設必須維持手調權重，這條防止不小心把預設改掉。"""
+    from agent.strategy import STRATEGY
+    assert STRATEGY.get("score_mode") == "manual"
+
+
+def test_icir_mode_keeps_magnitude_unlike_binary_flags():
+    """現行手調版把 rev_yoy 二元化(>0/>20%)，+555% 與 +21% 同分；ICIR 版應區分得出來。"""
+    from agent.strategy import score_candidates
+    df = _icir_df(rev_yoy=[21.0, 555.0, 25.0])
+    manual = score_candidates(df, cfg(w_rev_yoy=3.0, w_rev_accel=1.0))
+    assert manual.iloc[0] == manual.iloc[1]          # 二元旗標：兩者同分（就是被質疑的點）
+    icir = score_candidates(df, _icir_cfg())
+    assert icir.iloc[1] > icir.iloc[0]               # ICIR版：量級有反映出來
+
+
+def test_icir_negative_icir_factors_get_zero_weight():
+    """rs20/mom60 的 ICIR 在 h20 是負的 → 權重應為 0，分數不受它們影響。"""
+    from agent.strategy import score_candidates
+    a = score_candidates(_icir_df(rs20=[0.99, 0.01, 0.5], mom60=[3.0, -3.0, 0.0]), _icir_cfg())
+    b = score_candidates(_icir_df(rs20=[0.01, 0.99, 0.5], mom60=[-3.0, 3.0, 0.0]), _icir_cfg())
+    assert list(a.round(6)) == list(b.round(6))      # 把兩者對調，分數完全不變
+
+
+def test_icir_rank_norm_is_outlier_robust():
+    """排序標準化：極端值只佔一個名次，不會像原始z-score那樣主導尺度。"""
+    from agent.strategy import _rank_norm
+    s = _rank_norm(pd.Series([1.0, 2.0, 3.0, 1_000_000.0]))
+    assert s.max() <= 1.0 and s.min() > 0
+    assert s.iloc[3] > s.iloc[2] > s.iloc[1]         # 順序保留
+    assert s.iloc[2] - s.iloc[1] == s.iloc[3] - s.iloc[2]   # 間距均勻，不被離群值撐開
+
+
+def test_icir_missing_column_is_skipped_not_crash():
+    from agent.strategy import score_candidates
+    s = score_candidates(_icir_df(), _icir_cfg())    # 完全沒有因子欄位
+    assert len(s) == 3 and s.notna().all()
+
+
+def test_icir_unknown_horizon_returns_zero_scores():
+    from agent.strategy import score_candidates
+    s = score_candidates(_icir_df(rev_yoy=[1.0, 2.0, 3.0]), _icir_cfg(icir_horizon=999))
+    assert (s == 0).all()

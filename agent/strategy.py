@@ -58,6 +58,30 @@ STRATEGY = {
                              # 驗證的C組是0.8，之前誤留1.5，數字對不上見exit_rule_ablation重測）
     "w_invest_streak": 2.5, # 投信連續買超（含量體門檻）——「買氣」升權，追大戶的錢
 
+    # ── 評分模式（SPEC_QUANT_UPGRADE.md §5 決策1，2026-07-23）──
+    # "manual"＝上面那組手調 w_xxx（現行預設）
+    # "icir"  ＝ICIR加權 × 橫斷面排序標準化（見 score_candidates_icir）
+    # ⚠️ 改預設前必須先過 10 年 A/B（scripts/backtest_ab_icir.py），照 P0~P3 的紀律。
+    "score_mode": "manual",
+    "icir_horizon": 20,          # 用哪個持有天數的 ICIR 當權重（現行平均持有約15.5天）
+    # 下面的數字直接來自 P1 的 10 年因子研究（data/research/factor_report.json），
+    # 不是手填的。要更新就重跑 scripts/run_factor_report.py 再抄過來。
+    # 註：rs20/mom60 在 h10~h20 的 ICIR 是「負的」（追高反而扣分），故權重為 0。
+    "icir_weights": {
+        "5":  {"rs20": -0.1851, "stack_days": 0.0702, "mom60": -0.1143,
+               "invest_streak": 0.3445, "invest_new_entry": 0.4286,
+               "foreign_net": 0.4169, "rev_yoy": 0.3375},
+        "10": {"rs20": -0.1599, "stack_days": 0.1109, "mom60": -0.0805,
+               "invest_streak": 0.3617, "invest_new_entry": 0.4225,
+               "foreign_net": 0.3241, "rev_yoy": 0.4069},
+        "20": {"rs20": -0.1608, "stack_days": 0.1476, "mom60": -0.0406,
+               "invest_streak": 0.3143, "invest_new_entry": 0.3697,
+               "foreign_net": 0.1675, "rev_yoy": 0.4231},
+        "60": {"rs20": 0.0961, "stack_days": 0.4693, "mom60": 0.2190,
+               "invest_streak": 0.3166, "invest_new_entry": 0.3398,
+               "foreign_net": 0.0167, "rev_yoy": 0.6033},
+    },
+
     # ── 2026-07-15：中小型股×投信剛開始買（使用者要求）──
     "w_invest_new_entry": 2.5,   # 投信新進場（連買1~2日+當日量體達標，P1：短中期最強因子之一，從2.0升權）——跟上面的
                                   # w_invest_streak方向相反，這裡抓「剛開始買」不是「已經買很多天」
@@ -432,6 +456,55 @@ def apply_liquidity_gate(df: pd.DataFrame, cfg: dict = STRATEGY) -> pd.DataFrame
 # ══════════════════════════════════════════════════════════════════
 #  進場評分
 # ══════════════════════════════════════════════════════════════════
+def _rank_norm(s: pd.Series) -> pd.Series:
+    """橫斷面排序標準化 → 0~1（缺值填 0.5＝中性，不獎不罰）。
+
+    為什麼用排序而不是原始 z-score：我們量 IC 用的是 Spearman（排序相關），
+    標準化方式跟量測方式一致才合理；而且台股因子有肥尾（實例：月營收年增 +555%），
+    原始 z-score 會被極端值主導，一檔怪股就能吃掉整個分數尺度。
+    """
+    v = pd.to_numeric(s, errors="coerce")
+    if v.notna().sum() < 2:
+        return pd.Series(0.5, index=s.index)
+    return v.rank(pct=True).fillna(0.5)
+
+
+def score_candidates_icir(df: pd.DataFrame, cfg: dict = STRATEGY) -> pd.Series:
+    """
+    ICIR 加權的標準化合成分數（SPEC_QUANT_UPGRADE.md §5 決策1，2026-07-23 實作）。
+
+    跟現行手調權重版（score_candidates）的兩個關鍵差異：
+    1. **權重由 ICIR 決定，不是人挑的**：權重 ∝ 該因子在目標持有期的 ICIR
+       （來自 P1 的 10 年因子研究 data/research/factor_report.json），ICIR ≤ 0 的
+       因子權重為 0（rs20/mom60 實測是負的，本來就已歸零）。
+    2. **保留量級資訊**：現行版把最強的因子做成二元旗標——rev_yoy(ICIR 0.42，最強)
+       只用 `>0` 和 `>20%` 兩個 0/1 flag，等於「營收年增 +555% 跟 +21% 拿一樣的分」；
+       foreign_buy、invest_new_entry 也都是二元。這裡改用橫斷面排序標準化，把
+       IC 研究說有預測力的量級差異真的用進去。
+
+    ⚠️ 這是 opt-in（cfg["score_mode"]=="icir" 才啟用），預設仍走手調權重版——
+    必須先過 10 年 A/B 驗證勝出才談改預設，照 P0~P3 一路的紀律。
+    """
+    horizon = str(cfg.get("icir_horizon", 20))
+    table = (cfg.get("icir_weights") or {}).get(horizon) or {}
+    # 只留正 ICIR 的因子；權重正規化成總和 1，讓分數尺度與因子數無關
+    pos = {k: v for k, v in table.items() if v and v > 0}
+    total = sum(pos.values())
+    if not total:
+        return pd.Series(0.0, index=df.index)
+
+    s = pd.Series(0.0, index=df.index)
+    for col, icir in pos.items():
+        if col not in df.columns:
+            continue
+        w = icir / total
+        if col == "invest_new_entry":            # 本來就是布林事件旗標，直接用
+            s += df[col].fillna(False).astype(float) * w
+        else:
+            s += _rank_norm(df[col]) * w
+    return s
+
+
 def score_candidates(df: pd.DataFrame, cfg: dict = STRATEGY) -> pd.Series:
     """
     輸入：含 signal_ma_cross, signal_breakout, macd_hist, inst_net,
@@ -439,12 +512,17 @@ def score_candidates(df: pd.DataFrame, cfg: dict = STRATEGY) -> pd.Series:
           invest_streak 為選配，有欄位才計分）。
     輸出：每列的分數 Series。
 
+    cfg["score_mode"]=="icir" 時改走 score_candidates_icir()（ICIR加權標準化合成）。
+
     2026-07-09 選股重構：新增「趨勢」（相對強度 rs20、多頭排列持續 stack_days）
     與「題材代理」（投信連買 invest_streak）三個可回測因子，用來取代原本主導
     選股、卻只認「今天剛發生」的單日技術面 event flags（w_ma_cross/w_breakout）。
     所有新因子與降權都由 cfg 權重控制，STRATEGY 預設維持舊值以免影響尚未升級的
     即時路徑；實驗用的 cfg_trend/cfg_flow 才把新因子開起來、把 event flags 降為 0。
     """
+    if cfg.get("score_mode") == "icir":
+        return score_candidates_icir(df, cfg)
+
     s = pd.Series(0.0, index=df.index)
     # ── 技術面單日事件旗標（選股重構後在新 cfg 中降權為 0，只保留給進出場/舊設定）──
     s += df["signal_ma_cross"].clip(0, 1).astype(float) * cfg.get("w_ma_cross", 0)
