@@ -122,30 +122,55 @@ def fetch_daily_prices(
     return df[[c for c in cols if c in df.columns]]
 
 
+def _records_with_none(df: pd.DataFrame) -> list[dict]:
+    """DataFrame → list[dict]，NaN/NaT 一律轉成 None（DB NULL）。
+
+    pandas 陷阱（2026-07-23 被測試抓到的真 bug）：`df.where(pd.notnull(df), None)`
+    在 float 欄位上會把 None 又轉回 NaN，因為欄位 dtype 仍是 float64。舊的逐列寫法
+    剛好沒事，是因為單列 Series 是 object dtype、None 留得住；改成
+    `to_dict("records")` 後各欄保有原 dtype，NaN 就會被當成合法數值寫進 DB
+    （實測寫進去變成 Decimal('NaN')）。先轉 object 再填 None 才正確。
+    """
+    if df.empty:
+        return []
+    return df.astype(object).where(pd.notnull(df), None).to_dict("records")
+
+
 def upsert_daily_prices(df: pd.DataFrame):
+    """
+    2026-07-23 效能修正：原本 `for row in df.iterrows(): session.execute(...)`，
+    等於「一列一次 DB 往返」。實測 Neon 往返延遲約 122ms，全市場約 1,950 檔
+    ＝ 1,950 次往返 ≈ 230 秒；加上法人表同樣寫法，光寫入就吃掉約 470 秒——
+    這正是 data_ingest 平均 528 秒（佔全流程 68%）的主因（決策軌跡實測：
+    資料已是最新、backfill 空跑那次 data_ingest 只要 63 秒，其餘 650~900 秒都在這）。
+    改用 executemany 批次寫入（同 technical.py 既有作法），1 次往返取代 ~1,950 次。
+    """
     if df.empty:
         return
     # 把 inf / -inf / NaN 換成 None（DB NULL），避免 numeric overflow
     df = df.replace([float('inf'), float('-inf')], pd.NA)
-    df = df.where(pd.notnull(df), None)
+    cols = ["stock_id", "trade_date", "open", "high", "low", "close",
+            "volume", "turnover", "change_pct"]
+    rows = _records_with_none(df[[c for c in cols if c in df.columns]])
+    if not rows:
+        return
     with get_session() as session:
-        for _, row in df.iterrows():
-            session.execute(text("""
-                INSERT INTO daily_prices
-                    (stock_id, trade_date, open, high, low, close,
-                     volume, turnover, change_pct)
-                VALUES
-                    (:stock_id, :trade_date, :open, :high, :low, :close,
-                     :volume, :turnover, :change_pct)
-                ON CONFLICT (stock_id, trade_date) DO UPDATE SET
-                    open       = EXCLUDED.open,
-                    high       = EXCLUDED.high,
-                    low        = EXCLUDED.low,
-                    close      = EXCLUDED.close,
-                    volume     = EXCLUDED.volume,
-                    turnover   = EXCLUDED.turnover,
-                    change_pct = EXCLUDED.change_pct
-            """), row.to_dict())
+        session.execute(text("""
+            INSERT INTO daily_prices
+                (stock_id, trade_date, open, high, low, close,
+                 volume, turnover, change_pct)
+            VALUES
+                (:stock_id, :trade_date, :open, :high, :low, :close,
+                 :volume, :turnover, :change_pct)
+            ON CONFLICT (stock_id, trade_date) DO UPDATE SET
+                open       = EXCLUDED.open,
+                high       = EXCLUDED.high,
+                low        = EXCLUDED.low,
+                close      = EXCLUDED.close,
+                volume     = EXCLUDED.volume,
+                turnover   = EXCLUDED.turnover,
+                change_pct = EXCLUDED.change_pct
+        """), rows)
 
 
 # ── 3. 三大法人籌碼 ──────────────────────────────────────────────
@@ -203,30 +228,33 @@ def fetch_institutional(
 
 
 def upsert_institutional(df: pd.DataFrame):
+    """批次寫入（理由同 upsert_daily_prices：原本一列一次往返，是 data_ingest 慢的主因）。"""
     if df.empty:
         return
     cols = ["stock_id","trade_date","foreign_buy","foreign_sell","foreign_net",
             "invest_buy","invest_sell","invest_net",
             "dealer_buy","dealer_sell","dealer_net","total_net"]
+    rows = _records_with_none(df[cols])
+    if not rows:
+        return
     with get_session() as session:
-        for _, row in df[cols].iterrows():
-            session.execute(text("""
-                INSERT INTO institutional_trading
-                    (stock_id, trade_date,
-                     foreign_buy, foreign_sell, foreign_net,
-                     invest_buy,  invest_sell,  invest_net,
-                     dealer_buy,  dealer_sell,  dealer_net, total_net)
-                VALUES
-                    (:stock_id, :trade_date,
-                     :foreign_buy, :foreign_sell, :foreign_net,
-                     :invest_buy,  :invest_sell,  :invest_net,
-                     :dealer_buy,  :dealer_sell,  :dealer_net, :total_net)
-                ON CONFLICT (stock_id, trade_date) DO UPDATE SET
-                    foreign_net = EXCLUDED.foreign_net,
-                    invest_net  = EXCLUDED.invest_net,
-                    dealer_net  = EXCLUDED.dealer_net,
-                    total_net   = EXCLUDED.total_net
-            """), row.to_dict())
+        session.execute(text("""
+            INSERT INTO institutional_trading
+                (stock_id, trade_date,
+                 foreign_buy, foreign_sell, foreign_net,
+                 invest_buy,  invest_sell,  invest_net,
+                 dealer_buy,  dealer_sell,  dealer_net, total_net)
+            VALUES
+                (:stock_id, :trade_date,
+                 :foreign_buy, :foreign_sell, :foreign_net,
+                 :invest_buy,  :invest_sell,  :invest_net,
+                 :dealer_buy,  :dealer_sell,  :dealer_net, :total_net)
+            ON CONFLICT (stock_id, trade_date) DO UPDATE SET
+                foreign_net = EXCLUDED.foreign_net,
+                invest_net  = EXCLUDED.invest_net,
+                dealer_net  = EXCLUDED.dealer_net,
+                total_net   = EXCLUDED.total_net
+        """), rows)
 
 
 # ── 4. API 用量查詢 ──────────────────────────────────────────────
