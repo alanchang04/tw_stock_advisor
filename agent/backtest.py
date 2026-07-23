@@ -275,6 +275,17 @@ def _precompute_factors(data: dict, cfg: dict = STRATEGY) -> None:
     # 券資比（融券餘額/融資餘額，2026-07-23）：5個融資融券衍生因子裡唯一通過 IC 檢驗的
     # （h20 |ICIR| 0.252、h60 0.372，優於現行仍在用的 foreign_buy/stack_days；IC 為負
     # ＝低券資比後續報酬較好）。資料缺就不建這個矩陣，w_short_ratio 自然不生效。
+    # 波段進場型態（2026-07-23，練習軌用；cfg["require_swing_setup"]=True 時當進場濾網）
+    try:
+        from agent.strategy import compute_swing_setup
+        tech_p = lambda c: tech.pivot_table(index="trade_date", columns="stock_id", values=c)
+        px_p = lambda c: data["prices"].pivot_table(index="trade_date", columns="stock_id", values=c)
+        data["_swing_setup"] = compute_swing_setup(
+            px_p("open"), px_p("high"), px_p("low"), closes, px_p("volume"),
+            tech_p("ma20"), tech_p("ma60"), cfg.get("swing_setup"))
+    except Exception as e:
+        logger.warning(f"波段型態矩陣計算失敗（require_swing_setup 將無效）: {e}")
+
     margin = data.get("margin")
     if margin is not None and not margin.empty:
         m_bal = margin.pivot_table(index="trade_date", columns="stock_id", values="margin_balance")
@@ -381,6 +392,16 @@ def _candidates_asof(data, d, industry_codes, top_n=5, cfg=None):
         mat = data.get(key)
         if mat is not None and d in mat.index:
             df[col] = df["stock_id"].map(mat.loc[d])
+
+    # 波段進場型態濾網（2026-07-23）：cfg["require_swing_setup"]=True 時，只留「今天剛好
+    # 走到進場位置」的股票。這是練習軌的邏輯，拿來做「跟AI主軌可比的組合回測」用。
+    if cfg.get("require_swing_setup"):
+        sw = data.get("_swing_setup")
+        if sw is not None and d in sw.index:
+            row = sw.loc[d]
+            df = df[df["stock_id"].map(lambda s: bool(row.get(s, False)))]
+            if df.empty:
+                return []
 
     # 成交金額（流動性/抗操控）門檻：舊資料（無 turnover 欄位，如老師歷史檔）全 NaN 時優雅跳過。
     # 2026-07-15 起改用 apply_liquidity_gate（OR邏輯：成交金額達標 OR 投信新進場+較低下限）；
