@@ -84,6 +84,43 @@ def test_row_count_anomaly_empty_baseline_noop():
     assert qg.detect_row_count_anomaly(100, []) is None
 
 
+# ── 純函式：歷史破洞掃描（2026-07-23 新增）──────────────────────────
+# 背景：detect_row_count_anomaly 只檢查「最新一天」，所以 quality_gate 上線(2026-07-14)
+# 之前就存在的缺口永遠不會被發現。實例：2026-06-23 只有 863 筆（正常約1,950，整個上市
+# 市場沒抓到），剛好是 rs20 往前推20交易日的基準日 → 全市場56%股票 rs20=NaN。
+def _counts(*pairs):
+    return [(date(2026, 6, d), n) for d, n in pairs]
+
+
+def test_history_row_gaps_finds_old_hole():
+    counts = _counts((16, 1950), (17, 1948), (18, 1952), (22, 1957),
+                     (23, 863), (24, 1948), (25, 1947), (26, 1950))
+    gaps = qg.detect_history_row_gaps(counts)
+    assert len(gaps) == 1
+    assert "2026-06-23" in gaps[0]["actual"]
+    assert gaps[0]["severity"] == "error"        # 不到中位數一半＝error
+    assert gaps[0]["check_name"] == "history_row_gap"
+
+
+def test_history_row_gaps_uses_median_not_mean():
+    """窗口內有多個破洞時，平均會被拉低而掩蓋問題；中位數才抓得到。"""
+    counts = _counts((16, 1950), (17, 1948), (18, 100), (22, 100),
+                     (23, 100), (24, 1948), (25, 1947), (26, 1950))
+    gaps = qg.detect_history_row_gaps(counts)
+    assert len(gaps) == 3                        # 三個洞都要抓到
+
+
+def test_history_row_gaps_clean_window_returns_nothing():
+    counts = _counts((16, 1950), (17, 1948), (18, 1952), (22, 1957),
+                     (23, 1949), (24, 1948), (25, 1947), (26, 1950))
+    assert qg.detect_history_row_gaps(counts) == []
+
+
+def test_history_row_gaps_needs_minimum_sample():
+    # 資料太少時不下判斷（避免剛建置時整片誤報）
+    assert qg.detect_history_row_gaps(_counts((16, 1950), (17, 100))) == []
+
+
 # ── DB 整合（真實 schema，交易內回滾，不寫入正式資料）──────────────
 @pytest.fixture
 def tx(monkeypatch):

@@ -29,6 +29,7 @@ from database.connection import get_session
 
 PRICE_JUMP_THRESHOLD = 0.20     # 與 agent/strategy.py SPLIT_JUMP_THRESHOLD 同一門檻
 ROW_COUNT_DROP_RATIO = 0.85     # 當日筆數 < 近期均值 85% 視為異常
+HISTORY_GAP_WINDOW_DAYS = 120   # 歷史破洞回頭掃描的交易日數（涵蓋季線/rs20 等回看範圍）
 SCORECARD_WINDOW_DAYS = 30
 SCORECARD_CAP = 10              # 近30日觸發達此次數，信心分數探底至0
 
@@ -140,6 +141,43 @@ def detect_row_count_anomaly(today_count: int, baseline_counts: list[int],
     }
 
 
+def detect_history_row_gaps(counts: list[tuple], ratio: float = ROW_COUNT_DROP_RATIO,
+                            source: str = "daily_prices") -> list[dict]:
+    """
+    掃描整個窗口內「每一天」，找出筆數明顯偏低的歷史破洞。counts 為 [(trade_date, n), ...]。
+
+    2026-07-23 新增，補一個結構性缺口：detect_row_count_anomaly 只檢查「最新一天」
+    （run_quality_checks 取 counts.iloc[-1]），等於只往前看、一天看一次。任何
+    「防護網上線前就存在的洞」或「當晚排程沒跑成功那天的洞」都永遠不會被發現——
+    實例：2026-06-23 只有 863 筆（正常約 1,950），而 quality_gate 是 2026-07-14 才
+    上線，所以那天從來沒被檢查過；它又剛好是 rs20 往前推 20 個交易日的基準日，
+    造成全市場 56% 股票 rs20=NaN，一路影響到個股分析顯示「贏過nan%」。
+
+    基準用中位數不用平均：窗口裡若已有破洞，平均會被拉低而掩蓋問題。
+    """
+    valid = [(d, int(n)) for d, n in counts if n is not None]
+    if len(valid) < 5:
+        return []
+    ns = sorted(n for _, n in valid)
+    median = ns[len(ns) // 2]
+    if median <= 0:
+        return []
+    threshold = median * ratio
+    out = []
+    for d, n in valid:
+        if n < threshold:
+            out.append({
+                "check_name": "history_row_gap", "source": source,
+                "stock_id": None, "field": "row_count",
+                "expected": f">= {threshold:.0f}（窗口中位數 {median} 的 {ratio*100:.0f}%）",
+                "actual": f"{n}（{d}）",
+                "severity": "error" if n < median * 0.5 else "warn",
+                "note": f"歷史資料缺口：{d} 僅 {n} 筆，該日資料不完整，"
+                        f"會讓需要跨日比較的因子（如 rs20 需 20 日前收盤）算出 NaN。建議回補該日。",
+            })
+    return out
+
+
 # ══════════════════════════════════════════════════════════════════
 #  DB 查詢層：組資料 → 呼叫規則檢查 → 寫入 discrepancy_log
 # ══════════════════════════════════════════════════════════════════
@@ -162,6 +200,13 @@ def run_quality_checks() -> list[dict]:
                 SELECT DISTINCT trade_date FROM daily_prices ORDER BY trade_date DESC LIMIT 21) d)
             GROUP BY trade_date ORDER BY trade_date
         """), s.bind)
+        # 歷史破洞掃描用較長窗口（涵蓋 rs20/季線等因子真正會回看的範圍）
+        hist_counts = pd.read_sql(text("""
+            SELECT trade_date, COUNT(*) AS n FROM daily_prices
+            WHERE trade_date >= (SELECT MIN(trade_date) FROM (
+                SELECT DISTINCT trade_date FROM daily_prices ORDER BY trade_date DESC LIMIT :w) d)
+            GROUP BY trade_date ORDER BY trade_date
+        """), s.bind, params={"w": HISTORY_GAP_WINDOW_DAYS})
 
     discs: list[dict] = []
     discs += detect_price_discontinuity(px)
@@ -172,6 +217,18 @@ def run_quality_checks() -> list[dict]:
         anomaly = detect_row_count_anomaly(int(counts.iloc[-1]["n"]), counts.iloc[:-1]["n"].tolist())
         if anomaly:
             discs.append(anomaly)
+    # 歷史破洞：每天都會掃到同一個舊缺口，靠 actual 欄（含日期）去重，
+    # 否則 discrepancy_log 會被同一天的缺口洗版、也會把來源信心分數壓到 0
+    hist = detect_history_row_gaps(list(hist_counts.itertuples(index=False, name=None)))
+    if hist:
+        with get_session() as s:
+            seen = {r[0] for r in s.execute(text("""
+                SELECT actual FROM discrepancy_log WHERE check_name = 'history_row_gap'
+            """)).fetchall()}
+        new_hist = [d for d in hist if d["actual"] not in seen]
+        discs += new_hist
+        if len(hist) > len(new_hist):
+            logger.info(f"🧪 歷史資料缺口 {len(hist)} 天（其中 {len(hist)-len(new_hist)} 天先前已記錄，不重複寫入）")
 
     if discs:
         with get_session() as s:
