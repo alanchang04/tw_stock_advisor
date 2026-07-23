@@ -1534,10 +1534,13 @@ elif page == "🔎 個股分析":
         if trend.get("rs20") is not None:
             # 2026-07-22：原本一律綠chip寫「RS X 百分位」，國巨rs20=0.0124會顯示成綠色
             # 「RS 1 百分位」誤導成強勢。改成標強弱+依強弱給色（弱給橘色警示）。
+            # 變數名不可用 _st！那是外層存 stages 的字典（_st = _result["stages"]），
+            # 命名撞到會把它蓋成字串，後面 _sa_stage() 的 _st.get() 直接 AttributeError
+            # 炸掉整頁——2026-07-22 上線後實際踩到過。
             _rs = trend["rs20"] * 100
-            _st = "極弱" if _rs < 20 else ("偏弱" if _rs < 40 else ("中等" if _rs < 60 else ("偏強" if _rs < 80 else "極強")))
-            _cls = "g" if _rs >= 60 else ("o" if _rs < 40 else "")
-            _chips.append(f"<span class='dt-chip {_cls}'>相對強度 贏過{_rs:.0f}%（{_st}）</span>")
+            _rs_label = "極弱" if _rs < 20 else ("偏弱" if _rs < 40 else ("中等" if _rs < 60 else ("偏強" if _rs < 80 else "極強")))
+            _rs_cls = "g" if _rs >= 60 else ("o" if _rs < 40 else "")
+            _chips.append(f"<span class='dt-chip {_rs_cls}'>相對強度 贏過{_rs:.0f}%（{_rs_label}）</span>")
         if trend.get("stack_days"):
             _chips.append(f"<span class='dt-chip'>多頭排列 {trend['stack_days']:.0f} 日</span>")
         else:
