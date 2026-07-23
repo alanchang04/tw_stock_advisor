@@ -63,6 +63,12 @@ def ensure_local_tables(conn: sqlite3.Connection):
             revenue REAL, mom_pct REAL, yoy_pct REAL,
             PRIMARY KEY (stock_id, year_month)
         );
+        CREATE TABLE IF NOT EXISTS margin_trading (
+            stock_id TEXT NOT NULL, trade_date TEXT NOT NULL,
+            margin_balance REAL, margin_change REAL,
+            short_balance REAL, short_change REAL,
+            PRIMARY KEY (stock_id, trade_date)
+        );
         CREATE TABLE IF NOT EXISTS backfill_progress (
             task TEXT PRIMARY KEY, last_date TEXT
         );
@@ -77,6 +83,7 @@ _PK_COLS = {
     "dividend_events": ("stock_id", "ex_date"),
     "delisted_stocks": ("stock_id",),
     "monthly_revenue": ("stock_id", "year_month"),
+    "margin_trading": ("stock_id", "trade_date"),
 }
 
 
