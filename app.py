@@ -1622,11 +1622,26 @@ elif page == "🔎 個股分析":
     with colD:
         st.markdown("<div class='dt-col-title'>🤖 AI 綜合判讀 <span class='dt-badge'>04</span></div>",
                     unsafe_allow_html=True)
-        _pl_s, _ = _sa_stage("synthesis")
+        _pl_s, _sum_s = _sa_stage("synthesis")
         _parsed = _pl_s.get("parsed")
         if not _parsed:
-            st.markdown(_dt_card("dt-bad", "❌", "AI 綜合判讀失敗",
-                                 "本次 LLM 輸出無法解析，上面幾段資料仍完整可參考"),
+            # 2026-07-23：原本不分青紅皂白都說「輸出無法解析」，但實際上多半是
+            # 「LLM 呼叫失敗」（金鑰/額度/網路），兩者處理方式完全不同。分開講清楚。
+            _errs = _pl_s.get("llm_errors") or []
+            _raw_s = _pl_s.get("raw")
+            if _raw_s:
+                _body_f = (f"LLM 有回應但輸出無法解析（長度 {len(_raw_s)} 字，可能被截斷）。"
+                           "上面幾段資料仍完整可參考，可再按一次「開始分析」重試。")
+            else:
+                _body_f = ("<b>LLM 呼叫失敗</b>（不是解析問題）——常見原因：API 金鑰未設定/失效、"
+                           "免費額度用盡、或網路連不到 Gemini。上面幾段資料仍完整可參考。")
+                if _errs:
+                    _body_f += "<div class='dt-num'>錯誤訊息：" + "<br>".join(
+                        _dt_esc(e) for e in _errs) + "</div>"
+                else:
+                    _body_f += ("<div class='dt-num'>（本次沒有留下錯誤訊息——若是舊版分析結果，"
+                                "請 Manage app → Reboot app 後重跑）</div>")
+            st.markdown(_dt_card("dt-bad", "❌", "AI 綜合判讀失敗", _body_f),
                         unsafe_allow_html=True)
         else:
             _verdict_icon = {"positive": "🟢", "neutral": "🟡", "negative": "🔴"}.get(_parsed.get("verdict"), "🟡")

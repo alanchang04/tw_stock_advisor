@@ -555,9 +555,17 @@ def analyze_stock(stock_id: str) -> dict:
             parsed = None
         grounding = _synthesis_grounding_flags(basic, trend, rev_yoy, inst, ai_score, parsed, levels) if parsed else []
         _sfx = f"（🔍 {len(grounding)} 句引用數字查無對應）" if grounding else ""
-        rec.summary = (f"判讀：{parsed.get('verdict')}｜{parsed.get('verdict_reason', '')}{_sfx}"
-                       if parsed else ("LLM 輸出無法解析" if raw else "LLM 呼叫失敗"))
-        rec.payload = {"raw": raw, "parsed": parsed, "grounding_flags": grounding}
+        # 失敗要分清楚是「呼叫失敗（API/金鑰/額度/網路）」還是「有回應但解析不出來」——
+        # 這兩種的處理方式完全不同，混用一句話會誤導（2026-07-23 線上實際踩到）
+        _llm_errs = list(getattr(rec, "llm_errors", []) or [])
+        if parsed:
+            rec.summary = f"判讀：{parsed.get('verdict')}｜{parsed.get('verdict_reason', '')}{_sfx}"
+        elif raw:
+            rec.summary = f"LLM 有回應但輸出無法解析（回應長度 {len(raw)} 字）"
+        else:
+            rec.summary = "LLM 呼叫失敗" + (f"：{_llm_errs[0]}" if _llm_errs else "（無錯誤訊息）")
+        rec.payload = {"raw": raw, "parsed": parsed, "grounding_flags": grounding,
+                       "llm_errors": _llm_errs}
         _record("synthesis", rec.summary, rec.payload,
                sources=None)
         stages["synthesis"]["model_calls"] = rec.model_calls

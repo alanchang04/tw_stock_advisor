@@ -102,6 +102,19 @@ class StageRec:
         self.model_calls = 0
         self.tokens_in = 0
         self.tokens_out = 0
+        # LLM 呼叫失敗的錯誤訊息（2026-07-23 新增）：原本 _ask() 把例外吞掉只寫 logger，
+        # DB 的 error_msg 只在「階段整個拋例外」時才有值，所以線上 LLM 呼叫失敗時
+        # payload/summary/error_msg 全都看不出原因，只知道 model_calls=2、tokens=0。
+        # 雲端實際踩到後補的：把錯誤留在這裡，stage() 結束時寫進 error_msg。
+        self.llm_errors: list[str] = []
+
+    def add_llm_error(self, err, calls: int = 1):
+        """LLM 呼叫失敗：照樣累計次數（額度有消耗），並保留錯誤訊息供診斷。"""
+        self.model_calls += calls
+        msg = f"{type(err).__name__}: {err}" if isinstance(err, BaseException) else str(err)
+        msg = msg[:300]
+        if msg not in self.llm_errors:
+            self.llm_errors.append(msg)
 
     def add_llm(self, usage=None, calls: int = 1):
         """累計 LLM 用量。usage 吃 litellm 的 response.usage（或同形狀 dict），拿不到就只記次數。"""
@@ -136,6 +149,10 @@ class ExecRun:
             raise                                  # 記錄完照樣往外丟，不吞例外
         finally:
             finished = datetime.now(timezone.utc)
+            # 階段本身沒拋例外，但裡面的 LLM 呼叫失敗過 → 也要把原因留進 error_msg，
+            # 否則線上只看得到 model_calls>0 而 tokens=0，查不出到底是額度、金鑰還是網路
+            if status == "ok" and rec.llm_errors:
+                err = ("LLM呼叫失敗: " + " | ".join(rec.llm_errors))[:400]
             try:
                 with get_session() as s:
                     s.execute(text("""

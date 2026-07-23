@@ -61,6 +61,34 @@ def test_add_llm_accepts_dict_and_none():
     assert rec.tokens_in == 100 and rec.tokens_out == 20
 
 
+# ── LLM 呼叫失敗要留下原因（2026-07-23：雲端呼叫失敗但 DB/UI 查不出原因）────
+def test_add_llm_error_records_message_and_counts_call():
+    rec = StageRec("s")
+    rec.add_llm_error(RuntimeError("429 quota exceeded"))
+    rec.add_llm_error(RuntimeError("429 quota exceeded"))   # 重複訊息只留一份
+    assert rec.model_calls == 2                             # 失敗照樣消耗額度，要記次數
+    assert len(rec.llm_errors) == 1
+    assert "RuntimeError" in rec.llm_errors[0]
+    assert "429" in rec.llm_errors[0]
+
+
+def test_llm_error_written_to_error_msg_even_when_stage_succeeds(tx):
+    """階段本身沒拋例外、但 LLM 呼叫失敗過 → error_msg 要有原因，否則線上無從診斷。"""
+    run = exec_log.ExecRun(kind="stock_analysis")
+    with run.stage("synthesis") as rec:
+        rec.add_llm_error(RuntimeError("API key not valid"))
+        rec.summary = "LLM 呼叫失敗"
+    row = tx.execute(text("""
+        SELECT status, error_msg, model_calls FROM execution_log
+        WHERE run_id = :r AND stage = 'synthesis'
+    """), {"r": run.run_id}).fetchone()
+    assert row is not None
+    assert row[0] == "ok"                    # 階段沒拋例外，狀態仍是 ok
+    assert "LLM呼叫失敗" in row[1]
+    assert "API key not valid" in row[1]
+    assert row[2] == 1
+
+
 # ── DB 整合（真實 schema，交易內回滾）─────────────────────────────
 @pytest.fixture
 def tx(monkeypatch):

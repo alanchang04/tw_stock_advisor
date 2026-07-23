@@ -100,8 +100,13 @@ def _ask(system: str, user: str, max_tokens: int = 900, rec=None,
                 return out
         except Exception as e:
             if rec is not None:
-                rec.add_llm(None)          # 失敗的呼叫也算一次（額度有消耗）
-            logger.warning(f"辯論呼叫失敗（{attempt+1}/2）: {str(e)[:100]}")
+                # 失敗的呼叫也算一次（額度有消耗），並保留錯誤訊息——原本只寫 logger，
+                # 線上（Streamlit Cloud）出事時 DB/UI 完全看不到原因，無從診斷
+                if hasattr(rec, "add_llm_error"):
+                    rec.add_llm_error(e)
+                else:
+                    rec.add_llm(None)
+            logger.warning(f"LLM 呼叫失敗（{attempt+1}/2）: {str(e)[:200]}")
             time.sleep(10)
     return None
 
