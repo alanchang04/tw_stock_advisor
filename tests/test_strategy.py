@@ -2,6 +2,8 @@
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from datetime import date, timedelta
+
 import pandas as pd
 import pytest
 
@@ -468,3 +470,35 @@ def test_icir_unknown_horizon_returns_zero_scores():
     from agent.strategy import score_candidates
     s = score_candidates(_icir_df(rev_yoy=[1.0, 2.0, 3.0]), _icir_cfg(icir_horizon=999))
     assert (s == 0).all()
+
+
+# ── 策略版本沿革 STRATEGY_ERAS（2026-07-23）──────────────────────────
+# 原本 🔄歷史績效頁寫死 STRATEGY_V2_DATE，策略改了好幾輪沒人更新，長期把舊策略的
+# 交易標成「現行策略績效」。改成清單後這幾條測試鎖住它的結構不被寫壞。
+def test_eras_sorted_newest_first_and_unique():
+    from agent.strategy import STRATEGY_ERAS
+    dates = [e["live_from"] for e in STRATEGY_ERAS]
+    assert dates == sorted(dates, reverse=True), "必須由新到舊排序（strategy_era_for 依賴這點）"
+    assert len(set(dates)) == len(dates), "生效日不可重複"
+    assert len({e["key"] for e in STRATEGY_ERAS}) == len(STRATEGY_ERAS)
+
+
+def test_every_era_has_required_fields():
+    from agent.strategy import STRATEGY_ERAS
+    for e in STRATEGY_ERAS:
+        assert e.get("label") and e.get("desc"), f"{e.get('key')} 缺 label/desc"
+        assert isinstance(e["live_from"], date)
+
+
+def test_strategy_era_for_picks_right_version():
+    from agent.strategy import STRATEGY_ERAS, strategy_era_for
+    cur, prev = STRATEGY_ERAS[0], STRATEGY_ERAS[1]
+    assert strategy_era_for(cur["live_from"])["key"] == cur["key"]
+    assert strategy_era_for(cur["live_from"] - timedelta(days=1))["key"] == prev["key"]
+    assert strategy_era_for(prev["live_from"])["key"] == prev["key"]
+
+
+def test_oldest_era_is_catch_all():
+    """最舊那筆要能接住任意早的日期，否則 strategy_era_for 會漏掉極早的交易。"""
+    from agent.strategy import strategy_era_for
+    assert strategy_era_for(date(2001, 1, 1)) is not None

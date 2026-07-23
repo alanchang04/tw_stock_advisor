@@ -786,27 +786,57 @@ elif page == "📉 個股走勢":
 elif page == "🔄 歷史績效":
     st.title("🔄 歷史績效")
 
-    # 策略版本過濾：2026-07-20 是最近一次策略大改的定案日（P1因子IC重新配權+出場規則
-    # 消融+熊市擋新倉設為預設+族群曝險上限，見agent/strategy.py），也是「有熊市防護」
-    # 的真正分界線。2026-07-22修正：這裡原本切在07-05，那個日期之後、07-20之前進場的
-    # 交易用的其實是還沒防熊市的舊版策略（會一直買然後停損殺出），混進「新策略」績效
-    # 裡會讓現在這版看起來比實際更差——之前用07-05這個舊分界線是2026-07-04出場規則
-    # 改版時定的，後來策略又大改了好幾次，沒有跟著更新。
-    STRATEGY_V2_DATE = date(2026, 7, 20)
-    era = st.radio("評估範圍",
-                   [f"🆕 現行策略（{STRATEGY_V2_DATE} 後進場，含熊市擋新倉防護）",
-                    "📜 全部歷史（含舊策略，舊策略無熊市防護，僅供對照）"],
-                   horizontal=True)
+    # 2026-07-23：策略版本改讀 agent/strategy.py 的 STRATEGY_ERAS 清單，不再寫死日期。
+    # 原本寫死的 STRATEGY_V2_DATE 就是因為策略改了好幾輪沒人回頭更新，長期把舊策略的
+    # 交易標成「現行策略績效」。清單化之後，加新版本＝在 strategy.py 加一筆。
+    from agent.strategy import STRATEGY_ERAS
+
+    _cur = STRATEGY_ERAS[0]
+    _opts = [f"🆕 {_cur['label']}（{_cur['live_from']} 起進場）"] + \
+            [f"📁 {e['label']}（{e['live_from']} 起）" for e in STRATEGY_ERAS[1:]] + \
+            ["📜 全部歷史（含所有舊版，僅供對照）"]
+    era = st.radio("評估範圍", _opts, horizontal=True)
+
+    # 選到的版本 → 取進場日區間 [live_from, 下一版的 live_from)
+    _sel_idx = _opts.index(era)
+    _lo = _hi = None
+    if _sel_idx < len(STRATEGY_ERAS):
+        _lo = STRATEGY_ERAS[_sel_idx]["live_from"]
+        _hi = STRATEGY_ERAS[_sel_idx - 1]["live_from"] if _sel_idx > 0 else None
+        st.caption(f"📌 {STRATEGY_ERAS[_sel_idx]['desc']}")
 
     df = load_closed_positions()
-    if not df.empty and era.startswith("🆕"):
-        df = df[pd.to_datetime(df["進場日"]).dt.date >= STRATEGY_V2_DATE]
+    if not df.empty and _lo is not None:
+        _entry = pd.to_datetime(df["進場日"]).dt.date
+        df = df[_entry >= _lo] if _hi is None else df[(_entry >= _lo) & (_entry < _hi)]
+
+    # 新版剛上線時「已平倉」必然是空的（波段平均持有 3~4 週），但未實現損益有東西可看，
+    # 直接顯示「尚無資料」等於什麼都不給。這裡先把目前持倉的浮動損益攤出來。
+    _open = []
+    if _sel_idx == 0:
+        _open = [p for p in load_open_positions()
+                 if pd.to_datetime(p["進場日"]).date() >= _lo]
+        if _open:
+            _odf = pd.DataFrame(_open)
+            o1, o2, o3 = st.columns(3)
+            o1.metric("現行策略持倉", f"{len(_odf)} 檔")
+            o2.metric("未實現平均損益", f"{_odf['損益%'].mean():+.1f}%")
+            o3.metric("未實現損益$（估）", f"{_odf['損益$（估）'].sum():+,.0f}")
+            with st.expander("查看未實現明細", expanded=False):
+                st.dataframe(_odf[["股號", "名稱", "進場日", "成本", "現價", "損益%",
+                                   "損益$（估）", "持有(日)", "出場訊號"]],
+                             use_container_width=True, hide_index=True)
+        st.caption(f"⚠️ 樣本數警告：波段平均持有約 3~4 週，新版上線後要 1~2 個月才會有"
+                   f"第一批已平倉交易，累積到統計上能說話（30 筆以上）通常要數個月。"
+                   f"在那之前下面的數字只能當觀察，不足以判斷策略好壞。")
 
     if df.empty:
-        if era.startswith("🆕"):
-            st.info(f"新策略（{STRATEGY_V2_DATE} 後進場）尚無已平倉交易——這是正常的，"
-                    "波段平均持有約 3~4 週，觀察期需要一到兩個月累積樣本。"
-                    "可切「全部歷史」看舊策略對照組。")
+        if _lo is not None:
+            st.info(f"「{STRATEGY_ERAS[_sel_idx]['label']}」（{_lo} 起進場）尚無**已平倉**交易。"
+                    + ("上方為目前持倉的未實現損益。" if _open else
+                       ("此版目前也還沒有任何持倉（第一批訊號成交後才會出現）。"
+                        if _sel_idx == 0 else ""))
+                    + "可切「📜 全部歷史」看舊版對照。")
         else:
             st.info("尚無已平倉記錄")
         st.stop()
