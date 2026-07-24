@@ -824,7 +824,9 @@ def run_backtest(top_n=None, rebalance=5, cfg=None, data=None, quiet=False,
     })
     if not quiet:
         _report_roundtrip(tdf, bench, bench_0050, nav, m, m0050, cfg["capital"],
-                          sim_dates, top_n, rebalance, nav_0050=nav_0050)
+                          sim_dates, top_n, rebalance, nav_0050=nav_0050,
+                          market_close=(split_adjust(closes[mf_sid]).reindex(sim_dates)
+                                        if mf_sid in closes.columns else None))
     return tdf
 
 
@@ -863,7 +865,7 @@ EXPERIMENT_TRIALS = 58
 
 
 def _report_roundtrip(tdf, bench, bench_0050, nav, m, m0050, capital, sim_dates, top_n,
-                      rebalance, nav_0050=None):
+                      rebalance, nav_0050=None, market_close=None):
     rets = tdf["ret"]
     nets = tdf["net_ret"] if "net_ret" in tdf.columns else rets
     win = (rets > 0).mean()
@@ -925,6 +927,20 @@ def _report_roundtrip(tdf, bench, bench_0050, nav, m, m0050, capital, sim_dates,
         "=" * 66,
     ]
     print("\n".join(l for l in lines if l))
+
+    # SPEC §4.5：régime 切片納入回測輸出。分年對照證實策略在強多頭年全面落後、
+    # 熊市平盤年全面勝出，而一個 +328% 的總數字把這個結構完全藏起來。
+    try:
+        from research.regime_report import classify_regimes, regime_metrics
+        from research.regime_report import format_report as _reg_report
+        if market_close is not None:
+            _reg = classify_regimes(market_close)
+            _df = regime_metrics({d: float(v) for d, v in nav.items()}, _reg, trades=tdf,
+                                 nav_bench=({d: float(v) for d, v in nav_0050.items()}
+                                            if nav_0050 is not None else None))
+            print(_reg_report(_df))
+    except Exception as e:
+        logger.warning(f"régime 切片計算失敗（不影響回測結果）: {e}")
 
     # SPEC §4.4：統計檢定納入回測輸出。單一總報酬數字不該是結論依據——
     # 484 筆交易裡少數幾筆扛著大部分獲利，點估計幾乎沒有資訊量，要看信賴區間。
