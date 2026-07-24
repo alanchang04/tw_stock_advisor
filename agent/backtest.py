@@ -776,6 +776,8 @@ def run_backtest(top_n=None, rebalance=5, cfg=None, data=None, quiet=False,
         "bench_eqw": bench.mean(),
         "net_win": net_win_rate(tdf),
         "start": sim_dates[0], "end": last,
+        # 逐日權益曲線：供分年/分區間歸因用（否則只能拿到全期單一數字）
+        "nav": nav, "nav_0050": nav_0050,
     })
     if not quiet:
         _report_roundtrip(tdf, bench, bench_0050, nav, m, m0050, cfg["capital"],
