@@ -863,6 +863,11 @@ def perf_metrics(nav: pd.Series) -> dict:
 #  「+328% 是從將近 60 個變體裡挑出來的」這件事必須反映在統計門檻上（§4.2）。
 EXPERIMENT_TRIALS = 58
 
+#: 核心 edge（投信新進場）事件研究的年化 CAR，來自 P1 §3.4：
+#  92,084 個事件、相對全市場等權基準，+60日 CAR +2.02% → 年化約 +8.5%。
+#  §5.0 P3 第一題就是「這個 +8.5% 到組合實際超額之間的落差跑去哪」。
+CORE_EDGE_CAR_ANNUAL = 0.085
+
 
 def _report_roundtrip(tdf, bench, bench_0050, nav, m, m0050, capital, sim_dates, top_n,
                       rebalance, nav_0050=None, market_close=None):
@@ -927,6 +932,22 @@ def _report_roundtrip(tdf, bench, bench_0050, nav, m, m0050, capital, sim_dates,
         "=" * 66,
     ]
     print("\n".join(l for l in lines if l))
+
+    # SPEC §5-5：成本意識——年化摩擦成本占比 + 換手率成為一級指標。
+    # 同樣的毛報酬，換手兩倍就是多付一倍過路費，而先前的報告完全看不到這件事。
+    # 一併帶出 §5.0 P3 第一題的落差歸因骨架（目前只有成本這項是量出來的）。
+    try:
+        from research.cost_attribution import cost_metrics, edge_gap_attribution
+        from research.cost_attribution import format_report as _cost_report
+        _cm = cost_metrics(tdf, n_days=len(sim_dates),
+                           max_open=STRATEGY.get("max_open_positions", 10))
+        _attr = None
+        if m0050 is not None and _cm:
+            _ann_excess = m["ann_ret"] - m0050["ann_ret"]
+            _attr = edge_gap_attribution(CORE_EDGE_CAR_ANNUAL, _ann_excess, _cm)
+        print(_cost_report(_cm, _attr))
+    except Exception as e:
+        logger.warning(f"成本歸因計算失敗（不影響回測結果）: {e}")
 
     # SPEC §4.5：régime 切片納入回測輸出。分年對照證實策略在強多頭年全面落後、
     # 熊市平盤年全面勝出，而一個 +328% 的總數字把這個結構完全藏起來。
