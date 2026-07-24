@@ -27,6 +27,26 @@ def test_stop_loss_not_triggered_above_threshold():
     assert not ex
 
 
+# ── 結構性停損（stop_mode，2026-07-24 出場配對實驗）────────────────
+# 突破型態的進場配固定8%停損會被回測箱頂一再洗出場（10年 -50.2%）。
+# 改守結構價後 -9.1%、賺賠比 1.44→3.55——有效但仍未勝出，故 opt-in 預設關閉。
+def test_structural_stop_overrides_fixed_pct():
+    # 結構價 95 高於固定停損的 92：-5% 就該出場，不必等到 -8%
+    ex, reason = decide_exit(100, 100, 94.9, None, None, 1,
+                             cfg=cfg(), extra={"stop_price": 95.0})
+    assert ex and "結構價" in reason
+
+def test_structural_stop_holds_through_fixed_pct_level():
+    # 結構價 88 低於固定停損的 92：跌到 -9% 也不出場（改由結構價說了算）
+    ex, _ = decide_exit(100, 100, 91.0, None, None, 1,
+                        cfg=cfg(), extra={"stop_price": 88.0})
+    assert not ex
+
+def test_fixed_pct_stop_still_applies_without_stop_price():
+    ex, reason = decide_exit(100, 100, 91.9, None, None, 1, cfg=cfg(), extra={})
+    assert ex and "停損" in reason
+
+
 # ── 停利 ──────────────────────────────────────────────────────────
 # 2026-07-09：固定停利預設關閉（改用分級移動停利抱住大波段），
 # 只在 exit_fixed_take_profit=True 時才會觸發，供消融對照。

@@ -902,7 +902,14 @@ def decide_exit(
     extra / history 為 None 時（如舊版 backtest 呼叫）→ 只跑基本規則，不報錯。
     """
     # ── 1. 停損 ────────────────────────────────────────────────
-    if entry_price and close <= entry_price * (1 - cfg["stop_loss"]):
+    # stop_price（2026-07-23）：進場當下就決定的「結構性停損價」，例如突破K棒低點或
+    # 盤整箱型下緣。給了就用它取代固定百分比——固定 8% 是為「騎乘已確立趨勢」設計的，
+    # 用在剛突破的部位上會一再被回測箱頂的正常動作打到（實測勝率掉到 12.8%）。
+    if extra and extra.get("stop_price"):
+        sp = float(extra["stop_price"])
+        if close <= sp:
+            return True, f"停損(結構價 {sp:.2f})"
+    elif entry_price and close <= entry_price * (1 - cfg["stop_loss"]):
         return True, f"停損(-{cfg['stop_loss']*100:.0f}%)"
 
     gain = (close / entry_price - 1) if entry_price else 0.0

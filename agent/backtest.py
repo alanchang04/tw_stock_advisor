@@ -32,7 +32,7 @@ from agent.stock_selector import (
 )
 from agent.strategy import (STRATEGY, score_candidates, decide_exit, split_adjust,
                             compute_factor_matrices, compute_new_entry_flag, apply_liquidity_gate,
-                            apply_total_return_adjustment,
+                            apply_total_return_adjustment, SWING_SETUP_CFG,
                             # 交易成本/成交假設：單一事實來源在 strategy.py（回測與即時帳本共用）
                             FEE_RATE, TAX_RATE, SLIPPAGE, net_return)
 
@@ -555,6 +555,17 @@ def run_backtest(top_n=None, rebalance=5, cfg=None, data=None, quiet=False,
     if cfg.get("total_return_adjust", True) and div_events is not None and not div_events.empty:
         opens = apply_total_return_adjustment(opens, div_events)
 
+    # 最低價矩陣：結構性停損（stop_mode="entry_bar_low"/"box_low"）要用。
+    # 同樣做除權息還原，才跟 closes/opens 在同一個價格基準上比較。
+    # 預設 stop_mode 為 None（固定%停損），此時不必付這份 pivot 的成本；
+    # 資料源沒有 low 欄位時退回空矩陣 → stop_price 取不到值，自動回到固定%停損。
+    lows = pd.DataFrame(index=closes.index, columns=closes.columns, dtype=float)
+    if cfg.get("stop_mode") and "low" in data["prices"].columns:
+        lows = data["prices"].pivot_table(index="trade_date", columns="stock_id", values="low")
+        lows = lows.where(lows > 0).reindex(index=closes.index, columns=closes.columns)
+        if cfg.get("total_return_adjust", True) and div_events is not None and not div_events.empty:
+            lows = apply_total_return_adjustment(lows, div_events)
+
     tech = data["tech"]
     ma5p = tech.pivot_table(index="trade_date", columns="stock_id", values="ma5")
     ma20p = tech.pivot_table(index="trade_date", columns="stock_id", values="ma20")
@@ -637,8 +648,25 @@ def run_backtest(top_n=None, rebalance=5, cfg=None, data=None, quiet=False,
             if shares <= 0 or cash < shares * fill * (1 + FEE_RATE):
                 continue
             cash -= shares * fill * (1 + FEE_RATE)
+            # 結構性停損（2026-07-23）：突破型態的部位，停損守「型態的失效價」而不是
+            # 固定百分比。訊號K棒是前一日（i-1，今日開盤才成交），所以取那根的低點；
+            # box_low 則取訊號日之前 consol_days 根的最低（給回測箱頂留空間）。
+            stop_price = None
+            _sm = cfg.get("stop_mode")
+            if _sm in ("entry_bar_low", "box_low") and i >= 1:
+                sig_d = dates[i - 1]
+                if _sm == "entry_bar_low":
+                    stop_price = val(lows, sig_d, sid)
+                else:
+                    nb = int((cfg.get("swing_setup") or {}).get(
+                        "consol_days", SWING_SETUP_CFG["consol_days"]))
+                    lo_win = lows.loc[dates[max(0, i - 1 - nb):i - 1], sid] if sid in lows.columns else None
+                    stop_price = float(lo_win.min()) if lo_win is not None and lo_win.notna().any() else None
+                # 保險：停損價不可高於進場價（型態怪異時退回固定%）
+                if stop_price and stop_price >= fill:
+                    stop_price = None
             open_pos[sid] = {"entry_date": d, "entry_price": fill, "peak": fill,
-                             "entry_i": i, "shares": shares}
+                             "entry_i": i, "shares": shares, "stop_price": stop_price}
         pending_entries = []
 
         # 3) 依今日收盤評估出場規則 → 掛到明日開盤成交
@@ -649,7 +677,9 @@ def run_backtest(top_n=None, rebalance=5, cfg=None, data=None, quiet=False,
             p["peak"] = max(p["peak"], close)
             ex, reason = decide_exit(p["entry_price"], p["peak"], close,
                                      val(ma5p, d, sid), val(ma20p, d, sid), i - p["entry_i"],
-                                     cfg=day_cfg)
+                                     cfg=day_cfg,
+                                     extra=({"stop_price": p["stop_price"]}
+                                            if p.get("stop_price") else None))
             if ex and not any(s == sid for s, _ in pending_exits):
                 pending_exits.append((sid, reason))
 
