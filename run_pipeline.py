@@ -244,7 +244,20 @@ def mode_pipeline(source: str = "openapi", with_entries: bool = True, review: bo
             else:
                 mode_daily(source="finmind")
             run_technical_analysis(recent_days=5)     # 2. 技術指標（增量：只寫最近 5 天，日常更新夠用）
-            rec.summary = f"補資料(source={source}) + 技術指標增量(近5日)"
+            # 3. 處置股（SPEC §2.4）：處置期間人工撮合+預收款券，選股必須排除。
+            #    只抓當年度（端點支援區間查詢，一次請求就涵蓋今年所有仍在生效的處置），
+            #    失敗不擋 pipeline——沒有新資料時沿用 DB 既有的，過濾照常運作。
+            _disp_n = 0
+            try:
+                from data_pipeline.fetchers.disposition_fetcher import (
+                    _upsert, ensure_disposition_tables, fetch_punish)
+                ensure_disposition_tables()
+                _d = fetch_punish(date(date.today().year, 1, 1), date.today())
+                _disp_n = _upsert(_d, "disposition_events", "(stock_id, start_date)")
+            except Exception as e:
+                logger.warning(f"處置股更新失敗（沿用既有資料，不擋流程）: {e}")
+            rec.summary = (f"補資料(source={source}) + 技術指標增量(近5日) + "
+                           f"處置股 {_disp_n} 筆")
         with exec_log.stage("quality_gate") as rec:
             # Phase B：規則驗證器（單日斷點/法人落後/筆數異常）+ 來源信心分數
             from agent.quality_gate import run_quality_checks, source_scorecard

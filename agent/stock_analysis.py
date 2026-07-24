@@ -119,6 +119,13 @@ def rank_in_universe(stock_id: str, universe, cfg: dict = STRATEGY) -> dict:
         return {"ok": True, "in_universe": False, "veto_reason": hard_excluded[stock_id],
                "score": None, "rank": None, "total_candidates": total,
                "percentile_rank": None, "would_make_top_n": False}
+    # 處置股（2026-07-24）：也要講出原因，不能只回「不在候選池」——那正是使用者
+    # 抱怨過的「看不出為什麼」。處置是排除原因裡最具體、最該講清楚的一種。
+    if stock_id in {r["stock_id"] for r in (universe.attrs.get("disposition_excluded") or [])}:
+        return {"ok": True, "in_universe": False,
+                "veto_reason": "處置期間（人工管制撮合、委託達十交易單位須預收款券）",
+                "score": None, "rank": None, "total_candidates": total,
+                "percentile_rank": None, "would_make_top_n": False}
     if universe.empty or stock_id not in universe["stock_id"].values:
         return {"ok": True, "in_universe": False, "veto_reason": None,
                "score": None, "rank": None, "total_candidates": total,

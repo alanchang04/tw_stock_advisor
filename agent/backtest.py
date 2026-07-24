@@ -33,6 +33,7 @@ from agent.stock_selector import (
 from agent.strategy import (STRATEGY, score_candidates, decide_exit, split_adjust,
                             compute_factor_matrices, compute_new_entry_flag, apply_liquidity_gate,
                             apply_total_return_adjustment, SWING_SETUP_CFG,
+                            build_disposition_index, exclude_disposition,
                             # 交易成本/成交假設：單一事實來源在 strategy.py（回測與即時帳本共用）
                             FEE_RATE, TAX_RATE, SLIPPAGE, net_return)
 
@@ -109,6 +110,19 @@ def _load(parquet_dir: str | None = None, since=None) -> dict:
             div["ex_date"] = pd.to_datetime(div["ex_date"]).dt.date
         except Exception:
             div = pd.DataFrame(columns=["stock_id", "ex_date", "pre_close", "ref_price"])
+        try:
+            # 處置期間（SPEC §2.4）：表可能還沒 backfill（見 disposition_fetcher.py），
+            # 查不到就優雅降級為空 → exclude_disposition 自動停用。
+            disp = pd.DataFrame(
+                s.execute(text(
+                    "SELECT stock_id, start_date, end_date FROM disposition_events"
+                )).fetchall(),
+                columns=["stock_id", "start_date", "end_date"],
+            )
+            for c in ("start_date", "end_date"):
+                disp[c] = pd.to_datetime(disp[c]).dt.date
+        except Exception:
+            disp = pd.DataFrame(columns=["stock_id", "start_date", "end_date"])
 
     # 型別整理：DB 的 NUMERIC → float
     for df, cols in [
@@ -125,7 +139,8 @@ def _load(parquet_dir: str | None = None, since=None) -> dict:
     rev_map = {(r.stock_id, r.year_month): r.yoy_pct for r in rev.itertuples()}
 
     return {"prices": prices, "tech": tech, "inst": inst,
-            "imap": imap, "inds": inds, "rev_map": rev_map, "dividends": div}
+            "imap": imap, "inds": inds, "rev_map": rev_map, "dividends": div,
+            "disposition": disp}
 
 
 # ── 從本機 parquet 載入（跨週期歷史回測；資料來源＝TWSE回補 或 匯入老師的歷史檔）──
@@ -205,12 +220,23 @@ def _load_parquet(parquet_dir: str) -> dict:
                 margin[c] = pd.to_numeric(margin[c], errors="coerce")
         margin["trade_date"] = pd.to_datetime(margin["trade_date"]).dt.date
 
+    # 處置股（選配，2026-07-24，SPEC §2.4）：檔案不存在時降級為空表 → 過濾自動停用，
+    # 舊資料照跑。回測與 live 共用 strategy.exclude_disposition 同一支純函式。
+    disp = _p("disposition_events.parquet")
+    if disp is None:
+        disp = pd.DataFrame(columns=["stock_id", "start_date", "end_date"])
+    else:
+        for c in ("start_date", "end_date"):
+            disp[c] = pd.to_datetime(disp[c]).dt.date
+
     logger.info(f"從 parquet 載入：股價 {len(prices)} 列、法人 {len(inst)} 列、"
                 f"技術指標 {len(tech)} 列、除權息 {len(div)} 筆"
                 f"、融資融券 {0 if margin is None else len(margin)} 列"
+                f"、處置事件 {len(disp)} 筆"
                 f"（{'現算' if _p('technical.parquet') is None else '讀檔'}）")
     return {"prices": prices, "tech": tech, "inst": inst, "margin": margin,
-            "imap": imap, "inds": inds, "rev_map": rev_map, "dividends": div}
+            "imap": imap, "inds": inds, "rev_map": rev_map, "dividends": div,
+            "disposition": disp}
 
 
 def _compute_tech_from_prices(prices: pd.DataFrame) -> pd.DataFrame:
@@ -285,6 +311,9 @@ def _precompute_factors(data: dict, cfg: dict = STRATEGY) -> None:
             tech_p("ma20"), tech_p("ma60"), cfg.get("swing_setup"))
     except Exception as e:
         logger.warning(f"波段型態矩陣計算失敗（require_swing_setup 將無效）: {e}")
+
+    # 處置期間查詢索引（2026-07-24，SPEC §2.4）：沒有資料就是空 dict，過濾自動停用
+    data["_disposition_idx"] = build_disposition_index(data.get("disposition"))
 
     margin = data.get("margin")
     if margin is not None and not margin.empty:
@@ -402,6 +431,14 @@ def _candidates_asof(data, d, industry_codes, top_n=5, cfg=None):
             df = df[df["stock_id"].map(lambda s: bool(row.get(s, False)))]
             if df.empty:
                 return []
+
+    # 處置股排除（2026-07-24，SPEC §2.4）：處置期間人工撮合+預收款券，回測照隔日開盤
+    # 30bp 滑價成交是嚴重低估成本。資料沒回補時 _disposition_idx 為空 dict，自動停用。
+    _disp = data.get("_disposition_idx")
+    if _disp:
+        df, _ = exclude_disposition(df, d, _disp, cfg)
+        if df.empty:
+            return []
 
     # 成交金額（流動性/抗操控）門檻：舊資料（無 turnover 欄位，如老師歷史檔）全 NaN 時優雅跳過。
     # 2026-07-15 起改用 apply_liquidity_gate（OR邏輯：成交金額達標 OR 投信新進場+較低下限）；
@@ -776,8 +813,14 @@ def run_backtest(top_n=None, rebalance=5, cfg=None, data=None, quiet=False,
         "bench_eqw": bench.mean(),
         "net_win": net_win_rate(tdf),
         "start": sim_dates[0], "end": last,
-        # 逐日權益曲線：供分年/分區間歸因用（否則只能拿到全期單一數字）
-        "nav": nav, "nav_0050": nav_0050,
+        # 逐日權益曲線：供分年/分區間歸因用（否則只能拿到全期單一數字）。
+        # ⚠️ 存成 dict 不是 Series——pandas 的 __finalize__ 會用 `obj.attrs == attrs`
+        # 比對 attrs，值是 Series 時 `==` 回傳 Series → 「truth value is ambiguous」，
+        # 任何觸發 __finalize__ 的操作（concat/nlargest/…）都會炸。實際踩過。
+        # 取用：pd.Series(tdf.attrs["nav"])
+        "nav": {d: float(v) for d, v in nav.items()},
+        "nav_0050": ({d: float(v) for d, v in nav_0050.items()}
+                     if nav_0050 is not None else None),
     })
     if not quiet:
         _report_roundtrip(tdf, bench, bench_0050, nav, m, m0050, cfg["capital"],

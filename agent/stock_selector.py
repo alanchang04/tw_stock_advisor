@@ -385,6 +385,24 @@ def get_candidate_stocks(
         logger.warning(f"硬否決規則檢查失敗（略過，不阻擋流程）: {e}")
         hard_excluded = pd.DataFrame()
 
+    # 處置股排除（2026-07-24，SPEC §2.4 / SPEC_STRATEGY_MIDCAP §2.1 的「排除警示」待補項）。
+    # 跟回測共用 strategy.exclude_disposition 同一支純函式——族群曝險上限那次
+    # live/回測不一致的 parity bug 不能再犯。資料表還沒 backfill 時自動停用。
+    disposition_excluded = pd.DataFrame()
+    try:
+        from agent.strategy import build_disposition_index, exclude_disposition
+        from data_pipeline.fetchers.disposition_fetcher import load_disposition_ranges
+        _idx = build_disposition_index(load_disposition_ranges())
+        if _idx:
+            _asof = pd.to_datetime(df["trade_date"].iloc[0]).date() if "trade_date" in df.columns \
+                else date.today()
+            df, disposition_excluded = exclude_disposition(df, _asof, _idx, cfg)
+            if not disposition_excluded.empty:
+                logger.warning(f"⚠️ 處置股排除 {len(disposition_excluded)} 檔："
+                               + ", ".join(disposition_excluded["stock_id"].astype(str)))
+    except Exception as e:
+        logger.warning(f"處置股檢查失敗（略過，不阻擋流程）: {e}")
+
     # 趨勢/題材因子（相對強度/多頭排列持續/投信連買/投信新進場）——與回測共用同一份計算
     try:
         fmaps = _live_factor_maps(cfg)
@@ -470,6 +488,11 @@ def get_candidate_stocks(
     candidates.attrs["hard_excluded"] = (
         hard_excluded[["stock_id", "stock_name", "hard_veto_reason"]].to_dict("records")
         if not hard_excluded.empty else [])
+    # 排除了就要說出來（同 hard_excluded 的透明度設計）
+    candidates.attrs["disposition_excluded"] = (
+        disposition_excluded[["stock_id", "stock_name"]].to_dict("records")
+        if not disposition_excluded.empty and "stock_name" in disposition_excluded.columns
+        else [])
 
     logger.info(f"篩選出 {len(candidates)} 支候選股票（{'族群閘門' if use_gate else '全市場趨勢/題材'}）")
     return candidates

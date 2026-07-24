@@ -218,6 +218,12 @@ STRATEGY = {
     # ── 個股除權息還原（2026-07-17，SPEC_QUANT_UPGRADE.md P0-2）──
     "total_return_adjust": True,   # 用 dividend_events 官方事件還原個股報酬；
                                     # 消融/對照用途可設 False 關閉，回到未還原行為
+
+    # ── 處置股排除（2026-07-24，SPEC_QUANT_UPGRADE §2.4 / SPEC_STRATEGY_MIDCAP §2.1）──
+    # 這是**寫實度修正**不是策略調參：處置期間人工撮合（約5分鐘一次）+ 預收款券，
+    # 回測照隔日開盤 30bp 滑價成交是嚴重低估成本。跟滑價/量能天花板/跌停鎖死同類，
+    # 預期會讓回測數字變差（拿掉一些「爆量急漲」的贏家），那正是它該做的事。
+    "exclude_disposition": True,   # 消融對照用可設 False
 }
 
 
@@ -795,6 +801,60 @@ def compute_hard_vetoes(df: pd.DataFrame, cfg: dict = STRATEGY) -> pd.DataFrame:
     out = df[triggered].copy()
     out["hard_veto_reason"] = reasons[triggered]
     return out
+
+
+# ══════════════════════════════════════════════════════════════════
+#  處置股排除（SPEC_QUANT_UPGRADE §2.4 / SPEC_STRATEGY_MIDCAP §2.1）
+#
+#  處置期間是「人工管制撮合（約每五分鐘一次）」+ 委託達十交易單位須預收款券。
+#  回測假設隔日開盤照常成交、只扣 30bp 滑價，對處置股是嚴重低估成本；即時選股
+#  則會真的推薦到——處置多半由「爆量急漲」觸發，正是動能策略最愛的形態，
+#  成交金額門檻擋不住。
+#
+#  放在 strategy.py 是刻意的（單一策略中樞原則）：live 與回測共用同一支純函式，
+#  避免「族群曝險上限 live/回測不一致」那種 parity bug 再發生一次。
+# ══════════════════════════════════════════════════════════════════
+def build_disposition_index(ranges) -> dict:
+    """
+    處置期間表 → {stock_id: [(start, end), ...]} 查詢索引。
+
+    ranges 可以是 DataFrame（欄位 stock_id/start_date/end_date）或同名 key 的
+    dict 列表。空的/None 一律回傳空 dict——資料還沒回補時整套機制自然停用，
+    不會讓既有回測跑不動（比照除權息/融資融券的優雅降級慣例）。
+    """
+    idx: dict[str, list] = {}
+    if ranges is None:
+        return idx
+    rows = ranges.to_dict("records") if hasattr(ranges, "to_dict") else ranges
+    for r in rows:
+        sid, s, e = r.get("stock_id"), r.get("start_date"), r.get("end_date")
+        if not sid or s is None or e is None:
+            continue
+        idx.setdefault(str(sid), []).append((s, e))
+    return idx
+
+
+def is_under_disposition(stock_id: str, d, idx: dict) -> bool:
+    """某檔股票在某一天是否處於處置期間（含頭尾）。"""
+    if not idx:
+        return False
+    for s, e in idx.get(str(stock_id), ()):
+        if s <= d <= e:
+            return True
+    return False
+
+
+def exclude_disposition(df, as_of, idx: dict, cfg: dict = STRATEGY):
+    """
+    從候選 DataFrame 濾掉當日處於處置期間的股票。
+
+    回傳 (保留的 df, 被排除的 df)。被排除的那份要拿去顯示/記錄透明度——
+    跟 compute_hard_vetoes 的 hard_excluded 同一個設計:排除了就要說出來。
+    """
+    if df is None or len(df) == 0 or not idx or not cfg.get("exclude_disposition", True):
+        return df, (df.iloc[0:0] if df is not None and hasattr(df, "iloc") else df)
+    hit = df["stock_id"].map(lambda s: is_under_disposition(s, as_of, idx))
+    return df[~hit].copy(), df[hit].copy()
 
 
 # ══════════════════════════════════════════════════════════════════
