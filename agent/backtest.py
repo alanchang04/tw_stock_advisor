@@ -824,7 +824,7 @@ def run_backtest(top_n=None, rebalance=5, cfg=None, data=None, quiet=False,
     })
     if not quiet:
         _report_roundtrip(tdf, bench, bench_0050, nav, m, m0050, cfg["capital"],
-                          sim_dates, top_n, rebalance)
+                          sim_dates, top_n, rebalance, nav_0050=nav_0050)
     return tdf
 
 
@@ -857,7 +857,13 @@ def perf_metrics(nav: pd.Series) -> dict:
                 sharpe=sharpe, mdd=mdd, calmar=calmar)
 
 
-def _report_roundtrip(tdf, bench, bench_0050, nav, m, m0050, capital, sim_dates, top_n, rebalance):
+#: research/EXPERIMENTS.md 的誠實計數（保守下界）——deflated Sharpe 的關鍵輸入。
+#  「+328% 是從將近 60 個變體裡挑出來的」這件事必須反映在統計門檻上（§4.2）。
+EXPERIMENT_TRIALS = 58
+
+
+def _report_roundtrip(tdf, bench, bench_0050, nav, m, m0050, capital, sim_dates, top_n,
+                      rebalance, nav_0050=None):
     rets = tdf["ret"]
     nets = tdf["net_ret"] if "net_ret" in tdf.columns else rets
     win = (rets > 0).mean()
@@ -919,6 +925,22 @@ def _report_roundtrip(tdf, bench, bench_0050, nav, m, m0050, capital, sim_dates,
         "=" * 66,
     ]
     print("\n".join(l for l in lines if l))
+
+    # SPEC §4.4：統計檢定納入回測輸出。單一總報酬數字不該是結論依據——
+    # 484 筆交易裡少數幾筆扛著大部分獲利，點估計幾乎沒有資訊量，要看信賴區間。
+    # n_trials 取自 research/EXPERIMENTS.md 的誠實計數（deflation 的關鍵輸入）。
+    try:
+        from research.stats_tests import format_report, run_all
+        _res = run_all(trade_returns=nets.tolist(),
+                       nav={d: float(v) for d, v in nav.items()},
+                       nav_bench=({d: float(v) for d, v in nav_0050.items()}
+                                  if nav_0050 is not None else None),
+                       n_trials=EXPERIMENT_TRIALS,
+                       position_weight=1.0 / max(1, STRATEGY.get("max_open", 10)))
+        print(format_report(_res, mdd_actual=m["mdd"]))
+    except Exception as e:
+        logger.warning(f"統計檢定計算失敗（不影響回測結果）: {e}")
+
     logger.info("回測完成")
 
 
