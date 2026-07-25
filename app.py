@@ -797,7 +797,9 @@ elif page == "🏦 法人動向":
 # ══════════════════════════════════════════════════════════════════
 elif page == "📉 個股走勢":
     st.title("📉 個股走勢")
-    st.caption("這頁只放你 SOP 判斷會用到的數據：量價 / 乖離月線 / RSI / KD / MACD / 投信 / 營收。")
+    st.caption("上半＝決策該用的（已驗證正因子 + 別追高護欄）；下半的 K線/量/RSI/KD/MACD "
+               "是給你看圖用，其中 RSI/KD/MACD 在因子研究裡沒有預測力，別讓它們擋掉上面兩個"
+               "已驗證因子都成立的股票。")
 
     col1, col2 = st.columns([1, 3])
     with col1:
@@ -812,35 +814,35 @@ elif page == "📉 個股走勢":
         st.warning(f"找不到 {sid} 的資料")
         st.stop()
 
-    # ── SOP 檢核面板：一眼看完你的判斷標準 ──
+    # ── SOP 檢核面板：只放「決策該用」的——已驗證正因子 + 一個已驗證方向的護欄 ──
     _sop = load_stock_sop_snapshot(sid)
     st.subheader(f"{sid} {_sop.get('stock_name','')}", anchor=False, divider="gray")
     if _sop.get("industry"):
         st.caption(f"產業：{_sop['industry']}")
-    _m = st.columns(5)
     _dev = _sop.get("dev_pct")
-    _m[0].metric("乖離月線", f"{_dev:+.1f}%" if _dev is not None else "—",
-                 help="你的規則：乖離太多（>15%）＝追高，不進。系統也會硬否決 >15% 的")
     _rsi = _sop.get("rsi14")
-    _m[1].metric("RSI(14)", f"{_rsi:.0f}" if _rsi is not None else "—",
-                 help="你的規則：等 RSI 低一點再買；>80 偏超買")
     _k, _d = _sop.get("k"), _sop.get("d")
-    _m[2].metric("KD", f"{_k:.0f}/{_d:.0f}" if _k is not None and _d is not None else "—",
-                 help="你的規則：等 KD 低檔、準備向上交叉再買")
     _streak = _sop.get("invest_streak", 0)
     _inst5 = _sop.get("inst_5d_lots")
-    _m[3].metric("投信連買", f"{_streak} 日",
-                 f"三大法人近5日 {_inst5:+,.0f} 張" if _inst5 is not None else None,
-                 help="✅ 已驗證因子：投信連續買超是核心籌碼訊號")
     _rev = _sop.get("rev_yoy")
-    _m[4].metric("營收年增", f"{_rev:+.1f}%" if _rev is not None else "—",
-                 help="✅✅ 全因子最強：>0 且越高越好")
+
+    st.markdown("**✅ 決策該看的（已驗證正因子）**")
+    _m = st.columns(3)
+    _m[0].metric("營收年增", f"{_rev:+.1f}%" if _rev is not None else "—",
+                 help="✅✅ 全因子最強：>0 且越高越好，你最該看的一個")
+    _m[1].metric("投信連買", f"{_streak} 日",
+                 help="✅✅ 穩定顯著：投信連續買超是核心籌碼訊號，天數越多越好")
+    _m[2].metric("三大法人近5日", f"{_inst5:+,.0f} 張" if _inst5 is not None else "—",
+                 help="佐證：近5日三大法人淨買賣（外資訊號短期，60日就衰竭）")
+
+    st.markdown("**🛡️ 風險護欄（已驗證方向：別追高）**")
+    _g = st.columns(1)[0]
+    _g.metric("乖離月線", f"{_dev:+.1f}%" if _dev is not None else "—",
+              help="rs20/動能短中期負相關＝追高扣分。>15% 系統會硬否決，對應你『乖離太多不進』")
 
     _flags = []
     if _dev is not None and _dev > 15:
-        _flags.append("⚠️ 乖離月線 >15%＝追高風險（你的規則會跳過）")
-    if _rsi is not None and _rsi > 80:
-        _flags.append("⚠️ RSI >80 偏超買（你會等它低一點）")
+        _flags.append("⚠️ 乖離月線 >15%＝追高風險（你的規則會跳過；系統也硬否決）")
     if _rev is not None and _rev < 0:
         _flags.append("⚠️ 營收年增為負——最強因子不站在這檔這邊")
     if _streak and _streak >= 3 and _rev is not None and _rev > 0:
@@ -869,6 +871,9 @@ elif page == "📉 個股走勢":
     fig_vol.update_layout(title="成交量（張）", height=160,
                           margin=dict(l=0, r=0, t=30, b=0))
     st.plotly_chart(fig_vol, use_container_width=True)
+
+    st.caption("👇 以下 RSI / KD / MACD 是**參考用（因子研究裡無預測力）**——"
+               "看圖練手感、日後計分板會量測你的擇時到底有沒有加分，但別當進場的否決條件。")
 
     # ── KD ──
     fig_kd = go.Figure()
