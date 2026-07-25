@@ -277,36 +277,24 @@ def mode_pipeline(source: str = "openapi", with_entries: bool = True, review: bo
         result = run_daily_recommendation(with_entries=with_entries)  # 4. 出場檢查(+進場推薦)
         msg = result.get("report_text") if result else None
 
-        # 4.5 練習軌：每日20盲盒（純量化不進LLM，跟AI軌完全獨立），獨立訊息推播
+        # 4.5 每日 AI 因子排名 Top 20（2026-07-25 取代練習軌推播）——半自動決策支援：
+        # 系統負責「排名」（P3-2 證實有真實鑑別力），使用者負責「進出場判斷」。
+        # 練習軌的「盤整→帶量紅K突破」型態其補漲/擴散效應已被事件研究否決
+        # （EXPERIMENTS.md P3-新edge-1），故日推播改成純因子排名清單；練習軌頁保留供研究。
         practice_msg = None
         if with_entries:
-            with exec_log.stage("practice_track") as rec:
+            with exec_log.stage("ranked_watchlist") as rec:
                 try:
-                    from agent.stock_selector import get_practice_candidates
-                    pc = get_practice_candidates(top_n=20)
-                    _pool = (pc.attrs.get("setup_pool_size") if pc is not None else None)
-                    if pc is not None and not pc.empty:
-                        lines = [f"🎯 練習軌：波段進場型態（{date.today()}，純量化不含LLM/新聞）"]
-                        if _pool is not None:
-                            lines.append(f"今日全市場有 {_pool} 檔走到「盤整→帶量紅K突破」，"
-                                         f"下列為 AI 因子排序後前 {len(pc)} 檔：")
-                        for i, r in enumerate(pc.itertuples(), 1):
-                            lines.append(f"  {i}. {r.stock_id} {r.stock_name}（{r.industry}）"
-                                        f" 收盤{r.close:.1f}")
-                        lines.append("\n只看代號進TradingView，開20MA+成交量，自己判斷進出場點。")
-                        hard = pc.attrs.get("hard_excluded") or []
-                        if hard:
-                            lines.append(f"（另有 {len(hard)} 檔因乖離月線過遠/帶量長上引線被規則排除）")
-                        practice_msg = "\n".join(lines)
-                    elif _pool == 0 or (pc is not None and pc.empty):
-                        # 「今天沒有」本身就是資訊（市場沒有攻擊性），不要靜默跳過
-                        practice_msg = (f"🎯 練習軌（{date.today()}）：今日全市場沒有股票走到"
-                                        f"「盤整→帶量紅K突破」的型態，無進場候選。")
-                    rec.summary = (f"型態池 {_pool} 檔 → 取前 {0 if pc is None else len(pc)} 檔"
-                                   if _pool is not None else
-                                   f"篩出 {0 if pc is None else len(pc)} 檔（型態資料不可用，退回分數排序）")
+                    from agent.stock_selector import (get_ranked_watchlist,
+                                                      format_ranked_watchlist_for_telegram)
+                    rw = get_ranked_watchlist(top_n=20)
+                    if rw is not None and not rw.empty:
+                        practice_msg = format_ranked_watchlist_for_telegram(rw)
+                        rec.summary = f"AI 因子排名 Top {len(rw)} 已組訊息"
+                    else:
+                        rec.summary = "今日無符合門檻的候選（清單為空）"
                 except Exception as e:
-                    logger.error(f"練習軌篩選失敗: {e}")
+                    logger.error(f"每日排名清單失敗: {e}")
                     rec.summary = f"失敗：{e}"
 
         # 5. 我的持倉建議 + 追蹤清單買點（只建議，不影響主流程）

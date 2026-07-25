@@ -23,7 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 APP_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app.py")
 
-PAGES = ["📊 首頁", "📦 持倉追蹤", "🔖 追蹤清單", "🔎 個股分析", "🎯 練習軌", "🔥 族群輪動",
+PAGES = ["📊 首頁", "📋 每日排行", "📦 持倉追蹤", "🔖 追蹤清單", "🔎 個股分析", "🎯 練習軌", "🔥 族群輪動",
          "🏦 法人動向", "📉 個股走勢", "🔄 歷史績效", "📰 市場情報", "🧠 聰明資金", "🔍 決策軌跡"]
 
 

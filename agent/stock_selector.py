@@ -540,6 +540,60 @@ def get_practice_candidates(top_n: int = 20) -> pd.DataFrame:
     return out
 
 
+def get_ranked_watchlist(top_n: int = 20) -> pd.DataFrame:
+    """
+    每日 AI 因子排名清單（2026-07-25 新增，使用者要求）。
+
+    背景：SPEC_QUANT_UPGRADE §4.6 判決凍結了「機械式自動下單」（短持有+手調權重的
+    完整包裝不敵 0050），但 P3-2 集中度研究證實**評分本身有真實、統計顯著的鑑別力**
+    （K=5/10/20 的超額報酬 95% CI 排除 0）——壞掉的是執行，不是排名。
+
+    這個函式回傳跟 AI 主軌**同一套**篩選/評分（`get_candidate_stocks` + 完整 STRATEGY
+    權重：月營收年增最高權重、其次投信連買/新進場），只是取前 20 檔而非前 5 檔，
+    給使用者自己套用判斷（是否追高、K棒型態、KD/RSI、MACD 等）後手動決定——
+    半自動：系統負責「排名」（已驗證），使用者負責「進出場判斷」（未驗證但被
+    §4.6 之後的紀律鼓勵去獨立驗證，見前向計分板）。
+
+    跟 `get_practice_candidates()` 的差異：練習軌先用「盤整→帶量紅K突破」型態濾網
+    再排序（型態本身的補漲/擴散效應已被 2026-07-25 事件研究否決，見
+    research/EXPERIMENTS.md P3-新edge-1），這個函式**不設型態濾網**，是純粹的
+    因子排名，跟 AI 主軌選股邏輯完全一致（只是攤開前 20 名不是只給前 5 名）。
+
+    跟主軌另一個差異：關掉 `sector_exposure_cap`——那是「目前已持有部位」的投資組合
+    層限制，跟「今天全市場排名前 20 是誰」無關，此處要看的是純粹的因子排名。
+    """
+    from agent.strategy import STRATEGY
+    cfg = {**STRATEGY, "sector_exposure_cap": None}
+    return get_candidate_stocks([], top_n=top_n, cfg=cfg)
+
+
+def format_ranked_watchlist_for_telegram(df: pd.DataFrame) -> str:
+    """把 get_ranked_watchlist() 的結果排成 Telegram 訊息文字。"""
+    from datetime import date as _date
+
+    def _f(v):
+        try:
+            return None if v is None or pd.isna(v) else float(v)
+        except (TypeError, ValueError):
+            return None
+
+    lines = [f"📋 每日 AI 因子排名 Top {len(df)}（{_date.today()}，依營收年增/投信連買排序）"]
+    for i, r in enumerate(df.itertuples(), 1):
+        streak = _f(getattr(r, "invest_streak", None))
+        rev = _f(getattr(r, "rev_yoy", None))
+        streak_txt = f"投信連買{int(streak)}日" if streak else "投信未連買"
+        rev_txt = f"營收年增{rev:+.1f}%" if rev is not None else "營收無資料"
+        lines.append(f"  {i}. {r.stock_id} {r.stock_name}（{r.industry}）"
+                     f" 收盤{r.close:.1f}｜{streak_txt}｜{rev_txt}")
+    hard = df.attrs.get("hard_excluded") or []
+    if hard:
+        lines.append(f"\n（另有 {len(hard)} 檔因乖離月線過遠/帶量長上引線被規則排除，"
+                     f"不在候選池內）")
+    lines.append("\n⚠️ 這是排名不是買單：越前面統計上越有優勢，但單一檔輸大盤的機率仍高，"
+                 "自己判斷型態/KD RSI/是否追高再決定。詳見「📋 每日排行」頁。")
+    return "\n".join(lines)
+
+
 def _recent_news_map(stock_ids: list[str], days: int = 30, per_stock: int = 3) -> dict:
     """近 N 日與各候選股相關的新聞/YT 標題（market_signals.related_stocks 陣列匹配）。
     題材證據餵給辯論用（SPEC_REASONING_LAYER 2.1）；查詢失敗回空 dict 不擋流程。"""

@@ -56,8 +56,8 @@ if st.session_state.auth_user is None:
 USER = st.session_state.auth_user   # {user_id, username, display_name, role}
 
 st.sidebar.title("📈 台股顧問")
-_pages = ["📊 首頁", "📦 持倉追蹤", "🔖 追蹤清單", "🔎 個股分析", "🎯 練習軌", "🔥 族群輪動", "🏦 法人動向",
-          "📉 個股走勢", "🔄 歷史績效", "📰 市場情報", "🧠 聰明資金", "🔍 決策軌跡"]
+_pages = ["📊 首頁", "📋 每日排行", "📦 持倉追蹤", "🔖 追蹤清單", "🔎 個股分析", "🎯 練習軌", "🔥 族群輪動",
+          "🏦 法人動向", "📉 個股走勢", "🔄 歷史績效", "📰 市場情報", "🧠 聰明資金", "🔍 決策軌跡"]
 if USER["role"] == "admin":
     _pages.append("👤 帳號管理")
 page = st.sidebar.radio("導覽", _pages)
@@ -1766,15 +1766,81 @@ elif page == "🔎 個股分析":
 
 
 # ══════════════════════════════════════════════════════════════════
+#  Page 1.5：每日 AI 因子排名 Top 20（2026-07-25 新增，半自動決策支援）
+# ══════════════════════════════════════════════════════════════════
+elif page == "📋 每日排行":
+    st.title("📋 每日 AI 因子排名 Top 20")
+    st.caption("依營收年增/投信連買等**已驗證**因子排序的前 20 檔——這是你的打獵場，不是買單。")
+
+    st.info(
+        "**這頁在做什麼、為什麼可以信一部分：**\n\n"
+        "2026-07-24 的判決凍結了「機械式自動下單」（完整包裝跑 11 年不敵 0050），"
+        "但集中度研究（P3-2）證實**排名本身有真實、統計顯著的鑑別力**——"
+        "前 5 名 > 前 20 名 > 全部候選，越前面越好。**壞掉的是執行，不是排名。**\n\n"
+        "所以這頁把經過驗證的「排名」攤開給你，進出場判斷交給你（是否追高、K棒型態、"
+        "KD/RSI、是否量大長上引線）。這就是半自動：**系統排名 + 你判斷**。"
+    )
+    st.warning(
+        "⚠️ **這是排名不是 20 個贏家。** 誠實數據：這些股票平均只有一點點正向優勢，"
+        "而且**只有約 40~45% 會贏過大盤**——正的平均值是被少數幾檔大贏家拉起來的。"
+        "越前面（分數越高）統計上越有優勢，但**單一檔輸給 0050 的機率仍然偏高**。"
+        "你的判斷（挑型態、避開出貨、不追高）就是在這個池子裡去蕪存菁。"
+    )
+
+    try:
+        from agent.stock_selector import get_ranked_watchlist
+        _rw = get_ranked_watchlist(top_n=20)
+    except Exception as _e:
+        _rw = None
+        st.error(f"排名清單讀取失敗：{_e}")
+
+    if _rw is not None and not _rw.empty:
+        _show = _rw.copy()
+        _show.insert(0, "排名", range(1, len(_show) + 1))
+        _show["投信連買(日)"] = pd.to_numeric(_show.get("invest_streak"), errors="coerce").fillna(0).astype(int)
+        _show["營收年增%"] = pd.to_numeric(_show.get("rev_yoy"), errors="coerce").round(1)
+        _show["多頭排列(日)"] = pd.to_numeric(_show.get("stack_days"), errors="coerce").fillna(0).astype(int)
+        _show["綜合分數"] = pd.to_numeric(_show.get("score"), errors="coerce").round(2)
+        _cols = ["排名", "stock_id", "stock_name", "industry", "close",
+                 "綜合分數", "投信連買(日)", "營收年增%", "多頭排列(日)"]
+        _cols = [c for c in _cols if c in _show.columns]
+        st.dataframe(
+            _show[_cols].rename(columns={"stock_id": "代號", "stock_name": "名稱",
+                                         "industry": "產業", "close": "收盤"}),
+            hide_index=True, use_container_width=True)
+        st.caption("排序＝AI 綜合分數（月營收年增權重最高、其次投信連買/新進場，"
+                   "相對強度/動能/MACD 這些經 P1 驗證無效的因子權重為 0）。"
+                   "同一份清單每晚會推到你的 Telegram。")
+
+        _hard = _rw.attrs.get("hard_excluded") or []
+        if _hard:
+            with st.expander(f"另有 {len(_hard)} 檔被硬否決規則排除（乖離月線過遠/帶量長上引線）"):
+                st.caption("這些是「乖離月線 >15%（追高風險）」或「帶量長上引線（疑似主力出貨）」"
+                           "被程式強制排除的——正好對應你自己的『不追高、避開出貨』判斷。")
+                for _h in _hard:
+                    st.write(f"- {_h.get('stock_id')} {_h.get('stock_name', '')}"
+                             f"：{str(_h.get('hard_veto_reason', '')).strip('；')}")
+    elif _rw is not None:
+        st.info("今日沒有符合門檻（流動性/價格/RSI/處置）的候選股票。"
+                "這本身是資訊：代表今天市場沒什麼攻擊性。")
+
+
+# ══════════════════════════════════════════════════════════════════
 #  Page 8.5：練習軌——每日 20 盲盒（純量化，不進 LLM）
 # ══════════════════════════════════════════════════════════════════
 elif page == "🎯 練習軌":
     st.title("🎯 練習軌：波段進場型態")
-    st.caption("純量化篩選，完全不經過 LLM。2026-07-23 改版：先用型態濾出「今天剛好走到"
-               "可進場位置」的股票（近5日盤整 → 今日帶量紅K突破箱頂、收盤在當日上緣、"
-               "且趨勢站得住），再用 AI 選股因子排序。"
-               "建議流程：只看代號進 TradingView，只開 20MA 和成交量，隱藏新聞與籌碼，"
-               "自己判斷進出場；停損守突破K棒低點或月線（取低者）、停利沿20MA抱到跌破。")
+    st.warning(
+        "**2026-07-25 起，每日 Telegram 推播已改成「📋 每日排行」（純因子排名），不再推這頁。**\n\n"
+        "原因：這頁的「盤整→帶量紅K突破」型態，其補漲/擴散效應在 2026-07-25 的事件研究裡"
+        "被否決（同族群補漲、落後者補漲都不成立，見 EXPERIMENTS.md P3-新edge-1），"
+        "且型態當進場訊號跑 10 年是 -50.2%。**這頁保留作為型態研究與看圖練習用，"
+        "但它不再是你每天該看的主清單——主清單請看「📋 每日排行」。**"
+    )
+    st.caption("純量化篩選，完全不經過 LLM。先用型態濾出「今天剛好走到可進場位置」的股票"
+               "（近5日盤整 → 今日帶量紅K突破箱頂、收盤在當日上緣、且趨勢站得住），"
+               "再用 AI 選股因子排序。建議流程：只看代號進 TradingView，只開 20MA 和成交量，"
+               "自己判斷進出場練手感。")
 
     from agent.stock_selector import get_practice_candidates
     if st.button("🔄 重新整理今日清單", use_container_width=False):
