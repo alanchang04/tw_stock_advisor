@@ -155,6 +155,38 @@ def _rows_from_ranked_df(df) -> list[dict]:
     return out
 
 
+def compute_ranking_diff(ranked_df) -> dict:
+    """
+    **唯讀** diff（App 顯示用，不寫入）：今日 live 排名 對照 DB 最近一個交易日的排名。
+    寫入只在 pipeline 的 daily_ranking_alert 做——App 只讀不寫，避免瀏覽就污染歷史。
+
+    回傳 {"entered": [...], "dropped": [...], "dropped_names": {...}, "first_run": bool}。
+    任一步失敗都回空 diff（不擋頁面渲染）。
+    """
+    empty = {"entered": [], "dropped": [], "dropped_names": {}, "first_run": True}
+    try:
+        if ranked_df is None or ranked_df.empty:
+            return empty
+        ensure_ranking_table()
+        with get_session() as s:
+            rec_date = s.execute(text("SELECT MAX(trade_date) FROM daily_prices")).scalar() \
+                or date.today()
+        rows = _rows_from_ranked_df(ranked_df)
+        diff = diff_rankings(rows, _load_prev_ids(rec_date))
+        names = {}
+        if diff.get("dropped"):
+            with get_session() as s:
+                nm = s.execute(text(
+                    "SELECT stock_id, stock_name FROM stocks WHERE stock_id = ANY(:ids)"
+                ), {"ids": diff["dropped"]}).fetchall()
+            names = {r[0]: r[1] for r in nm}
+        diff["dropped_names"] = names
+        return diff
+    except Exception as e:
+        logger.warning(f"排名 diff（顯示用）計算失敗: {e}")
+        return empty
+
+
 def daily_ranking_alert(top_n: int = 20, ranked_df=None) -> str | None:
     """
     每日排名異動通知的總入口（run_pipeline 呼叫）：

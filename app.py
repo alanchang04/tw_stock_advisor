@@ -1920,6 +1920,31 @@ elif page == "📋 每日排行":
         _rw = None
         st.error(f"排名清單讀取失敗：{_e}")
 
+    # 今日進榜/退榜（跟上一交易日比）——唯讀，不寫入歷史（寫入只在每日 pipeline 做）
+    if _rw is not None and not _rw.empty:
+        try:
+            from agent.watchlist_alerts import compute_ranking_diff
+            _diff = compute_ranking_diff(_rw)
+        except Exception:
+            _diff = None
+        if _diff and not _diff.get("first_run") and (_diff.get("entered") or _diff.get("dropped")):
+            _e_ids = {r["stock_id"] for r in _diff.get("entered", [])}
+            _dc1, _dc2 = st.columns(2)
+            with _dc1:
+                if _diff.get("entered"):
+                    _lines = []
+                    for r in sorted(_diff["entered"], key=lambda x: x.get("rank", 999)):
+                        _star = "⭐" if (r.get("invest_streak") or 0) >= 3 and (r.get("rev_yoy") or -1) > 0 else "・"
+                        _lines.append(f"{_star} #{r.get('rank','?')} {r['stock_id']} {r.get('stock_name','')}")
+                    st.success("🆕 **今日新進榜**（vs 上一交易日）\n\n" + "\n\n".join(_lines))
+            with _dc2:
+                if _diff.get("dropped"):
+                    _nm = _diff.get("dropped_names", {})
+                    st.warning("📉 **今日退榜**（訊號轉弱，若持有留意）\n\n"
+                               + "、".join(f"{s} {_nm.get(s,'')}".strip() for s in _diff["dropped"]))
+            st.caption("⭐＝投信連買≥3日 且 營收年增>0（兩個已驗證因子同時成立）。"
+                       "同樣的異動每晚也會推到你的 Telegram。")
+
     with st.expander("📌 這份清單要看哪些因子（對照你的 SOP）", expanded=True):
         st.markdown(
             "| 欄位 | 怎麼看 | 證據 |\n|---|---|---|\n"
