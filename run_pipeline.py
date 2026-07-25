@@ -282,15 +282,16 @@ def mode_pipeline(source: str = "openapi", with_entries: bool = True, review: bo
         # 練習軌的「盤整→帶量紅K突破」型態其補漲/擴散效應已被事件研究否決
         # （EXPERIMENTS.md P3-新edge-1），故日推播改成純因子排名清單；練習軌頁保留供研究。
         practice_msg = None
+        ranked_df = None      # 給下面的「排名異動通知」重用，避免重算
         if with_entries:
             with exec_log.stage("ranked_watchlist") as rec:
                 try:
                     from agent.stock_selector import (get_ranked_watchlist,
                                                       format_ranked_watchlist_for_telegram)
-                    rw = get_ranked_watchlist(top_n=20)
-                    if rw is not None and not rw.empty:
-                        practice_msg = format_ranked_watchlist_for_telegram(rw)
-                        rec.summary = f"AI 因子排名 Top {len(rw)} 已組訊息"
+                    ranked_df = get_ranked_watchlist(top_n=20)
+                    if ranked_df is not None and not ranked_df.empty:
+                        practice_msg = format_ranked_watchlist_for_telegram(ranked_df)
+                        rec.summary = f"AI 因子排名 Top {len(ranked_df)} 已組訊息"
                     else:
                         rec.summary = "今日無符合門檻的候選（清單為空）"
                 except Exception as e:
@@ -343,7 +344,20 @@ def mode_pipeline(source: str = "openapi", with_entries: bool = True, review: bo
             if practice_msg:
                 from agent.notifier import send_telegram
                 send_telegram(practice_msg)
-            rec.summary = f"Telegram 推播完成（主報告 {len(msg or '')} 字）"
+            # 聰明日級通知（方向 A，2026-07-25）：排名進榜/退榜異動，只在有動作可做時推。
+            # 獨立訊息，跟主報告分開；首次執行/無異動時回 None，不推播不洗版。
+            _alert = None
+            if with_entries:
+                try:
+                    from agent.watchlist_alerts import daily_ranking_alert
+                    _alert = daily_ranking_alert(top_n=20, ranked_df=ranked_df)
+                    if _alert:
+                        from agent.notifier import send_telegram
+                        send_telegram(_alert)
+                except Exception as e:
+                    logger.warning(f"排名異動通知失敗（不擋流程）: {e}")
+            rec.summary = (f"Telegram 推播完成（主報告 {len(msg or '')} 字"
+                           + ("；排名異動已推" if _alert else "") + "）")
 
         logger.info("########## 每日完整流程結束 ##########")
         _ok = True
