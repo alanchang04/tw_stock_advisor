@@ -60,7 +60,11 @@ _pages = ["📊 首頁", "📋 每日排行", "📦 持倉追蹤", "🔖 追蹤�
           "🏦 法人動向", "📉 個股走勢", "🔄 歷史績效", "📰 市場情報", "🧠 聰明資金", "🔍 決策軌跡"]
 if USER["role"] == "admin":
     _pages.append("👤 帳號管理")
-page = st.sidebar.radio("導覽", _pages)
+# 跨頁跳轉：清單頁的「📈 走勢」按鈕會設 nav_goto，這裡在 radio 建立「之前」套用，
+# 避免「widget 建立後不可改 session_state」的 Streamlit 限制（見清單頁的按鈕）。
+if st.session_state.get("nav_goto") in _pages:
+    st.session_state["nav"] = st.session_state.pop("nav_goto")
+page = st.sidebar.radio("導覽", _pages, key="nav")
 
 _c1, _c2 = st.sidebar.columns([3, 1])
 _c1.caption(f"👤 {USER['display_name']}（{USER['role']}）")
@@ -266,24 +270,92 @@ def load_institutional(days: int = 5, top_n: int = 20, col: str = "total_net") -
     return df
 
 
+def _num(v):
+    """None / 非數字 / NaN → None，其餘轉 float。模組層共用（NaN 比較全 False 的防呆）。"""
+    try:
+        f = float(v)
+        return None if f != f else f      # NaN != NaN
+    except (TypeError, ValueError):
+        return None
+
+
+def _pick_row(rank, sid, name, industry, close, chips, key):
+    """清單頁共用的「一列 + 📈跳轉走勢圖」渲染（每日排行 / 練習軌都用）。
+    點按鈕會帶著股號跳到『📉 個股走勢』頁——那頁有 SOP 檢核面板。"""
+    c = st.columns([0.45, 2.3, 1.0, 3.4, 0.85])
+    c[0].markdown(f"**{rank}**")
+    c[1].markdown(f"**{sid}** {name}　"
+                  f"<span style='color:#888;font-size:0.8em'>{industry}</span>",
+                  unsafe_allow_html=True)
+    c[2].markdown(f"{close:.1f}" if close is not None else "—")
+    c[3].caption("　".join(chips))
+    if c[4].button("📈 走勢", key=key, help="跳到個股走勢圖 + SOP 檢核（量價/乖離/RSI/KD/MACD/投信/營收）"):
+        st.session_state["nav_goto"] = "📉 個股走勢"
+        st.session_state["chart_sid"] = str(sid)
+        st.rerun()
+
+
 @st.cache_data(ttl=300)
 def load_stock_ohlcv(sid: str, days: int = 120) -> pd.DataFrame:
     cutoff = (date.today() - timedelta(days=days)).strftime("%Y-%m-%d")
     with get_session() as s:
         rows = s.execute(text("""
             SELECT p.trade_date, p.open, p.high, p.low, p.close, p.volume,
-                   t.ma5, t.ma20, t.macd_hist, t.k_value, t.d_value
+                   t.ma5, t.ma20, t.macd_hist, t.k_value, t.d_value, t.rsi14
             FROM daily_prices p
             LEFT JOIN technical_indicators t
                 ON t.stock_id = p.stock_id AND t.trade_date = p.trade_date
             WHERE p.stock_id = :sid AND p.trade_date >= :c AND p.close > 0
             ORDER BY p.trade_date ASC
         """), {"sid": sid, "c": cutoff}).fetchall()
-    df = pd.DataFrame(rows, columns=["日期","開","高","低","收","量","MA5","MA20","MACD_Hist","K","D"])
+    df = pd.DataFrame(rows, columns=["日期","開","高","低","收","量","MA5","MA20","MACD_Hist","K","D","RSI"])
     df["日期"] = pd.to_datetime(df["日期"])
-    for c in ["開","高","低","收","量","MA5","MA20","MACD_Hist","K","D"]:
+    for c in ["開","高","低","收","量","MA5","MA20","MACD_Hist","K","D","RSI"]:
         df[c] = pd.to_numeric(df[c], errors="coerce")
     return df
+
+
+@st.cache_data(ttl=300)
+def load_stock_sop_snapshot(sid: str) -> dict:
+    """個股走勢頁的「SOP 檢核」面板要用的即時數據——只撈使用者判斷標準會用到的那幾個：
+    乖離月線 / RSI / KD / 投信連買天數 / 近5日三大法人 / 月營收年增。"""
+    snap = {"stock_name": "", "industry": ""}
+    with get_session() as s:
+        row = s.execute(text("""
+            SELECT s.stock_name, i.name_zh, p.close, t.ma20, t.rsi14, t.k_value, t.d_value
+            FROM stocks s
+            LEFT JOIN stock_industry_map m ON m.stock_id = s.stock_id
+            LEFT JOIN industries i ON i.code = m.industry_code
+            JOIN daily_prices p ON p.stock_id = s.stock_id
+              AND p.trade_date = (SELECT MAX(trade_date) FROM daily_prices WHERE stock_id = s.stock_id)
+            LEFT JOIN technical_indicators t ON t.stock_id = s.stock_id AND t.trade_date = p.trade_date
+            WHERE s.stock_id = :sid LIMIT 1
+        """), {"sid": sid}).fetchone()
+        if row:
+            snap.update({"stock_name": row[0] or "", "industry": row[1] or "",
+                         "close": _num(row[2]), "ma20": _num(row[3]), "rsi14": _num(row[4]),
+                         "k": _num(row[5]), "d": _num(row[6])})
+        # 投信近 30 日買賣超（張，DB 單位是股 ÷1000），算「連買天數」與近5日合計
+        inv = s.execute(text("""
+            SELECT invest_net, total_net FROM institutional_trading
+            WHERE stock_id = :sid ORDER BY trade_date DESC LIMIT 30
+        """), {"sid": sid}).fetchall()
+        streak = 0
+        for r in inv:
+            if (_num(r[0]) or 0) > 0:
+                streak += 1
+            else:
+                break
+        snap["invest_streak"] = streak
+        snap["inst_5d_lots"] = sum((_num(r[1]) or 0) for r in inv[:5]) / 1000.0
+        rev = s.execute(text("""
+            SELECT yoy_pct FROM monthly_revenue
+            WHERE stock_id = :sid ORDER BY year_month DESC LIMIT 1
+        """), {"sid": sid}).fetchone()
+        snap["rev_yoy"] = _num(rev[0]) if rev else None
+    if snap.get("close") and snap.get("ma20"):
+        snap["dev_pct"] = (snap["close"] - snap["ma20"]) / snap["ma20"] * 100
+    return snap
 
 
 @st.cache_data(ttl=300)
@@ -725,17 +797,56 @@ elif page == "🏦 法人動向":
 # ══════════════════════════════════════════════════════════════════
 elif page == "📉 個股走勢":
     st.title("📉 個股走勢")
+    st.caption("這頁只放你 SOP 判斷會用到的數據：量價 / 乖離月線 / RSI / KD / MACD / 投信 / 營收。")
 
-    stock_ids = load_active_stock_ids()
     col1, col2 = st.columns([1, 3])
     with col1:
-        sid  = st.text_input("輸入股號", value="2884")
+        # 從「📈 走勢」按鈕帶進來的股號會預先寫進 chart_sid；沒有就用預設。
+        # 用 setdefault 而非 value=，避免 key+value 同時給的 Streamlit 警告。
+        st.session_state.setdefault("chart_sid", "2884")
+        sid  = st.text_input("輸入股號", key="chart_sid")
         days = st.selectbox("天數", [60, 120, 240], index=1)
 
     df = load_stock_ohlcv(sid, days=days)
     if df.empty:
         st.warning(f"找不到 {sid} 的資料")
         st.stop()
+
+    # ── SOP 檢核面板：一眼看完你的判斷標準 ──
+    _sop = load_stock_sop_snapshot(sid)
+    st.subheader(f"{sid} {_sop.get('stock_name','')}", anchor=False, divider="gray")
+    if _sop.get("industry"):
+        st.caption(f"產業：{_sop['industry']}")
+    _m = st.columns(5)
+    _dev = _sop.get("dev_pct")
+    _m[0].metric("乖離月線", f"{_dev:+.1f}%" if _dev is not None else "—",
+                 help="你的規則：乖離太多（>15%）＝追高，不進。系統也會硬否決 >15% 的")
+    _rsi = _sop.get("rsi14")
+    _m[1].metric("RSI(14)", f"{_rsi:.0f}" if _rsi is not None else "—",
+                 help="你的規則：等 RSI 低一點再買；>80 偏超買")
+    _k, _d = _sop.get("k"), _sop.get("d")
+    _m[2].metric("KD", f"{_k:.0f}/{_d:.0f}" if _k is not None and _d is not None else "—",
+                 help="你的規則：等 KD 低檔、準備向上交叉再買")
+    _streak = _sop.get("invest_streak", 0)
+    _inst5 = _sop.get("inst_5d_lots")
+    _m[3].metric("投信連買", f"{_streak} 日",
+                 f"三大法人近5日 {_inst5:+,.0f} 張" if _inst5 is not None else None,
+                 help="✅ 已驗證因子：投信連續買超是核心籌碼訊號")
+    _rev = _sop.get("rev_yoy")
+    _m[4].metric("營收年增", f"{_rev:+.1f}%" if _rev is not None else "—",
+                 help="✅✅ 全因子最強：>0 且越高越好")
+
+    _flags = []
+    if _dev is not None and _dev > 15:
+        _flags.append("⚠️ 乖離月線 >15%＝追高風險（你的規則會跳過）")
+    if _rsi is not None and _rsi > 80:
+        _flags.append("⚠️ RSI >80 偏超買（你會等它低一點）")
+    if _rev is not None and _rev < 0:
+        _flags.append("⚠️ 營收年增為負——最強因子不站在這檔這邊")
+    if _streak and _streak >= 3 and _rev is not None and _rev > 0:
+        _flags.append("✅ 投信連買 + 營收正成長：兩個已驗證因子同時成立")
+    for _f in _flags:
+        (st.success if _f.startswith("✅") else st.warning)(_f)
 
     # ── K線 + 均線 ──
     fig = go.Figure()
@@ -770,6 +881,16 @@ elif page == "📉 個股走勢":
     fig_kd.update_layout(title="KD 隨機指標", height=180,
                          margin=dict(l=0, r=0, t=30, b=0))
     st.plotly_chart(fig_kd, use_container_width=True)
+
+    # ── RSI（你的規則會用到）──
+    if "RSI" in df.columns and df["RSI"].notna().any():
+        fig_rsi = go.Figure(go.Scatter(x=df["日期"], y=df["RSI"], name="RSI",
+                                       line=dict(color="#16a085", width=1.5)))
+        fig_rsi.add_hline(y=80, line_dash="dash", line_color="red",   annotation_text="超買 80")
+        fig_rsi.add_hline(y=45, line_dash="dot",  line_color="gray",  annotation_text="45")
+        fig_rsi.update_layout(title="RSI(14)", height=160, yaxis_range=[0, 100],
+                              margin=dict(l=0, r=0, t=30, b=0))
+        st.plotly_chart(fig_rsi, use_container_width=True)
 
     # ── MACD ──
     colors = ["#e74c3c" if v >= 0 else "#2ecc71" for v in df["MACD_Hist"].fillna(0)]
@@ -1794,23 +1915,36 @@ elif page == "📋 每日排行":
         _rw = None
         st.error(f"排名清單讀取失敗：{_e}")
 
+    with st.expander("📌 這份清單要看哪些因子（對照你的 SOP）", expanded=True):
+        st.markdown(
+            "| 欄位 | 怎麼看 | 證據 |\n|---|---|---|\n"
+            "| **綜合分數** | 越高越靠前，排名的鑑別力來源 | ✅ 統計顯著 |\n"
+            "| **營收年增%** | >0 且越高越好，**你最該看的一個** | ✅✅ 全因子最強 |\n"
+            "| **投信連買(日)** | 天數越多＝投信持續進場，**你的核心指標** | ✅✅ 穩定顯著 |\n"
+            "| 多頭排列(日) | 輔助，要撐 60 天以上才顯著 | ✅ 弱正向 |\n\n"
+            "👉 **點每一列的「📈 走勢」**，跳到走勢圖看你要判斷的量價/乖離月線/RSI/KD/MACD，"
+            "再決定進不進場（是否追高、有沒有量大長上引線）。"
+        )
+
     if _rw is not None and not _rw.empty:
-        _show = _rw.copy()
-        _show.insert(0, "排名", range(1, len(_show) + 1))
-        _show["投信連買(日)"] = pd.to_numeric(_show.get("invest_streak"), errors="coerce").fillna(0).astype(int)
-        _show["營收年增%"] = pd.to_numeric(_show.get("rev_yoy"), errors="coerce").round(1)
-        _show["多頭排列(日)"] = pd.to_numeric(_show.get("stack_days"), errors="coerce").fillna(0).astype(int)
-        _show["綜合分數"] = pd.to_numeric(_show.get("score"), errors="coerce").round(2)
-        _cols = ["排名", "stock_id", "stock_name", "industry", "close",
-                 "綜合分數", "投信連買(日)", "營收年增%", "多頭排列(日)"]
-        _cols = [c for c in _cols if c in _show.columns]
-        st.dataframe(
-            _show[_cols].rename(columns={"stock_id": "代號", "stock_name": "名稱",
-                                         "industry": "產業", "close": "收盤"}),
-            hide_index=True, use_container_width=True)
-        st.caption("排序＝AI 綜合分數（月營收年增權重最高、其次投信連買/新進場，"
+        _hdr = st.columns([0.45, 2.3, 1.0, 3.4, 0.85])
+        for _col, _t in zip(_hdr, ["#", "代號 / 名稱 / 產業", "收盤", "已驗證因子", "看圖"]):
+            _col.caption(_t)
+        for _i, _r in enumerate(_rw.itertuples(), 1):
+            _streak = int(_num(getattr(_r, "invest_streak", None)) or 0)
+            _rev = _num(getattr(_r, "rev_yoy", None))
+            _score = _num(getattr(_r, "score", None))
+            _chips = [
+                f"分數 {_score:.1f}" if _score is not None else "分數 —",
+                f"🏦投信連買{_streak}日" if _streak > 0 else "🏦投信未連買",
+                f"📈營收{_rev:+.1f}%" if _rev is not None else "📈營收 無資料",
+            ]
+            _pick_row(_i, getattr(_r, "stock_id"), getattr(_r, "stock_name", ""),
+                      getattr(_r, "industry", ""), _num(getattr(_r, "close", None)),
+                      _chips, key=f"rank_goto_{getattr(_r, 'stock_id')}")
+        st.caption("排序＝AI 綜合分數（月營收年增權重最高、其次投信連買/新進場；"
                    "相對強度/動能/MACD 這些經 P1 驗證無效的因子權重為 0）。"
-                   "同一份清單每晚會推到你的 Telegram。")
+                   "同一份清單每晚推到你的 Telegram。")
 
         _hard = _rw.attrs.get("hard_excluded") or []
         if _hard:
@@ -1903,19 +2037,29 @@ elif page == "🎯 練習軌":
             "⚠️ 以上全部是**回測**。AI 主軌的實盤是 57 筆、平均 -1.47%、勝率 42%（且為舊策略）；"
             "本練習軌無任何實盤紀錄。")
 
-    _show = _pc.copy()
-    _show.insert(0, "排名", range(1, len(_show) + 1))
-    _show["投信連買(日)"] = _show.get("invest_streak", 0).fillna(0).astype(int)
-    _show["多頭排列(日)"] = _show.get("stack_days", 0).fillna(0).astype(int)
-    _show["月營收年增%"] = _show.get("rev_yoy").round(1)
-    _cols = ["排名", "stock_id", "stock_name", "industry", "close",
-             "投信連買(日)", "多頭排列(日)", "月營收年增%", "score"]
-    _cols = [c for c in _cols if c in _show.columns]
-    st.dataframe(
-        _show[_cols].rename(columns={"stock_id": "代號", "stock_name": "名稱",
-                                     "industry": "產業", "close": "收盤", "score": "量化分數"}),
-        use_container_width=True, hide_index=True,
-    )
+    with st.expander("📌 這頁要看的因子（練型態時的參考）", expanded=False):
+        st.markdown(
+            "型態是「今天能不能進」（時機），下面的因子是「這檔好不好」（品質）——兩者互補：\n\n"
+            "- **投信連買(日)**：越多越好，你的核心籌碼指標 ✅\n"
+            "- **月營收年增%**：>0 越高越好，最強基本面因子 ✅\n"
+            "- 多頭排列(日)：趨勢輔助\n\n"
+            "👉 點「📈 走勢」跳走勢圖，用量價/乖離/KD/RSI 練你的進場判斷。"
+        )
+    _hdr = st.columns([0.45, 2.3, 1.0, 3.4, 0.85])
+    for _col, _t in zip(_hdr, ["#", "代號 / 名稱 / 產業", "收盤", "因子", "看圖"]):
+        _col.caption(_t)
+    for _i, _r in enumerate(_pc.itertuples(), 1):
+        _streak = int(_num(getattr(_r, "invest_streak", None)) or 0)
+        _stack = int(_num(getattr(_r, "stack_days", None)) or 0)
+        _rev = _num(getattr(_r, "rev_yoy", None))
+        _chips = [
+            f"🏦投信連買{_streak}日" if _streak > 0 else "🏦投信未連買",
+            f"📈營收{_rev:+.1f}%" if _rev is not None else "📈營收 無資料",
+            f"多頭{_stack}日",
+        ]
+        _pick_row(_i, getattr(_r, "stock_id"), getattr(_r, "stock_name", ""),
+                  getattr(_r, "industry", ""), _num(getattr(_r, "close", None)),
+                  _chips, key=f"prac_goto_{getattr(_r, 'stock_id')}")
 
     _hard = _pc.attrs.get("hard_excluded") or []
     if _hard:
