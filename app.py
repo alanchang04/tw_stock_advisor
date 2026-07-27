@@ -850,6 +850,30 @@ elif page == "📉 個股走勢":
     for _f in _flags:
         (st.success if _f.startswith("✅") else st.warning)(_f)
 
+    # ── 未驗證訊號：大戶集中度（TDCC，向前累積中，尚無足夠歷史回測）──
+    try:
+        from data_pipeline.fetchers.tdcc_fetcher import load_big_holder_trend
+        _tr = load_big_holder_trend(sid, weeks=2)
+    except Exception:
+        _tr = []
+    if _tr:
+        st.markdown("**🧪 未驗證訊號（TDCC 大戶集中度，歷史累積中，還不能當因子）**")
+        _cur = _tr[0]
+        _bp = _cur.get("big_holder_pct")
+        _delta = None
+        if len(_tr) >= 2 and _bp is not None and _tr[1].get("big_holder_pct") is not None:
+            _delta = _bp - _tr[1]["big_holder_pct"]
+        _tc = st.columns(2)
+        _tc[0].metric("千張大戶持股", f"{_bp:.1f}%" if _bp is not None else "—",
+                      f"{_delta:+.2f}pp（週）" if _delta is not None else None,
+                      help="TDCC 集保週更。大戶佔比默默上升＝籌碼集中（你的『大戶偷偷進場』直覺）。"
+                           "⚠️ 免費歷史只 ~1年、單一régime，尚無法回測，只當參考別當否決。")
+        _th = _cur.get("total_holders")
+        _tc[1].metric("總股東人數", f"{_th:,}" if _th else "—",
+                      help="股東人數下降 + 大戶佔比上升＝散戶出、大戶進（籌碼集中的典型型態）。同樣未驗證。")
+        st.caption(f"資料週：{_cur.get('data_date')}"
+                   + ("（需累積到下週才有週變化）" if _delta is None else ""))
+
     # ── K線 + 均線 ──
     fig = go.Figure()
     fig.add_trace(go.Candlestick(

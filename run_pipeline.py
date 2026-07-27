@@ -256,8 +256,16 @@ def mode_pipeline(source: str = "openapi", with_entries: bool = True, review: bo
                 _disp_n = _upsert(_d, "disposition_events", "(stock_id, start_date)")
             except Exception as e:
                 logger.warning(f"處置股更新失敗（沿用既有資料，不擋流程）: {e}")
+            # 4. TDCC 大戶集中度（SPEC §2.6，週更）：向前累積乾淨歷史 + 當前值當未驗證訊號。
+            #    每日呼叫但 update_tdcc 內建「本週已入庫則略過」，實際一週只寫一次。
+            _tdcc_n = 0
+            try:
+                from data_pipeline.fetchers.tdcc_fetcher import update_tdcc
+                _tdcc_n = update_tdcc()
+            except Exception as e:
+                logger.warning(f"TDCC 大戶集中度更新失敗（不擋流程）: {e}")
             rec.summary = (f"補資料(source={source}) + 技術指標增量(近5日) + "
-                           f"處置股 {_disp_n} 筆")
+                           f"處置股 {_disp_n} 筆 + TDCC {_tdcc_n} 檔")
         with exec_log.stage("quality_gate") as rec:
             # Phase B：規則驗證器（單日斷點/法人落後/筆數異常）+ 來源信心分數
             from agent.quality_gate import run_quality_checks, source_scorecard
