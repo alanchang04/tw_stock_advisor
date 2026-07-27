@@ -280,6 +280,22 @@ def _num(v):
         return None
 
 
+@st.cache_data(ttl=1800, show_spinner=False)
+def _cached_ranked_watchlist(trade_date_key: str):
+    """快取每日排行——資料一天才變一次，鍵綁最新交易日，切頁來回不重算（載入慢的主因）。
+    回傳 (df, hard_excluded)；hard_excluded 另外帶出，不依賴 df.attrs 過 pickle。"""
+    from agent.stock_selector import get_ranked_watchlist
+    df = get_ranked_watchlist(top_n=20)
+    hard = list(df.attrs.get("hard_excluded", [])) if df is not None else []
+    return df, hard
+
+
+def _ranked_watchlist_cached():
+    with get_session() as s:
+        d = s.execute(text("SELECT MAX(trade_date) FROM daily_prices")).scalar()
+    return _cached_ranked_watchlist(str(d))
+
+
 def _pick_row(rank, sid, name, industry, close, chips, key):
     """清單頁共用的「一列 + 📈跳轉走勢圖」渲染（每日排行 / 練習軌都用）。
     點按鈕會帶著股號跳到『📉 個股走勢』頁——那頁有 SOP 檢核面板。"""
@@ -1939,11 +1955,14 @@ elif page == "📋 每日排行":
     )
 
     try:
-        from agent.stock_selector import get_ranked_watchlist
-        _rw = get_ranked_watchlist(top_n=20)
+        _rw, _rw_hard = _ranked_watchlist_cached()   # 快取：切頁來回不重算
     except Exception as _e:
-        _rw = None
+        _rw, _rw_hard = None, []
         st.error(f"排名清單讀取失敗：{_e}")
+    _crb1, _crb2 = st.columns([4, 1])
+    if _crb2.button("🔄 重新整理", help="清快取重抓（資料一天才更新一次，平常不用按）"):
+        _cached_ranked_watchlist.clear()
+        st.rerun()
 
     # 今日進榜/退榜（跟上一交易日比）——唯讀，不寫入歷史（寫入只在每日 pipeline 做）
     if _rw is not None and not _rw.empty:
@@ -2001,7 +2020,7 @@ elif page == "📋 每日排行":
                    "相對強度/動能/MACD 這些經 P1 驗證無效的因子權重為 0）。"
                    "同一份清單每晚推到你的 Telegram。")
 
-        _hard = _rw.attrs.get("hard_excluded") or []
+        _hard = _rw_hard or []
         if _hard:
             with st.expander(f"另有 {len(_hard)} 檔被硬否決規則排除（乖離月線過遠/帶量長上引線）"):
                 st.caption("這些是「乖離月線 >15%（追高風險）」或「帶量長上引線（疑似主力出貨）」"

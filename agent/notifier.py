@@ -72,7 +72,7 @@ _BOT_COMMANDS = [
     ("status",     "系統狀態（資料更新到哪天）"),
     ("stock",      "查詢個股即時狀態，例：/stock 2330"),
     ("digest",     "今日市場情報彙整（族群/風險/氛圍）"),
-    ("recommend",  "今日 AI 選股推薦"),
+    ("recommend",  "每日 AI 因子排名 Top 20（明天可參考的清單）"),
     ("smartmoney", "聰明資金重點（投信連買/統一ETF換股）"),
     ("sector",     "族群輪動排行（含龍頭股）"),
     ("etf",        "近期 ETF 換股記錄"),
@@ -379,12 +379,32 @@ def _today_digest() -> str:
 
 
 def _today_recommend() -> str:
+    """今日「每日 AI 因子排名 Top 20」——2026-07-26 改讀 ranked_watchlist_history
+    （每晚 pipeline 存的因子排名），跟 App「📋 每日排行」與每晚推播同一份。
+    讀不到才退回舊的 daily_recommendations（top-5 LLM 推薦，過渡相容）。"""
     from database.connection import get_session
     from sqlalchemy import text
     with get_session() as s:
+        d = s.execute(text("SELECT MAX(rec_date) FROM ranked_watchlist_history")).scalar()
+        if d:
+            rows = s.execute(text("""
+                SELECT r.rank, r.stock_id, st.stock_name, r.invest_streak, r.rev_yoy
+                FROM ranked_watchlist_history r
+                LEFT JOIN stocks st ON st.stock_id = r.stock_id
+                WHERE r.rec_date = :d ORDER BY r.rank
+            """), {"d": d}).fetchall()
+            lines = [f"📋 {d} 每日 AI 因子排名 Top {len(rows)}（依營收年增/投信連買）："]
+            for rank, sid, name, streak, rev in rows:
+                streak = int(streak) if streak is not None else 0
+                chips = (f"投信連買{streak}日" if streak > 0 else "投信未連買")
+                chips += f"｜營收{float(rev):+.1f}%" if rev is not None else "｜營收無資料"
+                lines.append(f"#{rank} {sid} {name or ''}（{chips}）")
+            lines.append("\n⚠️ 這是排名不是買單，約 4~5 成才贏大盤，自己判斷型態/是否追高再決定。")
+            return "\n".join(lines)
+        # 過渡相容：ranked_watchlist_history 還沒資料時退回舊 top-5
         rec_date = s.execute(text("SELECT MAX(rec_date) FROM daily_recommendations")).scalar()
         if not rec_date:
-            return "📊 尚無 AI 選股推薦紀錄"
+            return "📊 尚無 AI 選股推薦紀錄（每晚 pipeline 跑完後產生）"
         rows = s.execute(text("""
             SELECT r.rank, r.stock_id, st.stock_name, r.reason
             FROM daily_recommendations r JOIN stocks st ON st.stock_id = r.stock_id
@@ -461,7 +481,7 @@ def _handle_command(text_raw: str, user: dict) -> str:
             "／查詢市場（隨時可問，不用等每日報告）\n"
             "/stock 2330 — 查個股價格/技術/籌碼即時狀態\n"
             "/digest — 今日市場情報彙整（族群/風險/氛圍）\n"
-            "/recommend — 今日 AI 選股推薦\n"
+            "/recommend — 每日 AI 因子排名 Top 20（明天可參考的清單）\n"
             "/smartmoney — 聰明資金重點（投信連買/統一ETF換股）\n"
             "/sector — 族群輪動排行＋龍頭股\n"
             "/etf — 近14天 ETF 換股記錄\n\n"
