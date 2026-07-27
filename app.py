@@ -56,8 +56,9 @@ if st.session_state.auth_user is None:
 USER = st.session_state.auth_user   # {user_id, username, display_name, role}
 
 st.sidebar.title("📈 台股顧問")
-_pages = ["📊 首頁", "📋 每日排行", "📦 持倉追蹤", "🔖 追蹤清單", "🔎 個股分析", "🎯 練習軌", "🔥 族群輪動",
-          "🏦 法人動向", "📉 個股走勢", "🔄 歷史績效", "📰 市場情報", "🧠 聰明資金", "🔍 決策軌跡"]
+_pages = ["📊 首頁", "📋 每日排行", "📓 選股日誌", "📦 持倉追蹤", "🔖 追蹤清單", "🔎 個股分析",
+          "🎯 練習軌", "🔥 族群輪動", "🏦 法人動向", "📉 個股走勢", "🔄 歷史績效", "📰 市場情報",
+          "🧠 聰明資金", "🔍 決策軌跡"]
 if USER["role"] == "admin":
     _pages.append("👤 帳號管理")
 # 跨頁跳轉：清單頁的「📈 走勢」按鈕會設 nav_goto，這裡在 radio 建立「之前」套用，
@@ -2011,6 +2012,109 @@ elif page == "📋 每日排行":
     elif _rw is not None:
         st.info("今日沒有符合門檻（流動性/價格/RSI/處置）的候選股票。"
                 "這本身是資訊：代表今天市場沒什麼攻擊性。")
+
+
+# ══════════════════════════════════════════════════════════════════
+#  Page 1.6：選股日誌 / 前向計分板（2026-07-26，方向 B）
+# ══════════════════════════════════════════════════════════════════
+elif page == "📓 選股日誌":
+    st.title("📓 選股日誌：你的判斷有沒有加分？")
+    st.caption("記下你從每日排行（或自己判斷）挑的股票，向前對照三條線："
+               "你的挑選 vs 前20整體 vs 0050。回測會被過擬合污染，**這種向前記錄是唯一乾淨的驗證**。")
+
+    from agent.pick_journal import (add_pick, close_pick, list_picks_with_returns,
+                                    summarize_scoreboard)
+
+    _uid = USER["user_id"]
+
+    # ── 計分板摘要 ──
+    _open = list_picks_with_returns(_uid, "open")
+    _closed = list_picks_with_returns(_uid, "closed")
+    _sb = summarize_scoreboard(_open + _closed)
+    if _sb["n"] == 0:
+        st.info("還沒有任何紀錄。下面加入你今天挑的股票，幾週後這裡就會開始回答"
+                "「你的判斷有沒有贏過『無腦買整份前20』和大盤」。")
+    else:
+        _fmt = lambda v: "—" if v is None else f"{v*100:+.1f}%"
+        c = st.columns(4)
+        c[0].metric("我的挑選 平均", _fmt(_sb["avg_pick"]), help="你所有紀錄的 close-to-close 平均報酬")
+        c[1].metric("前20整體 平均", _fmt(_sb["avg_pool"]), help="同期無腦買整份前20清單的平均")
+        c[2].metric("0050 平均", _fmt(_sb["avg_mkt"]))
+        _edge = _sb["edge_vs_pool"]
+        c[3].metric("我的判斷加分", _fmt(_edge),
+                    help="＝你的挑選 − 前20整體（配對）。>0 才代表你的過濾真的有價值")
+        if _edge is not None:
+            _msg = (f"目前你的挑選**贏過**「無腦買前20」{_edge*100:+.1f}pp"
+                    f"（{_sb['win_vs_pool']}/{_sb['n_vs_pool']} 筆贏）"
+                    if _edge > 0 else
+                    f"目前你的挑選**輸給**「無腦買前20」{_edge*100:+.1f}pp"
+                    f"（{_sb['win_vs_pool']}/{_sb['n_vs_pool']} 筆贏）——你的過濾可能在幫倒忙")
+            (st.success if _edge > 0 else st.warning)(_msg)
+        st.caption(f"⚠️ 目前 {_sb['n']} 筆，樣本還太小，**至少累積數月/數十筆才有統計意義**。"
+                   "close-to-close 是判斷歸因，不是實際成交損益。")
+
+    # ── 加入一筆 ──
+    with st.expander("➕ 加入一筆挑選", expanded=(_sb["n"] == 0)):
+        @st.cache_data(ttl=300)
+        def _latest_rank_options():
+            with get_session() as s:
+                d = s.execute(text("SELECT MAX(rec_date) FROM ranked_watchlist_history")).scalar()
+                if not d:
+                    return []
+                rows = s.execute(text(
+                    "SELECT r.stock_id, s.stock_name, r.rank FROM ranked_watchlist_history r "
+                    "LEFT JOIN stocks s ON s.stock_id=r.stock_id WHERE r.rec_date=:d ORDER BY r.rank"
+                ), {"d": d}).fetchall()
+            return [(r[0], r[1] or "", r[2]) for r in rows]
+        _opts = _latest_rank_options()
+        _sel = st.selectbox("從今日排行選（或下方自行輸入榜外股）",
+                            ["—"] + [f"#{rk} {sid} {nm}" for sid, nm, rk in _opts])
+        _manual = st.text_input("或自行輸入股號（榜外自選，例如你從供應鏈/大戶看到的）")
+        _note = st.text_input("理由 / 用到的邏輯",
+                              placeholder="例：供應鏈上游 CoWoS 受惠、大戶集中度上升、營收轉強…")
+        if st.button("➕ 加入日誌", type="primary"):
+            _sid = _manual.strip() if _manual.strip() else (
+                _sel.split()[1] if _sel != "—" else "")
+            if not _sid:
+                st.warning("請選一檔或輸入股號")
+            else:
+                ok, msg = add_pick(_uid, _sid, _note)
+                (st.success if ok else st.error)(msg)
+                if ok:
+                    st.cache_data.clear()
+                    st.rerun()
+
+    # ── 未平倉紀錄 ──
+    if _open:
+        st.subheader("持有中的紀錄", anchor=False)
+        _hdr = st.columns([1.9, 0.9, 0.9, 0.9, 0.9, 2.0, 0.7])
+        for _c, _t in zip(_hdr, ["代號 名稱", "挑選日", "我報酬", "vs前20", "vs0050", "理由", ""]):
+            _c.caption(_t)
+        for p in _open:
+            cc = st.columns([1.9, 0.9, 0.9, 0.9, 0.9, 2.0, 0.7])
+            _rk = f"（#{p['rank_at_pick']}）" if p["rank_at_pick"] else "（榜外）"
+            cc[0].markdown(f"**{p['stock_id']}** {p['stock_name']}<br>"
+                           f"<span style='color:#888;font-size:0.75em'>{_rk}</span>",
+                           unsafe_allow_html=True)
+            cc[1].caption(str(p["pick_date"]))
+            _pr = p["pick_ret"]
+            cc[2].markdown(f"**{_pr*100:+.1f}%**" if _pr is not None else "—")
+            _vp = (p["pick_ret"] - p["pool_ret"]) if (p["pick_ret"] is not None and p["pool_ret"] is not None) else None
+            _vm = (p["pick_ret"] - p["mkt_ret"]) if (p["pick_ret"] is not None and p["mkt_ret"] is not None) else None
+            cc[3].markdown(f"{_vp*100:+.1f}pp" if _vp is not None else "—")
+            cc[4].markdown(f"{_vm*100:+.1f}pp" if _vm is not None else "—")
+            cc[5].caption(p["note"] or "—")
+            if cc[6].button("平倉", key=f"close_{p['id']}", help="標記賣出（以最新收盤為出場價）"):
+                if close_pick(_uid, p["id"]):
+                    st.rerun()
+
+    # ── 已平倉紀錄 ──
+    if _closed:
+        with st.expander(f"已平倉 {len(_closed)} 筆"):
+            for p in _closed:
+                _pr = p["pick_ret"]
+                st.write(f"{p['stock_id']} {p['stock_name']}｜{p['pick_date']}→{p['exit_date']}"
+                         f"｜報酬 {(_pr*100 if _pr is not None else 0):+.1f}%｜{p['note'] or ''}")
 
 
 # ══════════════════════════════════════════════════════════════════
