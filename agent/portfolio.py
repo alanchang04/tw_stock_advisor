@@ -27,10 +27,30 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from database.connection import get_session
 from agent.strategy import (decide_exit, STRATEGY, FEE_RATE, TAX_RATE, SLIPPAGE,
                             net_return, buy_fill, sell_fill)
+from agent.paper_account import (ensure_paper_account, locked_account, marked_nav,
+                                 live_entry_share_count, record_cash, update_account)
 
 # 買單超過這天數還沒成交（例如 pipeline 連續掛掉）就作廢，不追過期訊號。
 # 需大於連假長度（春節可達 9 天），否則會誤殺正常的假期後成交。
 BUY_ORDER_STALE_DAYS = 10
+
+
+def entry_cost(shares: int, fill_price: float) -> float:
+    """Return cash required for a filled buy, including commission."""
+    return int(shares) * float(fill_price) * (1 + FEE_RATE)
+
+
+def exit_ledger(shares: int | None, entry_price: float, exit_price: float,
+                stored_entry_cost: float | None = None) -> dict:
+    """Calculate cash P&L; legacy positions without shares remain unknown."""
+    quantity = int(shares or 0)
+    if quantity <= 0:
+        return {"shares": 0, "entry_cost": None, "exit_proceeds": None, "net_pnl": None}
+    cost = (float(stored_entry_cost) if stored_entry_cost is not None
+            else entry_cost(quantity, entry_price))
+    proceeds = quantity * float(exit_price) * (1 - FEE_RATE - TAX_RATE)
+    return {"shares": quantity, "entry_cost": cost,
+            "exit_proceeds": proceeds, "net_pnl": proceeds - cost}
 
 
 def ensure_positions_table():
@@ -82,7 +102,11 @@ def ensure_pending_orders_table():
         # 不改寫 return_pct 既有語意（舊資料是舊模型的毛報酬），另存訊號價與淨報酬
         for col, typ in [("signal_price", "NUMERIC(12,2)"),
                          ("exit_signal_price", "NUMERIC(12,2)"),
-                         ("net_return_pct", "NUMERIC(8,4)")]:
+                         ("net_return_pct", "NUMERIC(8,4)"),
+                         ("shares", "INTEGER"),
+                         ("entry_cost", "NUMERIC(18,2)"),
+                         ("exit_proceeds", "NUMERIC(18,2)"),
+                         ("net_pnl", "NUMERIC(18,2)")]:
             s.execute(text(f"ALTER TABLE positions ADD COLUMN IF NOT EXISTS {col} {typ}"))
 
 
@@ -222,10 +246,16 @@ def fill_pending_orders(on_date: date) -> dict:
     """
     ensure_positions_table()
     ensure_pending_orders_table()
+    ensure_paper_account()
     from agent.strategy import suggest_shares
 
     filled_entries, filled_exits = [], []
     with get_session() as s:
+        account = locked_account(s)
+        if account is None:
+            raise RuntimeError("paper account initialization failed")
+        account_id, _, account_cash = account
+        account_cash = float(account_cash)
         orders = s.execute(text("""
             SELECT o.id, o.side, o.stock_id, o.signal_date, o.signal_price, o.reason,
                    o.position_id, st.stock_name
@@ -246,22 +276,34 @@ def fill_pending_orders(on_date: date) -> dict:
                     continue
                 fill = sell_fill(op)
                 pos = s.execute(text("""
-                    SELECT id, entry_price, entry_date FROM positions
+                    SELECT id, entry_price, entry_date, shares, entry_cost FROM positions
                     WHERE id = :pid AND status = 'open'
                 """), {"pid": pos_id}).fetchone() if pos_id else None
                 if pos is None:           # 部位已不在（例如手動平倉過）→ 作廢此單
                     s.execute(text("UPDATE pending_orders SET status='cancelled' WHERE id=:i"), {"i": oid})
                     continue
                 entry_px = float(pos[1])
+                ledger = exit_ledger(pos[3], entry_px, fill, pos[4])
+                shares = ledger["shares"]
+                exit_proceeds = ledger["exit_proceeds"]
+                net_pnl = ledger["net_pnl"]
                 gross = (fill / entry_px - 1) * 100
                 net   = net_return(entry_px, fill) * 100
                 hold  = _holding_days(s, sid, pos[2], on_date)
                 s.execute(text("""
                     UPDATE positions SET status='closed', exit_date=:d, exit_price=:px,
-                        exit_reason=:r, return_pct=:g, net_return_pct=:n, exit_signal_price=:sp
+                        exit_reason=:r, return_pct=:g, net_return_pct=:n, exit_signal_price=:sp,
+                        exit_proceeds=:proceeds, net_pnl=:pnl
                     WHERE id = :pid
                 """), {"d": on_date, "px": round(fill, 2), "r": reason, "g": round(gross, 4),
-                       "n": round(net, 4), "sp": sig_px, "pid": pos[0]})
+                       "n": round(net, 4), "sp": sig_px,
+                       "proceeds": round(exit_proceeds, 2) if exit_proceeds is not None else None,
+                       "pnl": round(net_pnl, 2) if net_pnl is not None else None,
+                       "pid": pos[0]})
+                if exit_proceeds is not None:
+                    account_cash += exit_proceeds
+                    record_cash(s, account_id, pos[0], on_date, "sell", exit_proceeds,
+                                account_cash, f"sell {sid}")
                 s.execute(text("""
                     UPDATE pending_orders SET status='filled', fill_date=:d, fill_price=:px
                     WHERE id = :i
@@ -269,6 +311,7 @@ def fill_pending_orders(on_date: date) -> dict:
                 held.discard(sid)
                 filled_exits.append({"stock_id": sid, "stock_name": name,
                                      "entry_price": entry_px, "exit_price": fill,
+                                     "shares": shares, "net_pnl": net_pnl,
                                      "return_pct": gross, "net_return_pct": net,
                                      "reason": reason, "holding_days": hold})
                 continue
@@ -285,22 +328,47 @@ def fill_pending_orders(on_date: date) -> dict:
                 s.execute(text("UPDATE pending_orders SET status='cancelled' WHERE id=:i"), {"i": oid})
                 continue
             fill = buy_fill(op)
-            s.execute(text("""
+            avg_vol = _avg_volume_before(
+                s, sid, on_date, STRATEGY.get("liquidity_avg_days", 5)
+            )
+            risk_shares = suggest_shares(fill, avg_volume=avg_vol)
+            nav = marked_nav(s, account_cash)
+            shares = live_entry_share_count(
+                price=fill, cash=account_cash, nav=nav,
+                max_open=max_open, risk_shares=risk_shares, avg_volume=avg_vol,
+                max_pct_of_avg_volume=STRATEGY.get("max_pct_of_avg_volume", 0.01),
+            )
+            if shares <= 0:
+                s.execute(text("UPDATE pending_orders SET status='cancelled' WHERE id=:i"), {"i": oid})
+                continue
+            cost = entry_cost(shares, fill)
+            inserted = s.execute(text("""
                 INSERT INTO positions (stock_id, entry_date, entry_price, entry_reason,
-                                       peak_price, signal_price)
-                VALUES (:sid, :d, :px, :reason, :px, :sp)
+                                       peak_price, signal_price, shares, entry_cost,
+                                       paper_account_id)
+                VALUES (:sid, :d, :px, :reason, :px, :sp, :shares, :entry_cost, :aid)
                 ON CONFLICT (stock_id, entry_date) WHERE source = 'ai' DO NOTHING
+                RETURNING id
             """), {"sid": sid, "d": on_date, "px": round(fill, 2),
-                   "reason": reason, "sp": sig_px})
+                   "reason": reason, "sp": sig_px, "shares": shares,
+                   "entry_cost": round(cost, 2), "aid": account_id}).fetchone()
+            if inserted is None:
+                s.execute(text("UPDATE pending_orders SET status='cancelled' WHERE id=:i"), {"i": oid})
+                continue
+            account_cash -= cost
+            record_cash(s, account_id, inserted[0], on_date, "buy", -cost,
+                        account_cash, f"buy {sid}")
             s.execute(text("""
                 UPDATE pending_orders SET status='filled', fill_date=:d, fill_price=:px
                 WHERE id = :i
             """), {"d": on_date, "px": round(fill, 2), "i": oid})
             held.add(sid)
-            avg_vol = _avg_volume_before(s, sid, on_date, STRATEGY.get("liquidity_avg_days", 5))
             filled_entries.append({"stock_id": sid, "stock_name": name, "entry_price": fill,
                                    "signal_price": float(sig_px) if sig_px else None,
-                                   "shares": suggest_shares(fill, avg_volume=avg_vol), "reason": reason})
+                                   "shares": shares, "entry_cost": cost,
+                                   "reason": reason})
+
+        update_account(s, account_id, account_cash, marked_nav(s, account_cash))
 
     if filled_entries or filled_exits:
         logger.info(f"✅ 開盤成交：買進 {len(filled_entries)} 檔、賣出 {len(filled_exits)} 檔")

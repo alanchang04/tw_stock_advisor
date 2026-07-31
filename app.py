@@ -17,7 +17,7 @@ import streamlit as st
 from sqlalchemy import text
 
 from database.connection import get_session
-from agent.strategy import decide_exit, suggest_shares, STRATEGY
+from agent.strategy import decide_exit, suggest_shares, STRATEGY, FEE_RATE, TAX_RATE
 
 # ══════════════════════════════════════════════════════════════════
 #  頁面設定
@@ -160,14 +160,15 @@ def load_open_positions() -> list[dict]:
     result = []
     with get_session() as s:
         rows = s.execute(text("""
-            SELECT p.stock_id, st.stock_name, p.entry_date, p.entry_price, p.peak_price
+            SELECT p.stock_id, st.stock_name, p.entry_date, p.entry_price, p.peak_price,
+                   p.shares, p.entry_cost
             FROM positions p JOIN stocks st ON st.stock_id = p.stock_id
             WHERE p.status = 'open' AND COALESCE(p.source, 'ai') = 'ai'
             ORDER BY p.entry_date
         """)).fetchall()
 
         for r in rows:
-            sid, name, entry_date, entry_price, peak_price = r
+            sid, name, entry_date, entry_price, peak_price, actual_shares, actual_cost = r
             entry_price = float(entry_price)
             peak_price  = float(peak_price) if peak_price else entry_price
 
@@ -228,8 +229,11 @@ def load_open_positions() -> list[dict]:
             # 2026-07-22：AI持倉的實際張數目前沒有存進DB（positions.shares只有手動倉在用），
             # 這裡用跟下單當時同一套1%風險法則(suggest_shares)反推「照現在資金設定，
             # 這張單大概會買多少股」，換算成金額損益——不是精確的歷史成交量，是可視化用估計值。
-            est_shares = suggest_shares(entry_price, cfg=STRATEGY)
-            pnl_dollar = (close - entry_price) * est_shares
+            display_shares = int(actual_shares) if actual_shares else suggest_shares(entry_price, cfg=STRATEGY)
+            if actual_shares and actual_cost is not None:
+                pnl_dollar = display_shares * close * (1 - FEE_RATE - TAX_RATE) - float(actual_cost)
+            else:
+                pnl_dollar = (close - entry_price) * display_shares
             result.append({
                 "股號": sid, "名稱": str(name),
                 "進場日": str(entry_date),
@@ -387,18 +391,20 @@ def load_closed_positions() -> pd.DataFrame:
                    p.exit_date,  p.exit_price,
                    p.return_pct, p.exit_reason,
                    (p.exit_date - p.entry_date) AS hold_days
+                   , p.net_pnl
             FROM positions p JOIN stocks st ON st.stock_id = p.stock_id
             WHERE p.status = 'closed' AND COALESCE(p.source, 'ai') = 'ai'
             ORDER BY p.exit_date DESC
         """)).fetchall()
     df = pd.DataFrame(rows, columns=[
-        "股號","名稱","進場日","進場價","出場日","出場價","報酬%","出場原因","持有天數"
+        "股號","名稱","進場日","進場價","出場日","出場價","報酬%","出場原因","持有天數","淨損益$"
     ])
     df["報酬%"] = pd.to_numeric(df["報酬%"], errors="coerce")
     if not df.empty:
         # 損益$（估）：跟開倉部位同一套邏輯，用目前資金設定反推張數，不是實際歷史成交量
         from agent.strategy import suggest_shares
         df["損益$（估）"] = [
+            round(float(r["淨損益$"])) if pd.notna(r["淨損益$"]) else
             round((float(r["出場價"]) - float(r["進場價"])) * suggest_shares(float(r["進場價"]), cfg=STRATEGY))
             for _, r in df.iterrows()
         ]
@@ -953,25 +959,15 @@ elif page == "📉 個股走勢":
 elif page == "🔄 歷史績效":
     st.title("🔄 歷史績效")
 
-    # 2026-07-24：10年基準對照。以前只對外講回測 +328%，沒講同期 0050 是 +745.5%，
-    # 那是報喜不報憂。這段是刻意放在最上面、不折疊的——使用者要能一眼看到機會成本。
     st.error(
-        "🚨 **回測誠實聲明：拉到 11.5 年全期，本策略是輸給 0050 的。**\n\n"
-        "| 2015-01~2026-07 | 總報酬 | 年化 | Sharpe | 最大回撤 | Calmar |\n"
-        "|---|---|---|---|---|---|\n"
-        "| 本策略 | +328.0% | 14.0% | 0.97 | **-27.4%** | 0.51 |\n"
-        "| **0050 買進持有(含息)** | **+745.5%** | **~20.4%** | **1.08** | -34.0% | **0.62** |\n"
-        "| 全市場等權買進持有 | +406.5% | — | — | — | — |\n\n"
-        "30萬本金：本策略做到 **128 萬**，0050 什麼都不做是 **254 萬**。"
-        "本策略**只贏在最大回撤（小 6.6pp）**。\n\n"
-        "**分年來看規律很清楚**：強多頭年（2019/2020/2021/2023/2024）全部大幅落後"
-        "（2024 差 52.7pp），熊市/平盤年（2015/2018/2022）全部勝出。"
-        "牛市落後同時伴隨交易筆數與停損次數暴增 → 疑似過度換手，診斷中。\n\n"
-        "**且獲利極度集中**：18 筆移動停利出場貢獻約 67% 毛獲利，前四大全部是 2025 年 5~6 月"
-        "進場、抱一年以上——正好落在現行策略的調校窗口內，**有過擬合嫌疑，尚未證偽**。"
+        "🚨 **資料品質聲明**：目前 Neon 的 2015–2026 行情只有約 9.7% 交易日覆蓋。"
+        "舊頁面寫死的 +328%／0050 +745.5% 與舊年化數字已移除；在完整歷史行情與"
+        "0050 含息資料補齊前，長期回測一律只視為診斷，不作投資判斷。最新 CLI 回測"
+        "會顯示實際覆蓋率，低於 80% 直接標記 DATA QUALITY FAIL。"
     )
-    with st.expander("⚖️ 2026-07-24 正式判決：現行實作已結案凍結", expanded=False):
+    with st.expander("🗄️ 2026-07-24 舊判決封存（資料品質修正後不再有效）", expanded=False):
         st.markdown(
+            "⚠️ 以下內容是歷史研究紀錄，引用舊回測口徑與不完整資料，不是目前績效。\n\n"
             "依 `docs/SPEC_QUANT_UPGRADE.md` §4.6（成功與放棄準則，2026-07-17 即已寫定）"
             "逐條對照後下的判決：\n\n"
             "| 準則 | 門檻 | 實測 | |\n|---|---|---|---|\n"
@@ -1052,8 +1048,9 @@ elif page == "🔄 歷史績效":
 
     # 進階指標：逐筆權益曲線（依出場日）→ MDD / 獲利因子
     df_seq = df.sort_values("出場日").copy()
-    df_seq["累計%"] = df_seq["報酬%"].cumsum()
-    mdd = (df_seq["累計%"] - df_seq["累計%"].cummax()).min()
+    df_seq["累計%"] = ((1 + df_seq["報酬%"] / 100).cumprod() - 1) * 100
+    _trade_equity = 1 + df_seq["累計%"] / 100
+    mdd = ((_trade_equity / _trade_equity.cummax()) - 1).min() * 100
     g_win  = df.loc[wins, "報酬%"].sum()
     g_loss = abs(df.loc[~wins, "報酬%"].sum())
     pf = g_win / g_loss if g_loss > 0 else float("inf")
@@ -1075,8 +1072,8 @@ elif page == "🔄 歷史績效":
 
     # ── Tab 1：累計績效曲線（AI 實際推薦紀錄 vs 0050）─────────────
     with t1:
-        st.caption("AI 每筆已平倉交易的累計報酬（逐筆加總）對比同期 0050 買進持有——"
-                   "這是判斷「值不值得跟單」的最直接依據")
+        st.caption("AI 已平倉交易依出場順序做逐筆複利，僅是交易品質指標；持倉可能重疊，"
+                   "因此不是可投資組合 NAV，也不能直接與 0050 比較。")
         try:
             start_d, end_d = df_seq["出場日"].min(), df_seq["出場日"].max()
             with get_session() as s:
@@ -1089,7 +1086,7 @@ elif page == "🔄 歷史績效":
             fig_eq = go.Figure()
             fig_eq.add_trace(go.Scatter(
                 x=df_seq["出場日"], y=df_seq["累計%"],
-                mode="lines+markers", name="AI 推薦（逐筆累計）",
+                mode="lines+markers", name="AI 交易（逐筆複利、非NAV）",
                 line=dict(color="#e74c3c", width=2)))
             if bench_rows:
                 bd = [r[0] for r in bench_rows]
@@ -1103,8 +1100,8 @@ elif page == "🔄 歷史績效":
                                  yaxis_title="累計報酬 %",
                                  legend=dict(orientation="h", y=1.1))
             st.plotly_chart(fig_eq, use_container_width=True)
-            st.caption("注意：AI 曲線為「逐筆報酬加總」（未含手續費/證交稅，約每筆 -0.49%），"
-                       "0050 為區間價格漲幅；兩者口徑略有差異，看趨勢與相對強弱即可。")
+            st.caption("注意：兩條線口徑不同，圖中 0050 也是價格報酬而非完整含息 NAV。"
+                       "公平比較請以 backtest 的 cash/NAV 報表為準，且資料覆蓋率需達 80%。")
         except Exception as e:
             st.warning(f"績效曲線繪製失敗：{e}")
 

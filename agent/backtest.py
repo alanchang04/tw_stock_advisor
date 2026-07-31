@@ -18,6 +18,7 @@ agent/backtest.py
 """
 from collections import Counter
 from datetime import date, timedelta
+import math
 
 import pandas as pd
 from loguru import logger
@@ -34,8 +35,10 @@ from agent.strategy import (STRATEGY, score_candidates, decide_exit, split_adjus
                             compute_factor_matrices, compute_new_entry_flag, apply_liquidity_gate,
                             apply_total_return_adjustment, SWING_SETUP_CFG,
                             build_disposition_index, exclude_disposition,
+                            apply_pre_score_filters,
                             # 交易成本/成交假設：單一事實來源在 strategy.py（回測與即時帳本共用）
                             FEE_RATE, TAX_RATE, SLIPPAGE, net_return)
+from agent.performance import buy_and_hold_nav, metric_table
 
 
 # ── 載入資料（一次全載入記憶體，避免每個日期重複查 DB）───────────
@@ -57,10 +60,12 @@ def _load(parquet_dir: str | None = None, since=None) -> dict:
     with get_session() as s:
         prices = pd.DataFrame(
             s.execute(text(f"""
-                SELECT stock_id, trade_date, open, close, volume, turnover, change_pct
+                SELECT stock_id, trade_date, open, high, low, close,
+                       volume, turnover, change_pct
                 FROM daily_prices{date_filter}
             """), params).fetchall(),
-            columns=["stock_id", "trade_date", "open", "close", "volume", "turnover", "change_pct"],
+            columns=["stock_id", "trade_date", "open", "high", "low", "close",
+                     "volume", "turnover", "change_pct"],
         )
         tech = pd.DataFrame(
             s.execute(text(f"""
@@ -86,6 +91,40 @@ def _load(parquet_dir: str | None = None, since=None) -> dict:
             s.execute(text("SELECT code, name_zh FROM industries")).fetchall(),
             columns=["industry_code", "name_zh"],
         )
+        stocks = pd.DataFrame(
+            s.execute(text("""
+                SELECT stock_id, market, listing_date, is_active
+                FROM stocks
+            """)).fetchall(),
+            columns=["stock_id", "market", "listing_date", "is_active"],
+        )
+        try:
+            delisted = pd.DataFrame(
+                s.execute(text("""
+                    SELECT stock_id, delisting_date, market
+                    FROM delisted_stocks
+                """)).fetchall(),
+                columns=["stock_id", "delisting_date", "market"],
+            )
+        except Exception:
+            delisted = pd.DataFrame(
+                columns=["stock_id", "delisting_date", "market"]
+            )
+        try:
+            universe_history = pd.DataFrame(
+                s.execute(text("""
+                    SELECT snapshot_date, stock_id, market, industry_code,
+                           asset_type, listing_date, delisting_date, is_active
+                    FROM stock_universe_history
+                """)).fetchall(),
+                columns=["snapshot_date", "stock_id", "market", "industry_code",
+                         "asset_type", "listing_date", "delisting_date", "is_active"],
+            )
+        except Exception:
+            universe_history = pd.DataFrame(columns=[
+                "snapshot_date", "stock_id", "market", "industry_code",
+                "asset_type", "listing_date", "delisting_date", "is_active",
+            ])
         try:
             rev = pd.DataFrame(
                 s.execute(text(
@@ -126,7 +165,7 @@ def _load(parquet_dir: str | None = None, since=None) -> dict:
 
     # 型別整理：DB 的 NUMERIC → float
     for df, cols in [
-        (prices, ["open", "close", "volume", "turnover", "change_pct"]),
+        (prices, ["open", "high", "low", "close", "volume", "turnover", "change_pct"]),
         (tech, ["ma5", "ma20", "ma60", "rsi14", "macd_hist", "signal_ma_cross", "signal_breakout"]),
         (inst, ["total_net", "foreign_net", "invest_net"]),
     ]:
@@ -134,12 +173,27 @@ def _load(parquet_dir: str | None = None, since=None) -> dict:
             df[c] = pd.to_numeric(df[c], errors="coerce")
     for df in (prices, tech, inst):
         df["trade_date"] = pd.to_datetime(df["trade_date"]).dt.date
+    if not stocks.empty:
+        stocks["listing_date"] = pd.to_datetime(
+            stocks["listing_date"], errors="coerce"
+        ).dt.date
+    if not delisted.empty:
+        delisted["delisting_date"] = pd.to_datetime(
+            delisted["delisting_date"], errors="coerce"
+        ).dt.date
+    if not universe_history.empty:
+        for column in ("snapshot_date", "listing_date", "delisting_date"):
+            universe_history[column] = pd.to_datetime(
+                universe_history[column], errors="coerce"
+            ).dt.date
 
     # 月營收 → point-in-time 查表 {(stock_id, 'YYYY-MM'): yoy}
     rev_map = {(r.stock_id, r.year_month): r.yoy_pct for r in rev.itertuples()}
 
     return {"prices": prices, "tech": tech, "inst": inst,
-            "imap": imap, "inds": inds, "rev_map": rev_map, "dividends": div,
+            "imap": imap, "inds": inds, "stocks": stocks,
+            "universe_history": universe_history,
+            "delisted": delisted, "rev_map": rev_map, "dividends": div,
             "disposition": disp}
 
 
@@ -193,6 +247,26 @@ def _load_parquet(parquet_dir: str) -> dict:
     inds = _p("industries.parquet")
     if inds is None:
         inds = pd.DataFrame(columns=["industry_code", "name_zh"])
+    stocks = _p("stocks.parquet")
+    if stocks is None:
+        stocks = pd.DataFrame(columns=["stock_id", "market", "listing_date", "is_active"])
+    elif "listing_date" in stocks:
+        stocks["listing_date"] = pd.to_datetime(stocks["listing_date"], errors="coerce").dt.date
+    delisted = _p("delisted_stocks.parquet")
+    if delisted is None:
+        delisted = pd.DataFrame(columns=["stock_id", "delisting_date", "market"])
+    elif "delisting_date" in delisted:
+        delisted["delisting_date"] = pd.to_datetime(
+            delisted["delisting_date"], errors="coerce").dt.date
+    universe_history = _p("stock_universe_history.parquet")
+    if universe_history is None:
+        universe_history = pd.DataFrame(columns=[
+            "snapshot_date", "stock_id", "market", "industry_code", "asset_type",
+            "listing_date", "delisting_date", "is_active"])
+    else:
+        for c in ("snapshot_date", "listing_date", "delisting_date"):
+            universe_history[c] = pd.to_datetime(
+                universe_history[c], errors="coerce").dt.date
     rev = _p("monthly_revenue.parquet")
     rev_map = {}
     if rev is not None and not rev.empty:
@@ -236,7 +310,8 @@ def _load_parquet(parquet_dir: str) -> dict:
                 f"（{'現算' if _p('technical.parquet') is None else '讀檔'}）")
     return {"prices": prices, "tech": tech, "inst": inst, "margin": margin,
             "imap": imap, "inds": inds, "rev_map": rev_map, "dividends": div,
-            "disposition": disp}
+            "disposition": disp, "stocks": stocks, "delisted": delisted,
+            "universe_history": universe_history}
 
 
 def _compute_tech_from_prices(prices: pd.DataFrame) -> pd.DataFrame:
@@ -373,6 +448,83 @@ def _hot_sectors_asof(data, d, top_n=5, min_stocks=10, window_days=7):
 
 
 # ── 某日（含當天）的候選股票，依正式評分排序取前 N ───────────────
+def _eligible_stock_ids_asof(data: dict, d, industry_codes=None,
+                             use_hot_sector_gate: bool = False) -> set[str]:
+    """Return securities that existed and were tradable on the given date."""
+    history = data.get("universe_history")
+    valid = None
+    if history is not None and not history.empty:
+        available = history[history["snapshot_date"] <= d]
+        if not available.empty:
+            snapshot_date = available["snapshot_date"].max()
+            valid = available[
+                (available["snapshot_date"] == snapshot_date)
+                & available["is_active"].fillna(False).astype(bool)
+                & available["asset_type"].eq("common_stock")
+            ][["stock_id", "industry_code"]].copy()
+    if valid is None:
+        imap = data.get("imap")
+        if imap is None or imap.empty:
+            return set()
+        valid = imap.copy()
+    valid["stock_id"] = valid["stock_id"].astype(str)
+    inds = data.get("inds")
+    if inds is not None and not inds.empty:
+        valid = valid.merge(
+            inds[["industry_code", "name_zh"]], on="industry_code", how="left"
+        )
+        valid = valid[
+            ~valid["industry_code"].isin(EXCLUDE_INDUSTRIES)
+            & ~valid["name_zh"].isin(EXCLUDE_INDUSTRIES)
+        ]
+    if use_hot_sector_gate:
+        valid = valid[valid["industry_code"].isin(industry_codes or [])]
+
+    stocks = data.get("stocks")
+    listing_dates = {}
+    if stocks is not None and not stocks.empty:
+        meta = stocks.copy()
+        meta["stock_id"] = meta["stock_id"].astype(str)
+        meta = meta[
+            meta["stock_id"].str.fullmatch(r"\d{4}", na=False)
+            & meta["market"].isin(["TWSE", "TPEX"])
+        ]
+        valid = valid[valid["stock_id"].isin(meta["stock_id"])]
+        listing_dates = meta.set_index("stock_id")["listing_date"].to_dict()
+
+    first_trade = data.get("_first_trade")
+    if first_trade is None:
+        prices = data.get("prices")
+        first_trade = (
+            prices.assign(stock_id=prices["stock_id"].astype(str))
+            .groupby("stock_id")["trade_date"].min().to_dict()
+            if prices is not None and not prices.empty else {}
+        )
+        data["_first_trade"] = first_trade
+
+    delisting_dates = {}
+    delisted = data.get("delisted")
+    if delisted is not None and not delisted.empty:
+        tmp = delisted.dropna(subset=["delisting_date"]).copy()
+        tmp["stock_id"] = tmp["stock_id"].astype(str)
+        delisting_dates = tmp.set_index("stock_id")["delisting_date"].to_dict()
+
+    eligible = set()
+    for sid in valid["stock_id"]:
+        listed_on = listing_dates.get(sid)
+        if listed_on is None or pd.isna(listed_on):
+            listed_on = first_trade.get(sid)
+        delisted_on = delisting_dates.get(sid)
+        if delisted_on is not None and pd.isna(delisted_on):
+            delisted_on = None
+        if listed_on is not None and d < listed_on:
+            continue
+        if delisted_on is not None and d > delisted_on:
+            continue
+        eligible.add(sid)
+    return eligible
+
+
 def _candidates_asof(data, d, industry_codes, top_n=5, cfg=None):
     cfg = cfg or STRATEGY
     use_gate = cfg.get("use_hot_sector_gate", True)
@@ -384,14 +536,18 @@ def _candidates_asof(data, d, industry_codes, top_n=5, cfg=None):
     if px.empty or tk.empty:
         return []
 
+    sids = _eligible_stock_ids_asof(
+        data, d, industry_codes=industry_codes,
+        use_hot_sector_gate=use_gate,
+    )
+
     if use_gate:
         # 舊行為：只取熱門族群內的股票（硬閘門）
-        sids = set(data["imap"][data["imap"]["industry_code"].isin(industry_codes)]["stock_id"])
-        base_px = px[px["stock_id"].isin(sids)]
+        base_px = px[px["stock_id"].astype(str).isin(sids)]
     else:
         # 新行為：不用族群硬閘門，全市場都是候選，讓相對強度/題材評分自己排序，
         # 才不會像舊版把整年強勢的南亞科（族群 60% 時間不在前 5 熱門）擋在門外。
-        base_px = px
+        base_px = px[px["stock_id"].astype(str).isin(sids)]
     df = base_px.merge(tk, on=["stock_id", "trade_date"], how="inner")
     if df.empty:
         return []
@@ -434,11 +590,15 @@ def _candidates_asof(data, d, industry_codes, top_n=5, cfg=None):
 
     # 處置股排除（2026-07-24，SPEC §2.4）：處置期間人工撮合+預收款券，回測照隔日開盤
     # 30bp 滑價成交是嚴重低估成本。資料沒回補時 _disposition_idx 為空 dict，自動停用。
+    avg_volume = data.get("_avg_volume_liq")
+    if avg_volume is not None and d in avg_volume.index:
+        df["avg_volume"] = df["stock_id"].map(avg_volume.loc[d])
     _disp = data.get("_disposition_idx")
-    if _disp:
-        df, _ = exclude_disposition(df, d, _disp, cfg)
-        if df.empty:
-            return []
+    df, _, _ = apply_pre_score_filters(
+        df, cfg=cfg, as_of=d, disposition_idx=_disp
+    )
+    if df.empty:
+        return []
 
     # 成交金額（流動性/抗操控）門檻：舊資料（無 turnover 欄位，如老師歷史檔）全 NaN 時優雅跳過。
     # 2026-07-15 起改用 apply_liquidity_gate（OR邏輯：成交金額達標 OR 投信新進場+較低下限）；
@@ -492,6 +652,34 @@ def is_limit_locked(change_pct: float | None, volume: float | None,
     return volume < avg_volume * lock_vol_ratio
 
 
+def _portfolio_nav(cash: float, open_pos: dict, marks: dict[str, float | None]) -> float:
+    """Return marked-to-market equity without mutating the portfolio."""
+    market_value = 0.0
+    for sid, position in open_pos.items():
+        mark = marks.get(sid)
+        if mark is None or not math.isfinite(mark) or mark <= 0:
+            mark = position.get("last_mark") or position.get("entry_price")
+        if mark is not None and math.isfinite(float(mark)) and mark > 0:
+            market_value += int(position["shares"]) * float(mark)
+    return float(cash) + market_value
+
+
+def _entry_share_count(fill: float, cash: float, nav: float, max_open: int,
+                       avg_volume: float | None, max_pct_of_avg_volume: float,
+                       fee_rate: float = FEE_RATE) -> int:
+    """Size one slot from current NAV, capped by available cash and liquidity."""
+    if fill <= 0 or cash <= 0 or nav <= 0 or max_open <= 0:
+        return 0
+    spendable = min(nav / max_open, cash)
+    shares_by_budget = int(spendable // (fill * (1 + fee_rate)))
+    shares_by_liquidity = (
+        int(avg_volume * max_pct_of_avg_volume)
+        if avg_volume is not None and math.isfinite(avg_volume) and avg_volume > 0
+        else shares_by_budget
+    )
+    return max(0, min(shares_by_budget, shares_by_liquidity))
+
+
 def _adaptive_throttle_blocked(recent_wins: list[bool], cfg: dict = STRATEGY) -> bool:
     """
     訊號品質偵測+動態縮手（2026-07-20，SPEC_QUANT_UPGRADE.md：診斷2021/2024兩個
@@ -534,12 +722,23 @@ def run_backtest(top_n=None, rebalance=5, cfg=None, data=None, quiet=False,
     top_n = top_n or cfg["pick_top_n"]
     if not quiet:
         logger.info("=== 回測開始（進場評分 + strategy 出場規則，不含 LLM）===")
+    loaded_here = data is None
     if data is None:
         # 直連 Neon 時，若呼叫端只在乎 start_date 之後的區間（如週報摘要），帶
         # since 讓 _load() 只查這段+120天緩衝（MA60/60日動能等指標需要的暖身期），
         # 大幅縮小網路傳輸量。parquet_dir 給定時走本機檔案，不受影響。
         since = (start_date - timedelta(days=120)) if (start_date and not parquet_dir) else None
         data = _load(parquet_dir=parquet_dir, since=since)
+    from research.data_quality import backtest_data_quality
+    quality = backtest_data_quality(
+        data, min_coverage=cfg.get("min_backtest_data_coverage", .80)
+    )
+    enough_dates_to_assess = data["prices"]["trade_date"].nunique() >= 10
+    if (loaded_here and enough_dates_to_assess
+            and cfg.get("enforce_backtest_data_quality", True)
+            and not quality["passed"]):
+        raise ValueError("Backtest data quality failed: " + "; ".join(quality["errors"]))
+    data["_quality"] = quality
     closes = data["prices"].pivot_table(index="trade_date", columns="stock_id", values="close")
     closes = closes.where(closes > 0)   # close<=0 為資料瑕疵(停牌/無成交)，視為缺值
     div_events = data.get("dividends")
@@ -630,8 +829,6 @@ def run_backtest(top_n=None, rebalance=5, cfg=None, data=None, quiet=False,
                                val(data["_avg_volume_liq"], d, sid), cfg)
 
     max_open = cfg.get("max_open_positions", 10)
-    capital_per_slot = cfg["capital"] / max_open   # 假設每格等額資金（近似 suggest_shares 的風控上限）
-
     open_pos = {}     # stock_id -> {entry_date, entry_price, peak, shares}
     trades = []       # 完整交易紀錄
     cash = cfg["capital"]
@@ -644,9 +841,13 @@ def run_backtest(top_n=None, rebalance=5, cfg=None, data=None, quiet=False,
     def _record_exit(sid, p, fill, d_exit, i_exit, reason):
         hold = i_exit - p["entry_i"]
         net_ret = net_return(p["entry_price"], fill)
+        buy_cost = p["shares"] * p["entry_price"] * (1 + FEE_RATE)
+        sell_proceeds = p["shares"] * fill * (1 - FEE_RATE - TAX_RATE)
         trades.append({"stock_id": sid, "entry_date": p["entry_date"], "exit_date": d_exit,
                        "ret": fill / p["entry_price"] - 1, "net_ret": net_ret,
-                       "hold": hold, "reason": reason})
+                       "hold": hold, "reason": reason, "shares": p["shares"],
+                       "buy_cost": buy_cost, "sell_proceeds": sell_proceeds,
+                       "net_pnl": sell_proceeds - buy_cost})
         recent_wins.append(net_ret > 0)
 
     for i, d in enumerate(sim_dates):
@@ -677,11 +878,29 @@ def run_backtest(top_n=None, rebalance=5, cfg=None, data=None, quiet=False,
             if not op or _limit_locked(d, sid):       # 跌停鎖死同樣沒有真實對手盤成交
                 continue
             fill = op * (1 + slippage)
-            shares_by_cash = int(capital_per_slot // (fill * (1 + FEE_RATE)))
             avg_vol = val(data["_avg_volume_liq"], d, sid)
-            shares_by_liq = (int(avg_vol * cfg.get("max_pct_of_avg_volume", 0.01))
-                             if avg_vol else shares_by_cash)
-            shares = min(shares_by_cash, shares_by_liq)
+            marks = {
+                held_sid: (
+                    val(opens, d, held_sid)
+                    or val(closes, dates[max(0, pos_idx[d] - 1)], held_sid)
+                    or held_pos.get("last_mark")
+                )
+                for held_sid, held_pos in open_pos.items()
+            }
+            current_nav = _portfolio_nav(cash, open_pos, marks)
+            sizing_nav = (
+                current_nav
+                if cfg.get("compound_position_sizing", True)
+                else float(cfg["capital"])
+            )
+            shares = _entry_share_count(
+                fill=fill,
+                cash=cash,
+                nav=sizing_nav,
+                max_open=max_open,
+                avg_volume=avg_vol,
+                max_pct_of_avg_volume=cfg.get("max_pct_of_avg_volume", 0.01),
+            )
             if shares <= 0 or cash < shares * fill * (1 + FEE_RATE):
                 continue
             cash -= shares * fill * (1 + FEE_RATE)
@@ -703,7 +922,8 @@ def run_backtest(top_n=None, rebalance=5, cfg=None, data=None, quiet=False,
                 if stop_price and stop_price >= fill:
                     stop_price = None
             open_pos[sid] = {"entry_date": d, "entry_price": fill, "peak": fill,
-                             "entry_i": i, "shares": shares, "stop_price": stop_price}
+                             "entry_i": i, "shares": shares, "stop_price": stop_price,
+                             "last_mark": fill}
         pending_entries = []
 
         # 3) 依今日收盤評估出場規則 → 掛到明日開盤成交
@@ -712,6 +932,7 @@ def run_backtest(top_n=None, rebalance=5, cfg=None, data=None, quiet=False,
             if close is None:
                 continue
             p["peak"] = max(p["peak"], close)
+            p["last_mark"] = close
             ex, reason = decide_exit(p["entry_price"], p["peak"], close,
                                      val(ma5p, d, sid), val(ma20p, d, sid), i - p["entry_i"],
                                      cfg=day_cfg,
@@ -770,15 +991,21 @@ def run_backtest(top_n=None, rebalance=5, cfg=None, data=None, quiet=False,
                     pending_entries.append(sid)
                     free_slots -= 1
 
-        mkt_val = sum(p["shares"] * (val(closes, d, sid) or p["peak"]) for sid, p in open_pos.items())
-        nav_curve.append((d, cash + mkt_val))
+        marks = {sid: val(closes, d, sid) for sid in open_pos}
+        nav_curve.append((d, _portfolio_nav(cash, open_pos, marks)))
 
     # 期末仍持有者，以最後一天收盤平倉計入（無隔日開盤可用）
     last = sim_dates[-1]
-    for sid, p in open_pos.items():
+    for sid, p in list(open_pos.items()):
         close = val(closes, last, sid)
         if close:
-            _record_exit(sid, p, close * (1 - slippage), last, len(sim_dates) - 1, "回測結束平倉")
+            fill = close * (1 - slippage)
+            _record_exit(sid, p, fill, last, len(sim_dates) - 1, "回測結束平倉")
+            cash += p["shares"] * fill * (1 - FEE_RATE - TAX_RATE)
+            del open_pos[sid]
+    if nav_curve:
+        remaining_marks = {sid: val(closes, last, sid) for sid in open_pos}
+        nav_curve[-1] = (last, _portfolio_nav(cash, open_pos, remaining_marks))
 
     if not trades:
         logger.error("回測期間沒有任何交易"); return
@@ -798,7 +1025,10 @@ def run_backtest(top_n=None, rebalance=5, cfg=None, data=None, quiet=False,
         if p0 and p1 and p0 > 0:
             bench_0050 = p1 / p0 - 1
             # 0050 買進持有的逐日 NAV（同本金），供風險調整後(Sharpe/回撤/Calmar)對比
-            nav_0050 = (mkt_adj.reindex(sim_dates).ffill() / p0) * cfg["capital"]
+            nav_0050 = buy_and_hold_nav(
+                mkt_adj.reindex(sim_dates).ffill(), cfg["capital"],
+                fee_rate=FEE_RATE, tax_rate=TAX_RATE, slippage=slippage,
+            )
     nav = pd.Series({d: v for d, v in nav_curve}).sort_index()
     m = perf_metrics(nav)
     m0050 = perf_metrics(nav_0050) if nav_0050 is not None else None
@@ -806,7 +1036,10 @@ def run_backtest(top_n=None, rebalance=5, cfg=None, data=None, quiet=False,
     tdf.attrs.update({
         "nav_total_ret": m["total"], "nav_mdd": m["mdd"],
         "sharpe": m["sharpe"], "ann_ret": m["ann_ret"], "ann_vol": m["ann_vol"], "calmar": m["calmar"],
-        "bench_0050": bench_0050,
+        "data_coverage": m["coverage"], "calendar_years": m["calendar_years"],
+        # 公平比較使用同樣含進出成本與滑價的 0050 NAV；另保留未扣成本原始值。
+        "bench_0050": m0050["total"] if m0050 else None,
+        "bench_0050_raw": bench_0050,
         "sharpe_0050": m0050["sharpe"] if m0050 else None,
         "mdd_0050": m0050["mdd"] if m0050 else None,
         "calmar_0050": m0050["calmar"] if m0050 else None,
@@ -821,6 +1054,8 @@ def run_backtest(top_n=None, rebalance=5, cfg=None, data=None, quiet=False,
         "nav": {d: float(v) for d, v in nav.items()},
         "nav_0050": ({d: float(v) for d, v in nav_0050.items()}
                      if nav_0050 is not None else None),
+        "comparison": metric_table(m, m0050).to_dict(orient="index"),
+        "data_quality": quality,
     })
     if not quiet:
         _report_roundtrip(tdf, bench, bench_0050, nav, m, m0050, cfg["capital"],
@@ -844,19 +1079,32 @@ def perf_metrics(nav: pd.Series) -> dict:
     2026-07-09 起把回測目標從「贏 0050 報酬」改為「風險調整後贏 0050」——
     大多頭年不糾結拚報酬，而是追求貼近大盤報酬、但波動與回撤更小。
     """
-    nav = nav.dropna()
+    nav = nav.dropna().sort_index()
     if len(nav) < 3:
-        return dict(total=0, ann_ret=0, ann_vol=0, sharpe=0, mdd=0, calmar=0)
-    rets = nav.pct_change().dropna()
-    years = len(nav) / TRADING_DAYS
+        return dict(total=0, ann_ret=0, ann_vol=0, sharpe=0, mdd=0, calmar=0,
+                    coverage=0, observations=len(nav), calendar_years=0)
+    try:
+        dated = nav.copy()
+        dated.index = pd.to_datetime(dated.index)
+        grid = pd.bdate_range(dated.index.min(), dated.index.max())
+        daily = dated.reindex(grid).ffill()
+        years = max((dated.index.max() - dated.index.min()).days / 365.2425,
+                    1 / TRADING_DAYS)
+        coverage = min(1.0, dated.index.nunique() / max(1, len(grid)))
+    except (TypeError, ValueError, OverflowError):
+        daily = nav
+        years = len(nav) / TRADING_DAYS
+        coverage = 1.0
+    rets = daily.pct_change().dropna()
     total = nav.iloc[-1] / nav.iloc[0] - 1
     ann_ret = (nav.iloc[-1] / nav.iloc[0]) ** (1 / years) - 1 if years > 0 else 0.0
     ann_vol = rets.std() * (TRADING_DAYS ** 0.5)
     sharpe = (rets.mean() / rets.std()) * (TRADING_DAYS ** 0.5) if rets.std() > 0 else 0.0
-    mdd = ((nav - nav.cummax()) / nav.cummax()).min()
+    mdd = ((daily - daily.cummax()) / daily.cummax()).min()
     calmar = ann_ret / abs(mdd) if mdd < 0 else float("inf")
     return dict(total=total, ann_ret=ann_ret, ann_vol=ann_vol,
-                sharpe=sharpe, mdd=mdd, calmar=calmar)
+                sharpe=sharpe, mdd=mdd, calmar=calmar,
+                coverage=coverage, observations=len(nav), calendar_years=years)
 
 
 #: research/EXPERIMENTS.md 的誠實計數（保守下界）——deflated Sharpe 的關鍵輸入。
@@ -907,9 +1155,17 @@ def _report_roundtrip(tdf, bench, bench_0050, nav, m, m0050, capital, sim_dates,
         f"  策略  ：總報酬 {m['total']*100:+.2f}%  年化 {m['ann_ret']*100:+.2f}%  "
         f"年化波動 {m['ann_vol']*100:.1f}%  Sharpe {m['sharpe']:.2f}  最大回撤 {m['mdd']*100:.1f}%  Calmar {m['calmar']:.2f}",
     ]
+    lines.append(
+        f"  Data coverage: {m['observations']} observed dates across "
+        f"{m['calendar_years']:.2f} calendar years ({m['coverage']:.1%})."
+    )
+    if m["coverage"] < 0.8:
+        lines.append(
+            "  DATA QUALITY FAIL: coverage below 80%; long-period performance is diagnostic only."
+        )
     if m0050:
         lines += [
-            f"  0050 ：總報酬 {bench_0050*100:+.2f}%  年化 {m0050['ann_ret']*100:+.2f}%  "
+            f"  0050 ：總報酬 {m0050['total']*100:+.2f}%  年化 {m0050['ann_ret']*100:+.2f}%  "
             f"年化波動 {m0050['ann_vol']*100:.1f}%  Sharpe {m0050['sharpe']:.2f}  最大回撤 {m0050['mdd']*100:.1f}%  Calmar {m0050['calmar']:.2f}",
             f"  → Sharpe {_cmp(m['sharpe'], m0050['sharpe'])}   "
             f"最大回撤 {_cmp(m['mdd'], m0050['mdd'])}   Calmar {_cmp(m['calmar'], m0050['calmar'])}",
@@ -931,7 +1187,12 @@ def _report_roundtrip(tdf, bench, bench_0050, nav, m, m0050, capital, sim_dates,
         "  調 agent/strategy.py 的參數後重跑此回測，即可比較買賣邏輯優劣。",
         "=" * 66,
     ]
-    print("\n".join(l for l in lines if l))
+    report_text = "\n".join(l for l in lines if l)
+    try:
+        print(report_text)
+    except UnicodeEncodeError:
+        encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+        print(report_text.encode(encoding, errors="replace").decode(encoding))
 
     # SPEC §5-5：成本意識——年化摩擦成本占比 + 換手率成為一級指標。
     # 同樣的毛報酬，換手兩倍就是多付一倍過路費，而先前的報告完全看不到這件事。
@@ -939,7 +1200,7 @@ def _report_roundtrip(tdf, bench, bench_0050, nav, m, m0050, capital, sim_dates,
     try:
         from research.cost_attribution import cost_metrics, edge_gap_attribution
         from research.cost_attribution import format_report as _cost_report
-        _cm = cost_metrics(tdf, n_days=len(sim_dates),
+        _cm = cost_metrics(tdf, n_days=max(1, round(m["calendar_years"] * TRADING_DAYS)),
                            max_open=STRATEGY.get("max_open_positions", 10))
         _attr = None
         if m0050 is not None and _cm:

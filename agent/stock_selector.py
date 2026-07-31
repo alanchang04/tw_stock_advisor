@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from database.connection import get_session
 from agent.strategy import (STRATEGY, score_candidates, split_adjust,
                             compute_factor_matrices, compute_new_entry_flag,
-                            apply_liquidity_gate)
+                            apply_liquidity_gate, apply_pre_score_filters)
 
 
 # 排除非個股的產業類別（ETF、指數等）
@@ -333,8 +333,8 @@ def get_candidate_stocks(
             {above_ma20_clause}
             {gate_clause}
         """), {
-            "min_close":  MIN_CLOSE,
-            "min_volume": MIN_VOLUME,
+            "min_close":  cfg.get("min_close", MIN_CLOSE),
+            "min_volume": cfg.get("min_volume", MIN_VOLUME),
             "sql_turnover_floor": sql_turnover_floor,
             "turnover_days": turnover_days,
             "vol_avg_days": vol_avg_days,
@@ -350,6 +350,9 @@ def get_candidate_stocks(
         return pd.DataFrame()
 
     df = pd.DataFrame(rows, columns=cols)
+    df = df[~df["industry"].isin(EXCLUDE_INDUSTRIES)].copy()
+    if df.empty:
+        return df
 
     # 百分位流動性門檻（2026-07-19）：對「全市場」（不是已被RSI/價格篩過的候選子集）
     # 算成交金額百分位排名，避免市場規模隨時間變化時，用絕對金額當代理的排名失真。
@@ -374,10 +377,10 @@ def get_candidate_stocks(
     # 空方硬否決規則（2026-07-15，程式層級強制）：乖離月線太遠/帶量長上引線，
     # 直接排除、不進辯論也不進練習軌清單（見 strategy.compute_hard_vetoes 註解）。
     try:
-        from agent.strategy import compute_hard_vetoes
-        hard_excluded = compute_hard_vetoes(df, cfg)
+        df, hard_excluded, _ = apply_pre_score_filters(df, cfg=cfg)
+        if df.empty:
+            return df
         if not hard_excluded.empty:
-            df = df[~df["stock_id"].isin(hard_excluded["stock_id"])].copy()
             logger.warning(f"⚠️ 硬否決規則排除 {len(hard_excluded)} 檔：" +
                            ", ".join(f"{r.stock_id}({r.hard_veto_reason.strip('；')})"
                                      for r in hard_excluded.itertuples()))
@@ -412,6 +415,12 @@ def get_candidate_stocks(
         logger.warning(f"趨勢/題材因子計算失敗（略過此因子）: {e}")
 
     # 60 日動能：取 60 個交易日前的收盤，算區間報酬（候選池內相對排名進評分）
+    if cfg.get("require_swing_setup"):
+        setup = (fmaps if "fmaps" in locals() else {}).get("swing_setup") or {}
+        df = df[df["stock_id"].map(lambda sid: bool(setup.get(sid)))].copy()
+        if df.empty:
+            return df
+
     try:
         with get_session() as session:
             base_rows = session.execute(text("""

@@ -26,6 +26,19 @@ from scipy import stats
 _EULER = 0.5772156649015329
 
 
+def _business_daily_nav(values):
+    """Normalize irregular dated NAV observations before daily statistics."""
+    import pandas as pd
+    s = pd.Series(values).dropna().sort_index()
+    if len(s) < 2:
+        return s
+    try:
+        s.index = pd.to_datetime(s.index)
+        return s.reindex(pd.bdate_range(s.index.min(), s.index.max())).ffill()
+    except (TypeError, ValueError, OverflowError):
+        return s
+
+
 # ══════════════════════════════════════════════════════════════════
 #  1. 交易級 bootstrap：平均報酬的信賴區間
 # ══════════════════════════════════════════════════════════════════
@@ -110,8 +123,8 @@ def excess_return_ttest(nav_strategy, nav_bench, periods_per_year: int = 252) ->
     """
     import pandas as pd
 
-    a = pd.Series(nav_strategy).sort_index()
-    b = pd.Series(nav_bench).sort_index() if nav_bench is not None else None
+    a = _business_daily_nav(nav_strategy)
+    b = _business_daily_nav(nav_bench) if nav_bench is not None else None
     if b is None or len(a) < 3:
         return {"n": len(a), "t_stat": float("nan"), "p_value": float("nan"),
                 "ann_excess": float("nan"), "significant": False}
@@ -216,7 +229,7 @@ def run_all(trade_returns, nav, nav_bench, n_trials: int,
     """一次跑完 §4.4 三項 + §4.2 deflated Sharpe。"""
     import pandas as pd
 
-    daily = pd.Series(nav).sort_index().pct_change().dropna().to_numpy(dtype=float) \
+    daily = _business_daily_nav(nav).pct_change().dropna().to_numpy(dtype=float) \
         if nav else np.array([])
     return {
         "bootstrap": bootstrap_mean_ci(trade_returns),

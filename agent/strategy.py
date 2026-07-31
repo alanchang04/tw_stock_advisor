@@ -128,6 +128,9 @@ STRATEGY = {
     # 勝出的柏拉圖改善(總報酬+320.7%→+344.3%、Sharpe0.97→1.00、回撤-26.1%→-24.8%、
     # Calmar0.53→0.58)，已設為新預設，跟0050(Sharpe1.08)只差0.08。
     # None=不設上限；設數值＝任一族群持倉數不得超過 max_open_positions×此比例。
+    "compound_position_sizing": True,
+    "enforce_backtest_data_quality": True,
+    "min_backtest_data_coverage": 0.80,
     "sector_exposure_cap": 0.6,
 
     # 訊號品質偵測+動態縮手（2026-07-20，診斷2021/2024兩個「指數被權值股拉漲、
@@ -855,6 +858,49 @@ def exclude_disposition(df, as_of, idx: dict, cfg: dict = STRATEGY):
         return df, (df.iloc[0:0] if df is not None and hasattr(df, "iloc") else df)
     hit = df["stock_id"].map(lambda s: is_under_disposition(s, as_of, idx))
     return df[~hit].copy(), df[hit].copy()
+
+
+def apply_pre_score_filters(df: pd.DataFrame, cfg: dict = STRATEGY,
+                            as_of=None, disposition_idx: dict | None = None):
+    """Apply candidate filters shared by live selection and backtests."""
+    if df is None or df.empty:
+        empty = df.iloc[0:0] if df is not None else pd.DataFrame()
+        return df, empty, empty
+
+    out = df.copy()
+    mask = pd.Series(True, index=out.index)
+    numeric_rules = (
+        ("close", cfg.get("min_close", STRATEGY["min_close"]), None),
+        ("volume", cfg.get("min_volume", STRATEGY["min_volume"]), None),
+        ("rsi14", cfg.get("min_rsi", STRATEGY["min_rsi"]),
+         cfg.get("max_rsi", STRATEGY["max_rsi"])),
+    )
+    for column, lower, upper in numeric_rules:
+        if column in out.columns:
+            values = pd.to_numeric(out[column], errors="coerce")
+            mask &= values >= lower
+            if upper is not None:
+                mask &= values <= upper
+    for column in ("ma5", "ma20"):
+        if column in out.columns:
+            mask &= pd.to_numeric(out[column], errors="coerce").notna()
+    if cfg.get("above_ma20_only") and {"close", "ma20"}.issubset(out.columns):
+        mask &= (
+            pd.to_numeric(out["close"], errors="coerce")
+            > pd.to_numeric(out["ma20"], errors="coerce")
+        )
+    out = out[mask].copy()
+
+    hard_excluded = compute_hard_vetoes(out, cfg)
+    if not hard_excluded.empty:
+        out = out[~out["stock_id"].isin(hard_excluded["stock_id"])].copy()
+
+    disposition_excluded = out.iloc[0:0]
+    if as_of is not None and disposition_idx:
+        out, disposition_excluded = exclude_disposition(
+            out, as_of, disposition_idx, cfg
+        )
+    return out, hard_excluded, disposition_excluded
 
 
 # ══════════════════════════════════════════════════════════════════
