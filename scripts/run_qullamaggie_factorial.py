@@ -59,7 +59,11 @@ OUT_MD = ROOT / "research" / "results" / "qullamaggie_factorial_2026-08-05.md"
 PURPOSE = "Qullamaggie 2x2 預先登記：現行/Q進場 × 現行/Q出場三組"
 
 ENTRY_MODES = ("current", "qullamaggie")
-SUPPORTED_ENTRY_MODES = (*ENTRY_MODES, "q_stop_order")
+# P3-9 reuses this engine with the production quality ranking and a prior-day box
+# stop-buy.  Its candidate pools are built by the caller and passed in as an
+# ``entry_schedule``, so only the mode name has to be accepted here.
+QUALITY_ENTRY_MODES = ("quality_stop_buy",)
+SUPPORTED_ENTRY_MODES = (*ENTRY_MODES, "q_stop_order", *QUALITY_ENTRY_MODES)
 EXIT_MODES = ("current", *EXIT_VARIANTS.keys())
 PREDECLARED_VARIANTS = {
     f"{entry}__{exit_mode}": {"entry": entry, "exit": exit_mode}
@@ -246,6 +250,23 @@ def build_entry_schedule(
     return schedule
 
 
+def _log_order(order_log: list | None, d, order: dict, outcome: str) -> None:
+    """Record what happened to one preplaced order.  Exactly one record per order.
+
+    ``outcome`` is one of ``triggered``/``gap_open``/``market_open`` (filled) or
+    ``cancelled_not_triggered``/``skipped_no_slot``/``skipped_no_price``/
+    ``skipped_no_cash``.  Needed because fill and cancel rates cannot be recovered
+    from the trade table -- cancelled orders leave no trade behind.
+    """
+    if order_log is None:
+        return
+    order_log.append({
+        "date": d, "stock_id": order["stock_id"],
+        "signal_date": order.get("signal_date"),
+        "trigger": order.get("trigger"), "outcome": outcome,
+    })
+
+
 def _finalize_trade(sid: str, position: dict, d, fill: float, reason: str) -> dict:
     shares = int(position["shares"])
     proceeds = shares * fill * (1 - FEE_RATE - TAX_RATE)
@@ -279,7 +300,7 @@ def run_factorial_backtest(
     entry_mode: str, exit_mode: str, cfg: dict | None = None,
     spec: QullamaggieSpec = QullamaggieSpec(), rebalance: int = 5,
     top_n: int = 5, slippage: float = SLIPPAGE,
-    entry_schedule: dict | None = None,
+    entry_schedule: dict | None = None, order_log: list | None = None,
 ) -> pd.DataFrame:
     """Run one factorial cell with real cash, shares, costs and next-open fills."""
     if entry_mode not in SUPPORTED_ENTRY_MODES or exit_mode not in EXIT_MODES:
@@ -329,18 +350,24 @@ def run_factorial_backtest(
         for order in pending_entries:
             sid = order["stock_id"]
             if sid in positions or len(positions) >= max_open:
+                _log_order(order_log, d, order, "skipped_no_slot")
                 continue
             op = _value(opens, d, sid)
             if op is None:
+                _log_order(order_log, d, order, "skipped_no_price")
                 continue
             trigger = order.get("trigger")
             if trigger is not None:
                 day_high = _value(highs, d, sid)
                 fill = stop_buy_fill(op, day_high, float(trigger), slippage)
                 if fill is None:
+                    # The preplaced stop never traded, so the order simply expires.
+                    _log_order(order_log, d, order, "cancelled_not_triggered")
                     continue
+                fill_kind = "gap_open" if op >= float(trigger) else "triggered"
             else:
                 fill = op * (1 + slippage)
+                fill_kind = "market_open"
             sig_d = order["signal_date"]
             if exit_mode == "current":
                 stop = fill * (1 - float(cfg.get("stop_loss", 0.08)))
@@ -362,7 +389,9 @@ def run_factorial_backtest(
                 cfg=cfg, stop_price=stop, size_scale=1.0,
             )
             if shares <= 0 or shares * fill * (1 + FEE_RATE) > cash:
+                _log_order(order_log, d, order, "skipped_no_cash")
                 continue
+            _log_order(order_log, d, order, fill_kind)
             buy_cost = shares * fill * (1 + FEE_RATE)
             cash -= buy_cost
             positions[sid] = {
@@ -435,7 +464,11 @@ def run_factorial_backtest(
 
         # 4) Build entries. Current signals keep the production five-day cadence;
         # Q signals are event-driven and checked daily.
-        market_key = "qullamaggie" if entry_mode == "q_stop_order" else entry_mode
+        # Q modes use the Q-style MA10>MA20 market state; every other mode -- the
+        # production entry and the P3-9 quality stop-buy -- keeps the production
+        # 0050-vs-MA60 filter, so entry timing is the only thing that varies.
+        market_key = ("qullamaggie" if entry_mode in ("qullamaggie", "q_stop_order")
+                      else "current")
         market_ok = bool(market[market_key].get(d, False))
         cadence_ok = entry_mode != "current" or i % rebalance == 0
         if market_ok and cadence_ok:
@@ -662,7 +695,12 @@ def main() -> None:
             print(f"{split:11s} {name:34s} ann={m['annual_return']:+.2%} "
                   f"S={m['sharpe']:.2f} MDD={m['mdd']:+.2%} n={m['trades']}", flush=True)
         payload["splits"][split] = section
-    payload["assessment"] = _assessment(payload)
+    # _assessment compares every declared cell, so it is only meaningful for a full
+    # run; with --only it used to raise KeyError *after* printing the result.
+    payload["assessment"] = (
+        {"status": "partial_diagnostic_only", "only": args.only} if args.only
+        else _assessment(payload)
+    )
     if args.no_write:
         print(json.dumps(payload, ensure_ascii=False, indent=2))
         return
