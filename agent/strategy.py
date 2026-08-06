@@ -115,6 +115,12 @@ STRATEGY = {
                                             # Sharpe/Calmar同步改善，是四組對照中最佳配置。
                                             # False=只加出場保護，不擋新倉（舊預設）
     "bear_reenable_death_cross": True,
+    # 研究用曝險模式。正式策略維持 binary；tiered 會依 risk_on/neutral/risk_off
+    # 把每筆部位縮成 100%/60%/30%，避免只用 MA60 一刀切而錯過修正後反彈。
+    "market_exposure_mode": "binary",
+    "neutral_exposure_scale": 0.60,
+    "risk_off_exposure_scale": 0.30,
+    "risk_off_breadth_threshold": 0.40,
 
     # ── 資金/風險管理（參考 freqtrade money management / 1% 風險法則）──
     # 每筆交易最多虧總資金的 risk_per_trade（配合停損距離反推張數）
@@ -147,6 +153,25 @@ STRATEGY = {
     # 讓飛天股整段大波段吃下來（實測 3491+103%/6274+97%/3026+120% 都是單次抱到）。
     # 固定停利、40 日時間停損都關閉；移動停利只留一層「寬 backstop」防拋物線崩塌。
     "stop_loss":      0.08,   # 自進場價跌 8% → 停損（趨勢還沒確立前的災難保護）
+    # 以下全是 opt-in 研究開關；預設不改動 8% 正式策略。
+    # stop_mode="atr" 時，以訊號日前 ATR 決定停損距離，並限制在 5%~12%。
+    "stop_mode": None,
+    "atr_period": 14,
+    "atr_stop_multiple": 2.5,
+    "atr_stop_min_pct": 0.05,
+    "atr_stop_max_pct": 0.12,
+    # 收盤跌破停損但隔日開盤已站回停損線時，取消該次賣單並於收盤重新判斷。
+    "revalidate_stop_at_open": False,
+    "stop_revalidate_buffer": 0.0,
+    # 停損／熊市死叉後的獨立重進場觀察。正式策略預設關閉，研究版才開。
+    "reentry_enabled": False,
+    "reentry_cooldown_days": 2,
+    "reentry_watch_days": 20,
+    "reentry_rank_pool": 20,
+    "reentry_position_scale": 0.50,
+    "reentry_require_above_ma20": True,
+    "reentry_require_above_exit": True,
+    "reentry_exit_reason_prefixes": ("停損", "均線死亡交叉"),
     "take_profit":    0.30,   # 固定停利門檻（僅 exit_fixed_take_profit=True 時生效，供消融對照用）
     "exit_fixed_take_profit": False,
     "trail_activate": 0.10,   # 沿用：trail_tiers 沒設定時的預設啟動門檻
@@ -906,7 +931,125 @@ def apply_pre_score_filters(df: pd.DataFrame, cfg: dict = STRATEGY,
 # ══════════════════════════════════════════════════════════════════
 #  資金管理：建議張數
 # ══════════════════════════════════════════════════════════════════
-def suggest_shares(price: float, cfg: dict = STRATEGY, avg_volume: float | None = None) -> int:
+def initial_stop_price(entry_price: float, cfg: dict = STRATEGY,
+                       atr: float | None = None,
+                       structural_stop: float | None = None) -> float | None:
+    """Return the entry-time stop using only information known at entry.
+
+    ``structural_stop`` takes priority for the existing entry-bar/box experiments.
+    ATR distance is bounded by pre-declared percentage limits so a stale/abnormal ATR
+    cannot create either a microscopic or effectively unbounded position risk.
+    """
+    if not entry_price or entry_price <= 0:
+        return None
+    if structural_stop is not None and 0 < structural_stop < entry_price:
+        return float(structural_stop)
+    if cfg.get("stop_mode") == "atr" and atr is not None and math.isfinite(atr) and atr > 0:
+        raw_pct = float(cfg.get("atr_stop_multiple", 2.5)) * atr / entry_price
+        min_pct = float(cfg.get("atr_stop_min_pct", 0.05))
+        max_pct = float(cfg.get("atr_stop_max_pct", 0.12))
+        distance_pct = min(max(raw_pct, min_pct), max_pct)
+        return entry_price * (1 - distance_pct)
+    return entry_price * (1 - float(cfg.get("stop_loss", 0.08)))
+
+
+def average_true_range(history: list[dict], period: int = 14) -> float | None:
+    """Calculate Wilder-style input ATR (simple rolling mean of true range).
+
+    The helper deliberately accepts plain OHLC dictionaries so live trading and tests
+    use the same definition as the vectorised backtest implementation.
+    """
+    if not history or period <= 0:
+        return None
+    trs = []
+    prev_close = None
+    for row in history:
+        try:
+            high, low, close = float(row["high"]), float(row["low"]), float(row["close"])
+        except (KeyError, TypeError, ValueError):
+            prev_close = None
+            continue
+        if not all(math.isfinite(v) and v > 0 for v in (high, low, close)):
+            prev_close = None
+            continue
+        tr = high - low
+        if prev_close is not None:
+            tr = max(tr, abs(high - prev_close), abs(low - prev_close))
+        trs.append(tr)
+        prev_close = close
+    if len(trs) < period:
+        return None
+    return sum(trs[-period:]) / period
+
+
+def is_initial_stop_reason(reason: str | None) -> bool:
+    """Whether an exit reason represents the initial disaster stop."""
+    return bool(reason and str(reason).startswith("停損"))
+
+
+def stop_exit_recovered_at_open(reason: str | None, open_price: float | None,
+                                stop_price: float | None,
+                                cfg: dict = STRATEGY) -> bool:
+    """Return True when an opt-in stop order should be cancelled at next open."""
+    if not cfg.get("revalidate_stop_at_open") or not is_initial_stop_reason(reason):
+        return False
+    if open_price is None or stop_price is None or open_price <= 0 or stop_price <= 0:
+        return False
+    buffer = max(float(cfg.get("stop_revalidate_buffer", 0.0)), 0.0)
+    return open_price > stop_price * (1 + buffer)
+
+
+def market_position_scale(state: str, cfg: dict = STRATEGY) -> float:
+    """Map a precomputed market state to an entry-size scale."""
+    if cfg.get("market_exposure_mode", "binary") != "tiered":
+        if state == "risk_off" and cfg.get("market_filter_block_entries", False):
+            return 0.0
+        return 1.0
+    if state == "risk_on":
+        return 1.0
+    if state == "risk_off":
+        return max(0.0, min(float(cfg.get("risk_off_exposure_scale", 0.30)), 1.0))
+    return max(0.0, min(float(cfg.get("neutral_exposure_scale", 0.60)), 1.0))
+
+
+def reentry_candidate_ok(close: float | None, ma20: float | None,
+                         prior_exit_price: float | None,
+                         cfg: dict = STRATEGY) -> bool:
+    """Shared price confirmation for the live and backtest reentry state machines."""
+    values = (close, ma20, prior_exit_price)
+    if any(v is None or not math.isfinite(float(v)) or float(v) <= 0 for v in values):
+        return False
+    if cfg.get("reentry_require_above_ma20", True) and float(close) <= float(ma20):
+        return False
+    if cfg.get("reentry_require_above_exit", True) and float(close) <= float(prior_exit_price):
+        return False
+    return True
+
+
+def entry_share_count(price: float, cash: float, nav: float, max_open: int,
+                      cfg: dict = STRATEGY, avg_volume: float | None = None,
+                      stop_price: float | None = None,
+                      size_scale: float = 1.0) -> int:
+    """Shared live/backtest sizing: cash, NAV slot, stop risk and liquidity caps."""
+    if (not price or price <= 0 or cash <= 0 or nav <= 0 or max_open <= 0
+            or size_scale <= 0):
+        return 0
+    stop = stop_price or initial_stop_price(price, cfg)
+    risk_per_share = price - stop if stop is not None else price * cfg.get("stop_loss", 0.08)
+    if risk_per_share <= 0:
+        return 0
+    risk_budget = nav * float(cfg.get("risk_per_trade", 0.01)) * size_scale
+    shares_by_risk = risk_budget / risk_per_share
+    slot_budget = min(cash, nav / max_open * size_scale)
+    shares_by_slot = slot_budget / (price * (1 + FEE_RATE))
+    candidates = [shares_by_risk, shares_by_slot]
+    if avg_volume is not None and math.isfinite(avg_volume) and avg_volume > 0:
+        candidates.append(avg_volume * cfg.get("max_pct_of_avg_volume", 0.01))
+    return max(math.floor(min(candidates)), 0)
+
+
+def suggest_shares(price: float, cfg: dict = STRATEGY, avg_volume: float | None = None,
+                   stop_price: float | None = None) -> int:
     """
     1% 風險法則（股為單位，支援零股）：
       單筆最大虧損 = capital × risk_per_trade；停損打到每股虧 price × stop_loss
@@ -918,8 +1061,10 @@ def suggest_shares(price: float, cfg: dict = STRATEGY, avg_volume: float | None 
     """
     if not price or price <= 0:
         return 0
+    stop = stop_price or initial_stop_price(price, cfg)
+    risk_per_share  = price - stop if stop is not None else price * cfg["stop_loss"]
     risk_budget     = cfg["capital"] * cfg["risk_per_trade"]
-    shares_by_risk  = risk_budget / (price * cfg["stop_loss"])
+    shares_by_risk  = risk_budget / risk_per_share
     cap_value       = cfg["capital"] / max(cfg.get("pick_top_n", 5), 1)
     shares_by_cap   = cap_value / price
     candidates      = [shares_by_risk, shares_by_cap]

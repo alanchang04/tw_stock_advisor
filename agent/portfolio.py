@@ -26,9 +26,11 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from database.connection import get_session
 from agent.strategy import (decide_exit, STRATEGY, FEE_RATE, TAX_RATE, SLIPPAGE,
-                            net_return, buy_fill, sell_fill)
+                            net_return, buy_fill, sell_fill, average_true_range,
+                            initial_stop_price, entry_share_count,
+                            stop_exit_recovered_at_open, reentry_candidate_ok)
 from agent.paper_account import (ensure_paper_account, locked_account, marked_nav,
-                                 live_entry_share_count, record_cash, update_account)
+                                 record_cash, update_account)
 
 # 買單超過這天數還沒成交（例如 pipeline 連續掛掉）就作廢，不追過期訊號。
 # 需大於連假長度（春節可達 9 天），否則會誤殺正常的假期後成交。
@@ -106,8 +108,29 @@ def ensure_pending_orders_table():
                          ("shares", "INTEGER"),
                          ("entry_cost", "NUMERIC(18,2)"),
                          ("exit_proceeds", "NUMERIC(18,2)"),
-                         ("net_pnl", "NUMERIC(18,2)")]:
+                         ("net_pnl", "NUMERIC(18,2)"),
+                         ("stop_price", "NUMERIC(12,2)")]:
             s.execute(text(f"ALTER TABLE positions ADD COLUMN IF NOT EXISTS {col} {typ}"))
+        s.execute(text("""
+            CREATE TABLE IF NOT EXISTS swing_reentry_watch (
+                id BIGSERIAL PRIMARY KEY,
+                stock_id VARCHAR(10) NOT NULL REFERENCES stocks(stock_id),
+                prior_position_id BIGINT REFERENCES positions(id),
+                exit_date DATE NOT NULL, exit_price NUMERIC(12,2) NOT NULL,
+                exit_reason TEXT NOT NULL,
+                status VARCHAR(12) NOT NULL DEFAULT 'active'
+                    CHECK (status IN ('active','queued','reentered','expired')),
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        s.execute(text("""CREATE UNIQUE INDEX IF NOT EXISTS uq_swing_reentry_active
+                          ON swing_reentry_watch(stock_id)
+                          WHERE status IN ('active','queued')"""))
+        for col, typ in [("size_scale", "NUMERIC(8,4) NOT NULL DEFAULT 1.0"),
+                         ("order_kind", "VARCHAR(20) NOT NULL DEFAULT 'normal'"),
+                         ("reentry_watch_id", "BIGINT REFERENCES swing_reentry_watch(id)")]:
+            s.execute(text(f"ALTER TABLE pending_orders ADD COLUMN IF NOT EXISTS {col} {typ}"))
 
 
 def _open_price(session, stock_id: str, on_date: date) -> float | None:
@@ -137,14 +160,17 @@ def open_positions() -> list[dict]:
     若不過濾，queue_exits 會把使用者的真實持股掛單自動平倉。"""
     with get_session() as s:
         rows = s.execute(text("""
-            SELECT p.stock_id, st.stock_name, p.entry_date, p.entry_price, p.peak_price, p.id
+            SELECT p.stock_id, st.stock_name, p.entry_date, p.entry_price, p.peak_price, p.id,
+                   p.stop_price, p.shares, p.paper_account_id
             FROM positions p JOIN stocks st ON st.stock_id = p.stock_id
             WHERE p.status = 'open' AND COALESCE(p.source, 'ai') = 'ai'
             ORDER BY p.entry_date
         """)).fetchall()
     return [dict(stock_id=r[0], stock_name=r[1], entry_date=r[2],
                  entry_price=float(r[3]), peak_price=float(r[4]) if r[4] else float(r[3]),
-                 id=r[5])
+                 id=r[5], stop_price=float(r[6]) if r[6] is not None else None,
+                 shares=int(r[7]) if r[7] is not None else None,
+                 paper_account_id=int(r[8]) if r[8] is not None else None)
             for r in rows]
 
 
@@ -212,6 +238,13 @@ def queue_entries(picks: list[dict], on_date: date) -> list[dict]:
         return []
 
     queued = []
+    default_scale = 1.0
+    if STRATEGY.get("market_exposure_mode", "binary") == "tiered":
+        try:
+            from agent.stock_selector import market_regime_detail
+            default_scale = float(market_regime_detail().get("exposure_scale", 1.0))
+        except Exception as e:
+            logger.warning(f"市場曝險級距查詢失敗（採正常部位）: {e}")
     with get_session() as s:
         for pk in picks:
             if len(queued) >= slots:
@@ -224,15 +257,102 @@ def queue_entries(picks: list[dict], on_date: date) -> list[dict]:
             if not rows or rows[-1]["close"] <= 0:
                 continue
             signal_price = rows[-1]["close"]
-            s.execute(text("""
-                INSERT INTO pending_orders (side, stock_id, signal_date, signal_price, reason)
-                VALUES ('buy', :sid, :d, :px, :reason)
-                ON CONFLICT DO NOTHING
-            """), {"sid": sid, "d": on_date, "px": signal_price, "reason": pk.get("reason", "")})
+            size_scale = max(0.0, min(float(pk.get("size_scale", default_scale)), 1.0))
+            order_kind = str(pk.get("order_kind", "normal"))
+            reentry_watch_id = pk.get("reentry_watch_id")
+            inserted = s.execute(text("""
+                INSERT INTO pending_orders
+                    (side, stock_id, signal_date, signal_price, reason,
+                     size_scale, order_kind, reentry_watch_id)
+                VALUES ('buy', :sid, :d, :px, :reason, :scale, :kind, :wid)
+                ON CONFLICT DO NOTHING RETURNING id
+            """), {"sid": sid, "d": on_date, "px": signal_price,
+                   "reason": pk.get("reason", ""), "scale": size_scale,
+                   "kind": order_kind, "wid": reentry_watch_id}).fetchone()
+            if inserted is None:
+                continue
             queued.append({"stock_id": sid, "signal_price": signal_price,
-                           "reason": pk.get("reason", "")})
+                           "reason": pk.get("reason", ""), "size_scale": size_scale,
+                           "order_kind": order_kind,
+                           "reentry_watch_id": reentry_watch_id})
     if queued:
         logger.info(f"📌 掛出隔日開盤買單 {len(queued)} 檔")
+    return queued
+
+
+def queue_reentries(candidates, on_date: date) -> list[dict]:
+    """Queue opt-in, half-sized reentries from the factor-ranked candidate pool.
+
+    A stopped stock does not receive a special score. It must independently return to
+    the ordinary top-N pool, finish its cooldown, and reclaim MA20/its exit price.
+    This prevents the state machine from becoming a stock-specific exception.
+    """
+    if not STRATEGY.get("reentry_enabled") or candidates is None or candidates.empty:
+        return []
+    ensure_pending_orders_table()
+    pool_n = int(STRATEGY.get("reentry_rank_pool", 20))
+    cooldown = int(STRATEGY.get("reentry_cooldown_days", 2))
+    watch_days = int(STRATEGY.get("reentry_watch_days", 20))
+    try:
+        from agent.stock_selector import market_regime_detail
+        market_scale = float(market_regime_detail().get("exposure_scale", 1.0))
+    except Exception:
+        market_scale = 1.0
+    reentry_scale = market_scale * float(STRATEGY.get("reentry_position_scale", 0.50))
+    if reentry_scale <= 0:
+        return []
+
+    with get_session() as s:
+        watches = s.execute(text("""
+            SELECT w.id, w.stock_id, w.exit_date, w.exit_price, w.exit_reason,
+                   (SELECT COUNT(DISTINCT trade_date) FROM daily_prices
+                    WHERE trade_date > w.exit_date AND trade_date <= :d) AS age
+            FROM swing_reentry_watch w
+            WHERE w.status='active'
+            ORDER BY w.exit_date, w.id
+        """), {"d": on_date}).fetchall()
+        for w in watches:
+            if int(w[5] or 0) > watch_days:
+                s.execute(text("""
+                    UPDATE swing_reentry_watch SET status='expired', updated_at=NOW()
+                    WHERE id=:i
+                """), {"i": w[0]})
+    by_sid = {str(w[1]): w for w in watches
+              if cooldown <= int(w[5] or 0) <= watch_days}
+    if not by_sid:
+        return []
+
+    picks = []
+    for rank, row in enumerate(candidates.head(pool_n).to_dict("records"), 1):
+        sid = str(row.get("stock_id"))
+        watch = by_sid.get(sid)
+        if watch is None:
+            continue
+        try:
+            close = float(row.get("close"))
+            ma20 = float(row.get("ma20"))
+        except (TypeError, ValueError):
+            continue
+        if not reentry_candidate_ok(close, ma20, float(watch[3]), STRATEGY):
+            continue
+        picks.append({
+            "stock_id": sid,
+            "reason": (f"重新進場：原策略排名#{rank}、站回MA20與前次出場價；"
+                       f"前次{watch[4]}"),
+            "size_scale": reentry_scale,
+            "order_kind": "reentry",
+            "reentry_watch_id": int(watch[0]),
+        })
+
+    queued = queue_entries(picks, on_date)
+    if queued:
+        ids = [q["reentry_watch_id"] for q in queued if q.get("reentry_watch_id")]
+        if ids:
+            with get_session() as s:
+                s.execute(text("""
+                    UPDATE swing_reentry_watch SET status='queued', updated_at=NOW()
+                    WHERE id = ANY(:ids)
+                """), {"ids": ids})
     return queued
 
 
@@ -247,9 +367,7 @@ def fill_pending_orders(on_date: date) -> dict:
     ensure_positions_table()
     ensure_pending_orders_table()
     ensure_paper_account()
-    from agent.strategy import suggest_shares
-
-    filled_entries, filled_exits = [], []
+    filled_entries, filled_exits, cancelled_exits = [], [], []
     with get_session() as s:
         account = locked_account(s)
         if account is None:
@@ -258,7 +376,8 @@ def fill_pending_orders(on_date: date) -> dict:
         account_cash = float(account_cash)
         orders = s.execute(text("""
             SELECT o.id, o.side, o.stock_id, o.signal_date, o.signal_price, o.reason,
-                   o.position_id, st.stock_name
+                   o.position_id, st.stock_name, o.size_scale, o.order_kind,
+                   o.reentry_watch_id
             FROM pending_orders o JOIN stocks st ON st.stock_id = o.stock_id
             WHERE o.status = 'pending' AND o.signal_date < :d
             ORDER BY o.side DESC, o.id      -- 先賣後買：釋出名額與資金
@@ -267,22 +386,36 @@ def fill_pending_orders(on_date: date) -> dict:
         held = {p["stock_id"] for p in open_positions()}
         max_open = STRATEGY.get("max_open_positions", 10)
 
-        for oid, side, sid, sig_date, sig_px, reason, pos_id, name in orders:
+        for (oid, side, sid, sig_date, sig_px, reason, pos_id, name,
+             size_scale, order_kind, reentry_watch_id) in orders:
             op = _open_price(s, sid, on_date)
 
             if side == "sell":
                 if op is None:            # 停牌：賣單順延，繼續 pending
                     logger.warning(f"  {sid} {name} 無開盤價，賣單順延")
                     continue
-                fill = sell_fill(op)
                 pos = s.execute(text("""
-                    SELECT id, entry_price, entry_date, shares, entry_cost FROM positions
+                    SELECT id, entry_price, entry_date, shares, entry_cost, stop_price
+                    FROM positions
                     WHERE id = :pid AND status = 'open'
                 """), {"pid": pos_id}).fetchone() if pos_id else None
                 if pos is None:           # 部位已不在（例如手動平倉過）→ 作廢此單
                     s.execute(text("UPDATE pending_orders SET status='cancelled' WHERE id=:i"), {"i": oid})
                     continue
                 entry_px = float(pos[1])
+                stop_line = (float(pos[5]) if pos[5] is not None
+                             else initial_stop_price(entry_px, STRATEGY))
+                if stop_exit_recovered_at_open(reason, op, stop_line, STRATEGY):
+                    s.execute(text(
+                        "UPDATE pending_orders SET status='cancelled' WHERE id=:i"
+                    ), {"i": oid})
+                    cancelled_exits.append({
+                        "stock_id": sid, "stock_name": name, "reason": reason,
+                        "open_price": op, "stop_price": stop_line,
+                        "action": "開盤已站回停損線，取消賣單；收盤重新判斷",
+                    })
+                    continue
+                fill = sell_fill(op)
                 ledger = exit_ledger(pos[3], entry_px, fill, pos[4])
                 shares = ledger["shares"]
                 exit_proceeds = ledger["exit_proceeds"]
@@ -309,6 +442,16 @@ def fill_pending_orders(on_date: date) -> dict:
                     WHERE id = :i
                 """), {"d": on_date, "px": round(fill, 2), "i": oid})
                 held.discard(sid)
+                prefixes = tuple(STRATEGY.get("reentry_exit_reason_prefixes") or ())
+                if (STRATEGY.get("reentry_enabled") and prefixes
+                        and any(str(reason).startswith(prefix) for prefix in prefixes)):
+                    s.execute(text("""
+                        INSERT INTO swing_reentry_watch
+                            (stock_id, prior_position_id, exit_date, exit_price, exit_reason)
+                        VALUES (:sid, :pid, :d, :px, :reason)
+                        ON CONFLICT DO NOTHING
+                    """), {"sid": sid, "pid": pos[0], "d": on_date,
+                           "px": round(fill, 2), "reason": reason})
                 filled_exits.append({"stock_id": sid, "stock_name": name,
                                      "entry_price": entry_px, "exit_price": fill,
                                      "shares": shares, "net_pnl": net_pnl,
@@ -319,41 +462,76 @@ def fill_pending_orders(on_date: date) -> dict:
             # ── buy ──
             if (on_date - sig_date).days > BUY_ORDER_STALE_DAYS:
                 s.execute(text("UPDATE pending_orders SET status='expired' WHERE id=:i"), {"i": oid})
+                if reentry_watch_id:
+                    s.execute(text("UPDATE swing_reentry_watch SET status='expired', updated_at=NOW() WHERE id=:i"),
+                              {"i": reentry_watch_id})
                 logger.warning(f"  {sid} {name} 買單過期作廢（訊號 {sig_date}）")
                 continue
             if op is None:                # 停牌：買單不追價，直接取消
                 s.execute(text("UPDATE pending_orders SET status='cancelled' WHERE id=:i"), {"i": oid})
+                if reentry_watch_id:
+                    s.execute(text("UPDATE swing_reentry_watch SET status='active', updated_at=NOW() WHERE id=:i"),
+                              {"i": reentry_watch_id})
                 continue
             if sid in held or len(held) >= max_open:
                 s.execute(text("UPDATE pending_orders SET status='cancelled' WHERE id=:i"), {"i": oid})
+                if reentry_watch_id:
+                    s.execute(text("UPDATE swing_reentry_watch SET status='active', updated_at=NOW() WHERE id=:i"),
+                              {"i": reentry_watch_id})
                 continue
             fill = buy_fill(op)
             avg_vol = _avg_volume_before(
                 s, sid, on_date, STRATEGY.get("liquidity_avg_days", 5)
             )
-            risk_shares = suggest_shares(fill, avg_volume=avg_vol)
-            nav = marked_nav(s, account_cash)
-            shares = live_entry_share_count(
-                price=fill, cash=account_cash, nav=nav,
-                max_open=max_open, risk_shares=risk_shares, avg_volume=avg_vol,
-                max_pct_of_avg_volume=STRATEGY.get("max_pct_of_avg_volume", 0.01),
+            stop_mode = STRATEGY.get("stop_mode")
+            box_days = int((STRATEGY.get("swing_setup") or {}).get("consol_days", 20))
+            stop_history = _recent_rows(
+                s, sid, sig_date,
+                n=max(int(STRATEGY.get("atr_period", 14)) + 1, box_days),
+            )
+            entry_atr = average_true_range(
+                stop_history, int(STRATEGY.get("atr_period", 14))
+            )
+            structural_stop = None
+            if stop_mode == "entry_bar_low" and stop_history:
+                structural_stop = stop_history[-1].get("low")
+            elif stop_mode == "box_low" and stop_history:
+                lows = [r.get("low") for r in stop_history[-box_days:]
+                        if r.get("low") and r["low"] > 0]
+                structural_stop = min(lows) if lows else None
+            stop_line = initial_stop_price(
+                fill, STRATEGY, atr=entry_atr, structural_stop=structural_stop
+            )
+            nav = marked_nav(s, account_cash, account_id)
+            shares = entry_share_count(
+                price=fill, cash=account_cash, nav=nav, max_open=max_open,
+                cfg=STRATEGY, avg_volume=avg_vol, stop_price=stop_line,
+                size_scale=float(size_scale or 1.0),
             )
             if shares <= 0:
                 s.execute(text("UPDATE pending_orders SET status='cancelled' WHERE id=:i"), {"i": oid})
+                if reentry_watch_id:
+                    s.execute(text("UPDATE swing_reentry_watch SET status='active', updated_at=NOW() WHERE id=:i"),
+                              {"i": reentry_watch_id})
                 continue
             cost = entry_cost(shares, fill)
             inserted = s.execute(text("""
                 INSERT INTO positions (stock_id, entry_date, entry_price, entry_reason,
                                        peak_price, signal_price, shares, entry_cost,
-                                       paper_account_id)
-                VALUES (:sid, :d, :px, :reason, :px, :sp, :shares, :entry_cost, :aid)
+                                       paper_account_id, stop_price)
+                VALUES (:sid, :d, :px, :reason, :px, :sp, :shares, :entry_cost,
+                        :aid, :stop)
                 ON CONFLICT (stock_id, entry_date) WHERE source = 'ai' DO NOTHING
                 RETURNING id
             """), {"sid": sid, "d": on_date, "px": round(fill, 2),
                    "reason": reason, "sp": sig_px, "shares": shares,
-                   "entry_cost": round(cost, 2), "aid": account_id}).fetchone()
+                   "entry_cost": round(cost, 2), "aid": account_id,
+                   "stop": round(stop_line, 2) if STRATEGY.get("stop_mode") else None}).fetchone()
             if inserted is None:
                 s.execute(text("UPDATE pending_orders SET status='cancelled' WHERE id=:i"), {"i": oid})
+                if reentry_watch_id:
+                    s.execute(text("UPDATE swing_reentry_watch SET status='active', updated_at=NOW() WHERE id=:i"),
+                              {"i": reentry_watch_id})
                 continue
             account_cash -= cost
             record_cash(s, account_id, inserted[0], on_date, "buy", -cost,
@@ -363,16 +541,25 @@ def fill_pending_orders(on_date: date) -> dict:
                 WHERE id = :i
             """), {"d": on_date, "px": round(fill, 2), "i": oid})
             held.add(sid)
+            if reentry_watch_id:
+                s.execute(text("""
+                    UPDATE swing_reentry_watch SET status='reentered', updated_at=NOW()
+                    WHERE id=:i
+                """), {"i": reentry_watch_id})
             filled_entries.append({"stock_id": sid, "stock_name": name, "entry_price": fill,
                                    "signal_price": float(sig_px) if sig_px else None,
                                    "shares": shares, "entry_cost": cost,
-                                   "reason": reason})
+                                   "stop_price": stop_line,
+                                   "size_scale": float(size_scale or 1.0),
+                                   "order_kind": order_kind, "reason": reason})
 
-        update_account(s, account_id, account_cash, marked_nav(s, account_cash))
+        update_account(s, account_id, account_cash,
+                       marked_nav(s, account_cash, account_id))
 
     if filled_entries or filled_exits:
         logger.info(f"✅ 開盤成交：買進 {len(filled_entries)} 檔、賣出 {len(filled_exits)} 檔")
-    return {"entries": filled_entries, "exits": filled_exits}
+    return {"entries": filled_entries, "exits": filled_exits,
+            "cancelled_exits": cancelled_exits}
 
 
 def exit_cfg() -> dict:
@@ -435,6 +622,7 @@ def queue_exits(on_date: date) -> list[dict]:
                 low=today["low"],
                 volume=today["volume"],
                 avg_volume=avg_vol,
+                stop_price=pos.get("stop_price"),
             )
 
             peak = max(pos["peak_price"], close)
@@ -479,7 +667,8 @@ def format_positions_report(queued_exits: list[dict], queued_entries: list[dict]
     filled = filled or {}
 
     fe, fx = filled.get("entries", []), filled.get("exits", [])
-    if fe or fx:
+    cancelled = filled.get("cancelled_exits", [])
+    if fe or fx or cancelled:
         lines.append("✅ 今日開盤已成交（昨日掛單）：")
         for e in fx:
             sign = "+" if e["net_return_pct"] >= 0 else ""
@@ -493,6 +682,9 @@ def format_positions_report(queued_exits: list[dict], queued_entries: list[dict]
                 slip = f"（訊號價 {e['signal_price']:.2f}，開盤價差 {gap:+.1f}%）"
             lines.append(f"  買進 {e['stock_id']} {e['stock_name']} @ {e['entry_price']:.2f}"
                          f" → {format_size(e.get('shares', 0))}{slip}")
+        for e in cancelled:
+            lines.append(f"  取消賣出 {e['stock_id']} {e['stock_name']}：開盤 "
+                         f"{e['open_price']:.2f} 已站回停損線 {e['stop_price']:.2f}，收盤重判")
         lines.append("")
 
     if queued_exits:

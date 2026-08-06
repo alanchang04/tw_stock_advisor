@@ -3,7 +3,7 @@
 import math
 
 from agent.backtest import _entry_share_count, _portfolio_nav
-from agent.strategy import FEE_RATE
+from agent.strategy import FEE_RATE, STRATEGY, entry_share_count
 
 
 def test_portfolio_nav_is_cash_plus_marked_positions():
@@ -54,3 +54,18 @@ def test_entry_size_respects_liquidity_cap():
         max_pct_of_avg_volume=0.01,
     )
     assert shares == 50
+
+
+def test_backtest_wrapper_matches_shared_live_formula():
+    params = dict(fill=100.0, cash=400_000.0, nav=500_000.0, max_open=5,
+                  avg_volume=100_000.0, max_pct_of_avg_volume=0.01,
+                  cfg={**STRATEGY, "risk_per_trade": .01}, stop_price=90.0,
+                  size_scale=.5)
+    backtest_shares = _entry_share_count(**params)
+    shared_shares = entry_share_count(
+        price=params["fill"], cash=params["cash"], nav=params["nav"],
+        max_open=params["max_open"], cfg=params["cfg"],
+        avg_volume=params["avg_volume"], stop_price=params["stop_price"],
+        size_scale=params["size_scale"],
+    )
+    assert backtest_shares == shared_shares

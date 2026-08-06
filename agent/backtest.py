@@ -35,7 +35,9 @@ from agent.strategy import (STRATEGY, score_candidates, decide_exit, split_adjus
                             compute_factor_matrices, compute_new_entry_flag, apply_liquidity_gate,
                             apply_total_return_adjustment, SWING_SETUP_CFG,
                             build_disposition_index, exclude_disposition,
-                            apply_pre_score_filters,
+                            apply_pre_score_filters, initial_stop_price,
+                            entry_share_count, stop_exit_recovered_at_open,
+                            market_position_scale, reentry_candidate_ok,
                             # 交易成本/成交假設：單一事實來源在 strategy.py（回測與即時帳本共用）
                             FEE_RATE, TAX_RATE, SLIPPAGE, net_return)
 from agent.performance import buy_and_hold_nav, metric_table
@@ -666,18 +668,19 @@ def _portfolio_nav(cash: float, open_pos: dict, marks: dict[str, float | None]) 
 
 def _entry_share_count(fill: float, cash: float, nav: float, max_open: int,
                        avg_volume: float | None, max_pct_of_avg_volume: float,
-                       fee_rate: float = FEE_RATE) -> int:
-    """Size one slot from current NAV, capped by available cash and liquidity."""
-    if fill <= 0 or cash <= 0 or nav <= 0 or max_open <= 0:
-        return 0
-    spendable = min(nav / max_open, cash)
-    shares_by_budget = int(spendable // (fill * (1 + fee_rate)))
-    shares_by_liquidity = (
-        int(avg_volume * max_pct_of_avg_volume)
-        if avg_volume is not None and math.isfinite(avg_volume) and avg_volume > 0
-        else shares_by_budget
+                       fee_rate: float = FEE_RATE, cfg: dict | None = None,
+                       stop_price: float | None = None,
+                       size_scale: float = 1.0) -> int:
+    """Compatibility wrapper around the shared live/backtest risk-sizing rule."""
+    use_cfg = {**STRATEGY, **(cfg or {}), "max_pct_of_avg_volume": max_pct_of_avg_volume}
+    # fee_rate is retained in the public signature for older callers/tests. The project's
+    # single source of truth is FEE_RATE, so non-default values are represented in slot cash.
+    if fee_rate != FEE_RATE and fill > 0:
+        cash = cash * (1 + FEE_RATE) / (1 + fee_rate)
+    return entry_share_count(
+        price=fill, cash=cash, nav=nav, max_open=max_open, cfg=use_cfg,
+        avg_volume=avg_volume, stop_price=stop_price, size_scale=size_scale,
     )
-    return max(0, min(shares_by_budget, shares_by_liquidity))
 
 
 def _adaptive_throttle_blocked(recent_wins: list[bool], cfg: dict = STRATEGY) -> bool:
@@ -775,13 +778,25 @@ def run_backtest(top_n=None, rebalance=5, cfg=None, data=None, quiet=False,
 
     # 市場濾網：大盤代理收盤 vs 其 60 日均線（逐日 bull/bear）
     regime_bull = None
+    regime_state = None
     mf_sid = cfg.get("market_filter_stock", "0050")
     if cfg.get("market_filter") and mf_sid in closes.columns:
         # split_adjust：市場濾網代理股（預設0050）若曾分割/併股，原始收盤價會出現
         # 單日假崩盤（見 2025-06-18 一分四實例），未還原會讓 MA60 誤判成連續數月
         # 空頭，錯誤觸發死亡交叉出場保護（見對話紀錄的根因分析）。
         mkt = split_adjust(closes[mf_sid])
-        regime_bull = (mkt >= mkt.rolling(60, min_periods=30).mean()).fillna(True)
+        mkt_ma20 = mkt.rolling(20, min_periods=15).mean()
+        mkt_ma60 = mkt.rolling(60, min_periods=30).mean()
+        regime_bull = (mkt >= mkt_ma60).fillna(True)
+        stock_ma20 = closes.rolling(20, min_periods=15).mean()
+        breadth = (closes >= stock_ma20).sum(axis=1) / stock_ma20.notna().sum(axis=1).replace(0, pd.NA)
+        risk_on = regime_bull & (mkt_ma20 > mkt_ma20.shift(5))
+        risk_off = (~regime_bull) & (
+            breadth < float(cfg.get("risk_off_breadth_threshold", 0.40))
+        )
+        regime_state = pd.Series("neutral", index=closes.index, dtype="object")
+        regime_state.loc[risk_on.fillna(False)] = "risk_on"
+        regime_state.loc[risk_off.fillna(False)] = "risk_off"
     bear_cfg = ({**cfg, "exit_on_death_cross": True}
                 if cfg.get("bear_reenable_death_cross") else cfg)
 
@@ -796,11 +811,24 @@ def run_backtest(top_n=None, rebalance=5, cfg=None, data=None, quiet=False,
     # 預設 stop_mode 為 None（固定%停損），此時不必付這份 pivot 的成本；
     # 資料源沒有 low 欄位時退回空矩陣 → stop_price 取不到值，自動回到固定%停損。
     lows = pd.DataFrame(index=closes.index, columns=closes.columns, dtype=float)
+    atr = pd.DataFrame(index=closes.index, columns=closes.columns, dtype=float)
     if cfg.get("stop_mode") and "low" in data["prices"].columns:
         lows = data["prices"].pivot_table(index="trade_date", columns="stock_id", values="low")
         lows = lows.where(lows > 0).reindex(index=closes.index, columns=closes.columns)
         if cfg.get("total_return_adjust", True) and div_events is not None and not div_events.empty:
             lows = apply_total_return_adjustment(lows, div_events)
+        if cfg.get("stop_mode") == "atr" and "high" in data["prices"].columns:
+            highs = data["prices"].pivot_table(
+                index="trade_date", columns="stock_id", values="high"
+            ).where(lambda x: x > 0).reindex(index=closes.index, columns=closes.columns)
+            if cfg.get("total_return_adjust", True) and div_events is not None and not div_events.empty:
+                highs = apply_total_return_adjustment(highs, div_events)
+            prev_close = closes.shift(1)
+            tr = highs - lows
+            for gap in ((highs - prev_close).abs(), (lows - prev_close).abs()):
+                tr = tr.mask(gap.notna() & (tr.isna() | (gap > tr)), gap)
+            atr = tr.rolling(int(cfg.get("atr_period", 14)),
+                             min_periods=int(cfg.get("atr_period", 14))).mean()
 
     tech = data["tech"]
     ma5p = tech.pivot_table(index="trade_date", columns="stock_id", values="ma5")
@@ -835,8 +863,11 @@ def run_backtest(top_n=None, rebalance=5, cfg=None, data=None, quiet=False,
     nav_curve = []    # (date, cash+持股市值) —— 真實資金受限的權益曲線，供公平期間比較用
     # 掛單簿：今日收盤決定 → 隔日開盤成交（真實可執行的時序，見 SLIPPAGE 上方說明）
     pending_entries: list[str] = []
+    pending_entry_scales: dict[str, float] = {}
+    pending_entry_kinds: dict[str, str] = {}
     pending_exits: list[tuple[str, str]] = []   # (stock_id, 出場原因)
     recent_wins: list[bool] = []   # 訊號品質偵測用（見下方 adaptive_throttle）：逐筆平倉勝負紀錄
+    reentry_watch: dict[str, dict] = {}
 
     def _record_exit(sid, p, fill, d_exit, i_exit, reason):
         hold = i_exit - p["entry_i"]
@@ -846,13 +877,27 @@ def run_backtest(top_n=None, rebalance=5, cfg=None, data=None, quiet=False,
         trades.append({"stock_id": sid, "entry_date": p["entry_date"], "exit_date": d_exit,
                        "ret": fill / p["entry_price"] - 1, "net_ret": net_ret,
                        "hold": hold, "reason": reason, "shares": p["shares"],
+                       "entry_kind": p.get("entry_kind", "normal"),
                        "buy_cost": buy_cost, "sell_proceeds": sell_proceeds,
                        "net_pnl": sell_proceeds - buy_cost})
         recent_wins.append(net_ret > 0)
+        prefixes = tuple(cfg.get("reentry_exit_reason_prefixes") or ())
+        if (cfg.get("reentry_enabled") and prefixes
+                and any(str(reason).startswith(prefix) for prefix in prefixes)):
+            reentry_watch[sid] = {
+                "exit_i": i_exit, "exit_price": fill, "reason": reason,
+            }
 
     for i, d in enumerate(sim_dates):
         bull = True if regime_bull is None else bool(regime_bull.get(d, True))
         day_cfg = cfg if bull else bear_cfg
+        state = (str(regime_state.get(d, "neutral")) if regime_state is not None
+                 else ("risk_on" if bull else "risk_off"))
+        if cfg.get("market_exposure_mode", "binary") == "tiered":
+            market_scale = market_position_scale(state, cfg)
+        else:
+            market_scale = (0.0 if (not bull and cfg.get("market_filter_block_entries", False))
+                            else 1.0)
 
         # 1) 執行昨日決定的出場 —— 今日開盤價成交（扣單邊滑價）
         unfilled_exits = []
@@ -863,6 +908,9 @@ def run_backtest(top_n=None, rebalance=5, cfg=None, data=None, quiet=False,
             op = val(opens, d, sid)
             if op is None or _limit_locked(d, sid):   # 停牌/無開盤，或跌停鎖死賣不掉 → 明日再試
                 unfilled_exits.append((sid, reason))
+                continue
+            stop_line = p.get("stop_price") or initial_stop_price(p["entry_price"], cfg)
+            if stop_exit_recovered_at_open(reason, op, stop_line, cfg):
                 continue
             fill = op * (1 - slippage)
             _record_exit(sid, p, fill, d, i, reason)
@@ -879,6 +927,26 @@ def run_backtest(top_n=None, rebalance=5, cfg=None, data=None, quiet=False,
                 continue
             fill = op * (1 + slippage)
             avg_vol = val(data["_avg_volume_liq"], d, sid)
+            gi = pos_idx[d]
+            sig_d = dates[gi - 1] if gi >= 1 else None
+            structural_stop = None
+            _sm = cfg.get("stop_mode")
+            if _sm in ("entry_bar_low", "box_low") and sig_d is not None:
+                if _sm == "entry_bar_low":
+                    structural_stop = val(lows, sig_d, sid)
+                else:
+                    nb = int((cfg.get("swing_setup") or {}).get(
+                        "consol_days", SWING_SETUP_CFG["consol_days"]))
+                    lo_dates = dates[max(0, gi - nb):gi]
+                    lo_win = lows.loc[lo_dates, sid] if sid in lows.columns else None
+                    structural_stop = (
+                        float(lo_win.min())
+                        if lo_win is not None and lo_win.notna().any() else None
+                    )
+            entry_atr = val(atr, sig_d, sid) if sig_d is not None else None
+            stop_price = initial_stop_price(
+                fill, cfg, atr=entry_atr, structural_stop=structural_stop
+            )
             marks = {
                 held_sid: (
                     val(opens, d, held_sid)
@@ -900,31 +968,22 @@ def run_backtest(top_n=None, rebalance=5, cfg=None, data=None, quiet=False,
                 max_open=max_open,
                 avg_volume=avg_vol,
                 max_pct_of_avg_volume=cfg.get("max_pct_of_avg_volume", 0.01),
+                cfg=cfg,
+                stop_price=stop_price,
+                size_scale=pending_entry_scales.get(sid, market_scale),
             )
             if shares <= 0 or cash < shares * fill * (1 + FEE_RATE):
                 continue
             cash -= shares * fill * (1 + FEE_RATE)
-            # 結構性停損（2026-07-23）：突破型態的部位，停損守「型態的失效價」而不是
-            # 固定百分比。訊號K棒是前一日（i-1，今日開盤才成交），所以取那根的低點；
-            # box_low 則取訊號日之前 consol_days 根的最低（給回測箱頂留空間）。
-            stop_price = None
-            _sm = cfg.get("stop_mode")
-            if _sm in ("entry_bar_low", "box_low") and i >= 1:
-                sig_d = dates[i - 1]
-                if _sm == "entry_bar_low":
-                    stop_price = val(lows, sig_d, sid)
-                else:
-                    nb = int((cfg.get("swing_setup") or {}).get(
-                        "consol_days", SWING_SETUP_CFG["consol_days"]))
-                    lo_win = lows.loc[dates[max(0, i - 1 - nb):i - 1], sid] if sid in lows.columns else None
-                    stop_price = float(lo_win.min()) if lo_win is not None and lo_win.notna().any() else None
-                # 保險：停損價不可高於進場價（型態怪異時退回固定%）
-                if stop_price and stop_price >= fill:
-                    stop_price = None
             open_pos[sid] = {"entry_date": d, "entry_price": fill, "peak": fill,
-                             "entry_i": i, "shares": shares, "stop_price": stop_price,
+                             "entry_i": i, "shares": shares,
+                             "stop_price": stop_price if cfg.get("stop_mode") else None,
+                             "entry_kind": pending_entry_kinds.get(sid, "normal"),
                              "last_mark": fill}
+            reentry_watch.pop(sid, None)
         pending_entries = []
+        pending_entry_scales = {}
+        pending_entry_kinds = {}
 
         # 3) 依今日收盤評估出場規則 → 掛到明日開盤成交
         for sid, p in open_pos.items():
@@ -944,10 +1003,41 @@ def run_backtest(top_n=None, rebalance=5, cfg=None, data=None, quiet=False,
         # 4) 再平衡日：依今日收盤評分選股 → 掛到明日開盤進場
         #    （持倉上限與 portfolio.record_entries() 的風控守門員一致）
         gi = pos_idx[d]
-        market_ok = bull or not cfg.get("market_filter_block_entries", False)
+        market_ok = market_scale > 0
         # 訊號品質偵測+動態縮手（見 _adaptive_throttle_blocked 註解）：出場規則不受
         # 影響，已有部位照樣正常出場，只是暫停再加碼新倉。
         entry_ok = market_ok and not _adaptive_throttle_blocked(recent_wins, cfg)
+        # 獨立重進場狀態機：只在原策略候選前 N、冷卻期後重新站回趨勢時，以半倉重試。
+        # 這條每日檢查，不必剛好撞上原本每 rebalance 天一次的節奏。
+        if cfg.get("reentry_enabled") and reentry_watch:
+            expired = [sid for sid, w in reentry_watch.items()
+                       if i - w["exit_i"] > int(cfg.get("reentry_watch_days", 20))]
+            for sid in expired:
+                reentry_watch.pop(sid, None)
+            eligible_age = {
+                sid for sid, w in reentry_watch.items()
+                if i - w["exit_i"] >= int(cfg.get("reentry_cooldown_days", 2))
+            }
+            if entry_ok and eligible_age:
+                re_ranked = _candidates_asof(
+                    data, d, None, top_n=int(cfg.get("reentry_rank_pool", 20)), cfg=cfg
+                )
+                for sid in re_ranked:
+                    if sid not in eligible_age or sid in open_pos or sid in pending_entries:
+                        continue
+                    close = val(closes, d, sid)
+                    ma20 = val(ma20p, d, sid)
+                    watch = reentry_watch[sid]
+                    if not reentry_candidate_ok(close, ma20, watch["exit_price"], cfg):
+                        continue
+                    if len(open_pos) + len(pending_entries) >= max_open:
+                        break
+                    pending_entries.append(sid)
+                    pending_entry_scales[sid] = (
+                        market_scale * float(cfg.get("reentry_position_scale", 0.50))
+                    )
+                    pending_entry_kinds[sid] = "reentry"
+
         if entry_ok and (gi - start_i) % rebalance == 0:
             free_slots = max_open - len(open_pos) - len(pending_entries) + len(pending_exits)
             if free_slots > 0:
@@ -988,7 +1078,11 @@ def run_backtest(top_n=None, rebalance=5, cfg=None, data=None, quiet=False,
                         break
                     if sid in open_pos or sid in pending_entries:
                         continue
+                    if cfg.get("reentry_enabled") and sid in reentry_watch:
+                        continue
                     pending_entries.append(sid)
+                    pending_entry_scales[sid] = market_scale
+                    pending_entry_kinds[sid] = "normal"
                     free_slots -= 1
 
         marks = {sid: val(closes, d, sid) for sid in open_pos}

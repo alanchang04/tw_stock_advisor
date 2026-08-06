@@ -61,8 +61,10 @@ def run_daily_recommendation(with_entries: bool = True):
     with exec_log.stage("fills") as rec:
         filled = broker.sync(eval_date)
         rec.summary = (f"broker={broker.name}：開盤成交 買{len(filled.get('entries', []))} "
-                       f"賣{len(filled.get('exits', []))}")
-        rec.payload = filled if (filled.get("entries") or filled.get("exits")) else None
+                       f"賣{len(filled.get('exits', []))}；"
+                       f"停損收復取消{len(filled.get('cancelled_exits', []))}")
+        rec.payload = filled if any(filled.get(k) for k in
+                                    ("entries", "exits", "cancelled_exits")) else None
 
     # Step 2: 出場檢查（先做，且不依賴 LLM —— 確保賣出提醒一定會發）
     #         只掛「明日開盤賣出」委託，不當場平倉
@@ -76,22 +78,35 @@ def run_daily_recommendation(with_entries: bool = True):
 
     result, opened = {}, []
 
-    # 市場濾網：僅在 market_filter_block_entries=True 時空頭不開新倉
-    # （預設 False：空頭只加回死亡交叉出場保護，見 portfolio.exit_cfg）
+    # 市場濾網：正式 binary 模式在空頭且 block_entries=True 時不開新倉；
+    # opt-in tiered 模式不一刀切，改由下單層依 risk_on/neutral/risk_off 縮小部位。
     from agent.strategy import STRATEGY as _S
     with exec_log.stage("risk_gate") as rec:
         blocked = False
-        if with_entries and _S.get("market_filter_block_entries"):
-            from agent.stock_selector import market_is_bull
-            if not market_is_bull():
+        regime = None
+        if with_entries and _S.get("market_exposure_mode", "binary") == "tiered":
+            from agent.stock_selector import market_regime_detail
+            regime = market_regime_detail()
+            if float(regime.get("exposure_scale", 1.0)) <= 0:
+                with_entries = False
+                blocked = True
+        elif with_entries and _S.get("market_filter_block_entries"):
+            from agent.stock_selector import market_regime_detail
+            regime = market_regime_detail()
+            if not regime["bull"]:
                 logger.warning("市場濾網觸發（空頭）：今日不開新倉")
                 with_entries = False
                 blocked = True
-        rec.summary = ("空頭濾網擋下新倉" if blocked else
+        scale_text = (f"；曝險級距 {regime.get('state')} ×"
+                      f"{float(regime.get('exposure_scale', 1.0)):.0%}"
+                      if regime and _S.get("market_exposure_mode") == "tiered" else "")
+        rec.summary = ("市場風控擋下新倉" if blocked else
                        f"進場{'開' if with_entries else '關(週末模式)'}；"
-                       f"部位上限 {_S.get('max_open_positions', 10)} 檔")
+                       f"部位上限 {_S.get('max_open_positions', 10)} 檔{scale_text}")
         rec.payload = {"with_entries": with_entries, "blocked_by_market_filter": blocked,
-                       "market_filter_block_entries": _S.get("market_filter_block_entries", False)}
+                       "market_filter_block_entries": _S.get("market_filter_block_entries", False),
+                       "market_exposure_mode": _S.get("market_exposure_mode", "binary"),
+                       "regime": regime}
 
     if with_entries:
         # Step 3: 篩選候選股票（趨勢版選股不用族群硬閘門；熱門族群仍供 LLM 參考）
@@ -115,6 +130,19 @@ def run_daily_recommendation(with_entries: bool = True):
                                "top_candidates": candidates[keep].head(20).to_dict("records")}
 
         if candidates is not None and not candidates.empty:
+            if _ST.get("reentry_enabled"):
+                with exec_log.stage("orders_reentries") as rec:
+                    # 重進場規格用「純因子前20」，不套目前持倉的族群上限；與回測的
+                    # _candidates_asof(top_n=20) 口徑一致。正式預設關閉，不增加日常查詢。
+                    from agent.stock_selector import get_ranked_watchlist
+                    reentry_pool = get_ranked_watchlist(
+                        top_n=int(_ST.get("reentry_rank_pool", 20))
+                    )
+                    reentries = broker.submit_reentries(reentry_pool, eval_date)
+                    rec.summary = (f"重進場狀態機掛單 {len(reentries)} 檔"
+                                   + ("：" + ", ".join(r["stock_id"] for r in reentries)
+                                      if reentries else "（無符合者）"))
+                    rec.payload = {"queued": reentries} if reentries else None
             logger.info("Step 4 — 呼叫 LLM 產生推薦")
             candidates_text = format_candidates_for_llm(candidates)
             hot_sector_names = candidates["industry"].unique().tolist()

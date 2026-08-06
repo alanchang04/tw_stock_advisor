@@ -73,6 +73,23 @@ point-in-time 資料。不得因測試版本改變 0050 比較期間或成本口
 - 移除最佳 5 筆後仍為正年化，且不由單一年份貢獻超過 40% 總獲利。
 - holdout 與 walk-forward 不得同時轉負；否則不得部署。
 
+### 3.1 P3-6 實作與判決（2026-08-05）
+
+已用 opt-in 設定完成五組單因子實驗；正式 `STRATEGY` 預設不變：
+
+- `revalidate_stop_at_open=True`：收盤觸發初始停損、隔日開盤已站回停損線才取消賣單。
+- `stop_mode="atr"`：訊號日前 ATR14×2.5，距離限 5%～12%，依 NAV 1% 風險反推股數。
+- `reentry_enabled=True`：冷卻 2 日、20 日內回到原因子 top20、站回 MA20 與前次出場價，半倉。
+- `market_exposure_mode="tiered"`：risk-on／neutral／risk-off 使用 100%／60%／30% 部位。
+- 帳本只呈現建立後有真實股數、現金流水的前向 NAV；舊倉不倒推股數。
+
+development（2015～2020）中 ATR 與三級曝險有改善，但 validation（2021～2022）五組皆為
+約 -16% 年化、MDD -40%～-43%，未達門檻；三級曝險 Sharpe 方向翻轉。重進場在
+development 實際觸發 0 次，屬無樣本規格，不能推論更廣泛的重進場概念無效。
+
+判決：全部維持停用；ATR 僅保留研究候選，不掃參數、不讀 holdout。完整數字見
+`research/results/swing_risk_experiments_2026-08-05.md`。
+
 ## 4. 融資反轉：研究假說，而非直接宣告失效
 
 當前失敗只證明「現有定義＋2026-04～07 樣本」無效。12 個訊號集中在 7 月下旬，只有

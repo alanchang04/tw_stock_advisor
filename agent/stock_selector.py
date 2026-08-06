@@ -19,7 +19,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from database.connection import get_session
 from agent.strategy import (STRATEGY, score_candidates, split_adjust,
                             compute_factor_matrices, compute_new_entry_flag,
-                            apply_liquidity_gate, apply_pre_score_filters)
+                            apply_liquidity_gate, apply_pre_score_filters,
+                            market_position_scale)
 
 
 # 排除非個股的產業類別（ETF、指數等）
@@ -57,18 +58,48 @@ def market_regime_detail() -> dict:
                 ORDER BY trade_date DESC LIMIT 90
             """), {"sid": sid}).fetchall()
         if len(rows) < 30:
-            return {"bull": True, "stock_id": sid, "close": None, "ma60": None, "ok": False}
+            return {"bull": True, "state": "risk_on", "exposure_scale": 1.0,
+                    "stock_id": sid, "close": None, "ma20": None, "ma60": None,
+                    "breadth": None, "ok": False}
         closes = pd.Series({r[0]: float(r[1]) for r in rows}).sort_index()
         adj = split_adjust(closes)
+        ma20_series = adj.rolling(20, min_periods=15).mean()
         ma60 = float(adj.rolling(60, min_periods=30).mean().iloc[-1])
+        ma20 = float(ma20_series.iloc[-1])
         last_close = float(adj.iloc[-1])
         bull = last_close >= ma60
+        with get_session() as s:
+            breadth = s.execute(text("""
+                SELECT AVG(CASE WHEN p.close >= t.ma20 THEN 1.0 ELSE 0.0 END)
+                FROM daily_prices p
+                JOIN technical_indicators t
+                  ON t.stock_id=p.stock_id AND t.trade_date=p.trade_date
+                JOIN stocks st ON st.stock_id=p.stock_id
+                WHERE p.trade_date=(SELECT MAX(trade_date) FROM daily_prices)
+                  AND p.close > 0 AND t.ma20 IS NOT NULL
+                  AND COALESCE(st.is_active, TRUE)=TRUE
+                  AND COALESCE(st.industry_code, '') NOT ILIKE '%ETF%'
+            """)).scalar()
+        breadth = float(breadth) if breadth is not None else None
+        ma20_rising = len(ma20_series.dropna()) >= 6 and ma20 > float(ma20_series.dropna().iloc[-6])
+        if bull and ma20_rising:
+            state = "risk_on"
+        elif (not bull and breadth is not None
+              and breadth < float(STRATEGY.get("risk_off_breadth_threshold", 0.40))):
+            state = "risk_off"
+        else:
+            state = "neutral"
+        scale = market_position_scale(state, STRATEGY)
         if not bull:
             logger.warning(f"市場濾網：{sid} 還原後收盤 {last_close:.2f} < MA60 {ma60:.2f} → 空頭模式")
-        return {"bull": bull, "stock_id": sid, "close": last_close, "ma60": ma60, "ok": True}
+        return {"bull": bull, "state": state, "exposure_scale": scale,
+                "stock_id": sid, "close": last_close, "ma20": ma20, "ma60": ma60,
+                "breadth": breadth, "ok": True}
     except Exception as e:
         logger.warning(f"市場濾網查詢失敗（視為多頭）: {e}")
-        return {"bull": True, "stock_id": sid, "close": None, "ma60": None, "ok": False}
+        return {"bull": True, "state": "risk_on", "exposure_scale": 1.0,
+                "stock_id": sid, "close": None, "ma20": None, "ma60": None,
+                "breadth": None, "ok": False}
 
 
 def market_is_bull() -> bool:

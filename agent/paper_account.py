@@ -58,6 +58,14 @@ def ensure_paper_account(cfg: dict = STRATEGY) -> None:
             ON CONFLICT (strategy_key) DO NOTHING RETURNING id
         """), {"key": SWING_ACCOUNT_KEY, "capital": capital, "cash": opening_cash}).fetchone()
         if row:
+            # Known quantities are not invented: a brand-new ledger may adopt them and
+            # opening_cash already subtracts their recorded entry_cost above.
+            s.execute(text("""
+                UPDATE positions SET paper_account_id=:aid
+                WHERE status='open' AND COALESCE(source,'ai')='ai'
+                  AND shares IS NOT NULL AND entry_cost IS NOT NULL
+                  AND paper_account_id IS NULL
+            """), {"aid": row[0]})
             s.execute(text("""
                 INSERT INTO paper_account_transactions
                     (account_id, trade_date, kind, amount, cash_after, note)
@@ -73,15 +81,56 @@ def locked_account(session, strategy_key: str = SWING_ACCOUNT_KEY):
     """), {"key": strategy_key}).fetchone()
 
 
-def marked_nav(session, cash: float) -> float:
-    value = session.execute(text("""
+def marked_nav(session, cash: float, account_id: int | None = None) -> float:
+    """NAV of the forward ledger only; legacy quantity-less positions are excluded."""
+    account_filter = " AND p.paper_account_id=:aid" if account_id is not None else ""
+    value = session.execute(text(f"""
         SELECT COALESCE(SUM(p.shares * COALESCE(
             (SELECT d.close FROM daily_prices d WHERE d.stock_id=p.stock_id
              AND d.close > 0 ORDER BY d.trade_date DESC LIMIT 1), p.entry_price)), 0)
         FROM positions p
         WHERE p.status='open' AND COALESCE(p.source,'ai')='ai' AND p.shares IS NOT NULL
-    """)).scalar()
+        {account_filter}
+    """), {"aid": account_id} if account_id is not None else {}).scalar()
     return float(cash) + float(value or 0)
+
+
+def paper_account_snapshot(strategy_key: str = SWING_ACCOUNT_KEY) -> dict | None:
+    """Return an honest forward-ledger snapshot plus legacy coverage diagnostics."""
+    ensure_paper_account()
+    with get_session() as s:
+        account = s.execute(text("""
+            SELECT id, initial_capital, cash, last_nav, started_at, updated_at
+            FROM paper_accounts WHERE strategy_key=:key
+        """), {"key": strategy_key}).fetchone()
+        if account is None:
+            return None
+        aid, initial, cash, _, started, updated = account
+        tracked = s.execute(text("""
+            SELECT COUNT(*), COALESCE(SUM(p.shares * COALESCE(
+                (SELECT d.close FROM daily_prices d WHERE d.stock_id=p.stock_id
+                 AND d.close > 0 ORDER BY d.trade_date DESC LIMIT 1), p.entry_price)), 0)
+            FROM positions p
+            WHERE p.status='open' AND COALESCE(p.source,'ai')='ai'
+              AND p.paper_account_id=:aid AND p.shares IS NOT NULL
+        """), {"aid": aid}).fetchone()
+        legacy = s.execute(text("""
+            SELECT COUNT(*), ARRAY_AGG(stock_id ORDER BY entry_date)
+            FROM positions
+            WHERE status='open' AND COALESCE(source,'ai')='ai'
+              AND (paper_account_id IS DISTINCT FROM :aid OR shares IS NULL)
+        """), {"aid": aid}).fetchone()
+        tracked_value = float(tracked[1] or 0)
+        nav = float(cash) + tracked_value
+        return {
+            "account_id": int(aid), "initial_capital": float(initial),
+            "cash": float(cash), "tracked_market_value": tracked_value,
+            "tracked_nav": nav, "tracked_open_count": int(tracked[0] or 0),
+            "legacy_open_count": int(legacy[0] or 0),
+            "legacy_stock_ids": list(legacy[1] or []),
+            "all_ai_positions_covered": int(legacy[0] or 0) == 0,
+            "started_at": started, "updated_at": updated,
+        }
 
 
 def record_cash(session, account_id: int, position_id: int | None, trade_date: date,

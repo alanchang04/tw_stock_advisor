@@ -17,7 +17,8 @@ import streamlit as st
 from sqlalchemy import text
 
 from database.connection import get_session
-from agent.strategy import decide_exit, suggest_shares, STRATEGY, FEE_RATE, TAX_RATE
+from agent.strategy import decide_exit, STRATEGY, FEE_RATE, TAX_RATE
+from agent.paper_account import ensure_paper_account, paper_account_snapshot
 
 # ══════════════════════════════════════════════════════════════════
 #  頁面設定
@@ -156,19 +157,24 @@ if _dbs.get("ok"):
 
 @st.cache_data(ttl=60)
 def load_open_positions() -> list[dict]:
+    # App 可能在每日 pipeline 之前先啟動；先做冪等 schema 準備，避免新欄位尚未建立。
+    from agent.portfolio import ensure_pending_orders_table
+    ensure_paper_account()
+    ensure_pending_orders_table()
     today = date.today()
     result = []
     with get_session() as s:
         rows = s.execute(text("""
             SELECT p.stock_id, st.stock_name, p.entry_date, p.entry_price, p.peak_price,
-                   p.shares, p.entry_cost
+                   p.shares, p.entry_cost, p.stop_price, p.paper_account_id
             FROM positions p JOIN stocks st ON st.stock_id = p.stock_id
             WHERE p.status = 'open' AND COALESCE(p.source, 'ai') = 'ai'
             ORDER BY p.entry_date
         """)).fetchall()
 
         for r in rows:
-            sid, name, entry_date, entry_price, peak_price, actual_shares, actual_cost = r
+            (sid, name, entry_date, entry_price, peak_price, actual_shares, actual_cost,
+             stored_stop, paper_account_id) = r
             entry_price = float(entry_price)
             peak_price  = float(peak_price) if peak_price else entry_price
 
@@ -213,6 +219,7 @@ def load_open_positions() -> list[dict]:
                 macd_hist=today_r["macd_hist"], macd_hist_prev=prev_r.get("macd_hist"),
                 open=today_r["open"], high=today_r["high"],
                 low=today_r["low"], volume=today_r["volume"], avg_volume=avg_vol,
+                stop_price=float(stored_stop) if stored_stop is not None else None,
             )
 
             hold = s.execute(text("""
@@ -226,20 +233,21 @@ def load_open_positions() -> list[dict]:
             )
 
             pct = (close / entry_price - 1) * 100
-            # 2026-07-22：AI持倉的實際張數目前沒有存進DB（positions.shares只有手動倉在用），
-            # 這裡用跟下單當時同一套1%風險法則(suggest_shares)反推「照現在資金設定，
-            # 這張單大概會買多少股」，換算成金額損益——不是精確的歷史成交量，是可視化用估計值。
-            display_shares = int(actual_shares) if actual_shares else suggest_shares(entry_price, cfg=STRATEGY)
+            # 舊部位沒有實際股數時保持未知，不再用目前設定反推，避免把估算值誤當 NAV。
+            display_shares = int(actual_shares) if actual_shares else None
             if actual_shares and actual_cost is not None:
                 pnl_dollar = display_shares * close * (1 - FEE_RATE - TAX_RATE) - float(actual_cost)
             else:
-                pnl_dollar = (close - entry_price) * display_shares
+                pnl_dollar = None
             result.append({
                 "股號": sid, "名稱": str(name),
                 "進場日": str(entry_date),
                 "成本": entry_price, "現價": close,
                 "損益%": round(pct, 2),
-                "損益$（估）": round(pnl_dollar),
+                "股數": display_shares,
+                "損益$": round(pnl_dollar) if pnl_dollar is not None else None,
+                "帳本範圍": ("前向NAV" if paper_account_id is not None and display_shares
+                             else "舊倉/未納入NAV"),
                 "持有(日)": hold,
                 "MA5": round(ma5, 2) if ma5 else None,
                 "MA20": round(ma20, 2) if ma20 else None,
@@ -401,13 +409,7 @@ def load_closed_positions() -> pd.DataFrame:
     ])
     df["報酬%"] = pd.to_numeric(df["報酬%"], errors="coerce")
     if not df.empty:
-        # 損益$（估）：跟開倉部位同一套邏輯，用目前資金設定反推張數，不是實際歷史成交量
-        from agent.strategy import suggest_shares
-        df["損益$（估）"] = [
-            round(float(r["淨損益$"])) if pd.notna(r["淨損益$"]) else
-            round((float(r["出場價"]) - float(r["進場價"])) * suggest_shares(float(r["進場價"]), cfg=STRATEGY))
-            for _, r in df.iterrows()
-        ]
+        df["損益$"] = [round(float(v)) if pd.notna(v) else None for v in df["淨損益$"]]
     return df
 
 
@@ -552,6 +554,24 @@ if page == "📊 首頁":
     c5.metric("出場訊號",     f"{exit_cnt} 檔",
               delta="需注意" if exit_cnt else None, delta_color="inverse")
 
+    try:
+        ledger = paper_account_snapshot()
+    except Exception as e:
+        ledger = None
+        st.warning(f"前向紙上帳本目前無法讀取：{e}")
+    if ledger:
+        st.caption(
+            f"前向紙上帳本（{ledger['started_at']:%Y-%m-%d} 起）："
+            f"現金 {ledger['cash']:,.0f}｜已追蹤持股市值 {ledger['tracked_market_value']:,.0f}｜"
+            f"可核對 NAV {ledger['tracked_nav']:,.0f}"
+        )
+        if not ledger["all_ai_positions_covered"]:
+            st.warning(
+                f"帳本只涵蓋建立後有實際股數的部位；另有 {ledger['legacy_open_count']} 檔舊倉"
+                f"（{', '.join(ledger['legacy_stock_ids'])}）不屬於前向帳本或缺股數，不納入 NAV。"
+                "系統不會用目前參數倒推舊股數。"
+            )
+
     if exit_cnt:
         alerts = [f"**{p['股號']} {p['名稱']}**（{p['出場訊號']}）"
                   for p in positions if p["_exit"]]
@@ -560,20 +580,19 @@ if page == "📊 首頁":
     # 持倉摘要
     if positions:
         st.subheader("持倉概況")
-        st.caption("損益$為估計值：用目前資金設定（1%風險法則）反推張數，"
-                   "不是實際歷史成交量——目的是看出「%數差不多，賺的錢差很多」的規模差異")
+        st.caption("損益$只顯示有實際成交股數與成本的前向帳本；舊倉缺股數時顯示為空。")
         df = pd.DataFrame([{k: v for k, v in p.items() if k != "_exit"} for p in positions])
         avg_ret     = df["損益%"].mean()
-        total_pnl   = df["損益$（估）"].sum()
+        total_pnl   = df["損益$"].sum(min_count=1)
         best        = df.loc[df["損益%"].idxmax()]
         worst       = df.loc[df["損益%"].idxmin()]
         b1, b2, b3, b4 = st.columns(4)
         b1.metric("平均損益",    f"{avg_ret:+.1f}%")
-        b2.metric("總損益$（估）", f"{total_pnl:+,.0f}")
+        b2.metric("已知部位損益$", f"{total_pnl:+,.0f}" if pd.notna(total_pnl) else "—")
         b3.metric("最佳持倉",    f"{best['名稱']} {best['損益%']:+.1f}%")
         b4.metric("最差持倉",    f"{worst['名稱']} {worst['損益%']:+.1f}%")
 
-        # 損益長條圖（同時標%數跟估計金額，避免「%數差不多但賺的錢差很多」被忽略）
+        # 損益長條圖（有實際帳本股數者才顯示金額）
         fig = px.bar(
             df.sort_values("損益%"),
             x="損益%", y="名稱",
@@ -582,11 +601,11 @@ if page == "📊 首頁":
             color_continuous_scale=["#e74c3c", "#ecf0f1", "#2ecc71"],
             color_continuous_midpoint=0,
             text="損益%",
-            custom_data=["損益$（估）"],
-            title="各持倉損益%（懸停看估計金額）",
+            custom_data=["損益$"],
+            title="各持倉損益%（懸停看已知帳本金額）",
         )
         fig.update_traces(texttemplate="%{text:+.1f}%", textposition="outside",
-                          hovertemplate="%{y}：%{x:+.1f}%｜約 %{customdata[0]:+,.0f} 元<extra></extra>")
+                          hovertemplate="%{y}：%{x:+.1f}%｜帳本 %{customdata[0]:+,.0f} 元<extra></extra>")
         fig.update_layout(height=300, margin=dict(l=0, r=0, t=40, b=0),
                           coloraxis_showscale=False)
         st.plotly_chart(fig, use_container_width=True)
@@ -624,11 +643,11 @@ elif page == "📦 持倉追蹤":
                     return ["background-color: rgba(231, 76, 60, 0.25)"] * len(row)
                 return [""] * len(row)
 
-            st.caption("損益$（估）：用目前資金設定反推張數估算，非實際歷史成交量")
+            st.caption("損益$只顯示前向帳本的實際股數/成本；舊倉缺股數時為空。")
             st.dataframe(
                 df.style.apply(row_style, axis=1)
                   .format({"成本": "{:.2f}", "現價": "{:.2f}", "損益%": "{:+.2f}%",
-                           "損益$（估）": "{:+,.0f}",
+                           "損益$": "{:+,.0f}",
                            "MA5": "{:.2f}", "MA20": "{:.2f}"}, na_rep="—"),
                 use_container_width=True, hide_index=True
             )
@@ -1019,10 +1038,12 @@ elif page == "🔄 歷史績效":
             o1, o2, o3 = st.columns(3)
             o1.metric("現行策略持倉", f"{len(_odf)} 檔")
             o2.metric("未實現平均損益", f"{_odf['損益%'].mean():+.1f}%")
-            o3.metric("未實現損益$（估）", f"{_odf['損益$（估）'].sum():+,.0f}")
+            _known_open_pnl = _odf["損益$"].sum(min_count=1)
+            o3.metric("已知未實現損益$",
+                      f"{_known_open_pnl:+,.0f}" if pd.notna(_known_open_pnl) else "—")
             with st.expander("查看未實現明細", expanded=False):
                 st.dataframe(_odf[["股號", "名稱", "進場日", "成本", "現價", "損益%",
-                                   "損益$（估）", "持有(日)", "出場訊號"]],
+                                   "股數", "損益$", "帳本範圍", "持有(日)", "出場訊號"]],
                              use_container_width=True, hide_index=True)
         st.caption(f"⚠️ 樣本數警告：波段平均持有約 3~4 週，新版上線後要 1~2 個月才會有"
                    f"第一批已平倉交易，累積到統計上能說話（30 筆以上）通常要數個月。"
@@ -1055,7 +1076,7 @@ elif page == "🔄 歷史績效":
     g_loss = abs(df.loc[~wins, "報酬%"].sum())
     pf = g_win / g_loss if g_loss > 0 else float("inf")
 
-    total_pnl_dollar = df["損益$（估）"].sum() if "損益$（估）" in df.columns else None
+    total_pnl_dollar = df["損益$"].sum(min_count=1) if "損益$" in df.columns else None
 
     c1, c2, c3, c4, c5, c6, c7 = st.columns(7)
     c1.metric("總交易筆數", len(df))
@@ -1064,9 +1085,9 @@ elif page == "🔄 歷史績效":
     c4.metric("平均持有",   f"{avg_h:.1f} 天")
     c5.metric("獲利因子",   f"{pf:.2f}", help="總獲利÷總虧損，>1.5 較穩健")
     c6.metric("最大回撤",   f"{mdd:.1f}pp", help="逐筆累計報酬曲線的最大回落（百分點）")
-    if total_pnl_dollar is not None:
-        c7.metric("總損益$（估）", f"{total_pnl_dollar:+,.0f}",
-                  help="用目前資金設定反推每筆張數估算，不是實際歷史成交量")
+    if total_pnl_dollar is not None and pd.notna(total_pnl_dollar):
+        c7.metric("已知總損益$", f"{total_pnl_dollar:+,.0f}",
+                  help="只加總有實際股數與現金流水的前向帳本交易")
 
     t1, t2, t3 = st.tabs(["📈 累計績效 vs 大盤", "📊 報酬分布", "📋 交易紀錄"])
 
@@ -1132,9 +1153,9 @@ elif page == "🔄 歷史績效":
         styler = df.style
         _elementwise = getattr(styler, "map", None) or styler.applymap
         st.dataframe(
-            _elementwise(color_ret, subset=[c for c in ["報酬%", "損益$（估）"] if c in df.columns])
+            _elementwise(color_ret, subset=[c for c in ["報酬%", "損益$"] if c in df.columns])
               .format({"進場價": "{:.2f}", "出場價": "{:.2f}", "報酬%": "{:+.2f}%",
-                       "損益$（估）": "{:+,.0f}"},
+                       "損益$": "{:+,.0f}"},
                       na_rep="—"),
             use_container_width=True, hide_index=True,
         )
@@ -1938,10 +1959,11 @@ elif page == "📋 每日排行":
 
     st.info(
         "**這頁在做什麼、為什麼可以信一部分：**\n\n"
-        "2026-07-24 的判決凍結了「機械式自動下單」（完整包裝跑 11 年不敵 0050），"
-        "但集中度研究（P3-2）證實**排名本身有真實、統計顯著的鑑別力**——"
+        "2026-07-24 的判決是：現行機械策略尚未證明優於 0050，正式參數凍結，"
+        "但仍保留前向紙上模擬蒐集證據；它不是已核准的實盤自動交易。"
+        "集中度研究（P3-2）顯示**排名本身有統計鑑別力**——"
         "前 5 名 > 前 20 名 > 全部候選，越前面越好。**壞掉的是執行，不是排名。**\n\n"
-        "所以這頁把經過驗證的「排名」攤開給你，進出場判斷交給你（是否追高、K棒型態、"
+        "所以這頁把「排名」攤開給你作研究與人工判斷（是否追高、K棒型態、"
         "KD/RSI、是否量大長上引線）。這就是半自動：**系統排名 + 你判斷**。"
     )
     st.warning(
