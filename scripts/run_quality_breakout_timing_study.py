@@ -50,6 +50,13 @@ SPEC = QualityTimingSpec()
 HORIZONS = (3, 5, 10, 20)
 REBALANCE = 5
 
+#: P3-9b: research runs on a TWSE-only universe.  TPEX institutional data starts
+#: 2018-01, so a 2015-2020 study that includes TPEX names switches universe
+#: halfway through and no cross-year comparison holds.  Adopted for consistency,
+#: not for returns (same footing as exclude_disposition in #43).
+#: Live keeps STRATEGY["universe_markets"] = None; its data is complete.
+UNIVERSE_MARKETS = ("TWSE",)
+
 #: F0 reference: the unmodified factorial's ``current__current`` cell, recomputed
 #: on 2026-08-06 after the two machines' data was fully reconciled.
 #:
@@ -239,7 +246,13 @@ def _metrics(trades: pd.DataFrame, order_log: list, data: dict,
 
 
 def _baseline_check(m: dict) -> dict:
-    """F0.  Published figures are rounded, so compare at published precision."""
+    """F0 part 1: the unrestricted path must be untouched by the P3-9b change.
+
+    Run with ``universe_markets=None`` this must reproduce the pre-change figures
+    exactly.  That is the real engine-integrity test -- it asks whether adding the
+    venue restriction perturbed anything it should not have.  Published figures
+    are rounded, so compare at published precision.
+    """
     checks = {
         "annual_return": round(m["annual_return"] * 100, 2) == BASELINE["annual_return"],
         "sharpe": round(m["sharpe"], 2) == BASELINE["sharpe"],
@@ -247,6 +260,7 @@ def _baseline_check(m: dict) -> dict:
         "trades": m["trades"] == BASELINE["trades"],
     }
     return {
+        "purpose": "universe_markets=None 時必須與改動前完全相同（no-op 回歸檢查）",
         "expected": BASELINE,
         "observed": {
             "annual_return": round(m["annual_return"] * 100, 2),
@@ -383,7 +397,10 @@ def main() -> None:
     parser.add_argument("--no-write", action="store_true")
     args = parser.parse_args()
 
-    cfg = dict(STRATEGY)
+    # Research universe is TWSE-only (P3-9b).  `cfg_unrestricted` exists purely to
+    # run the F0 no-op regression -- it must still reproduce the pre-change figures.
+    cfg_unrestricted = dict(STRATEGY)
+    cfg = {**STRATEGY, "universe_markets": UNIVERSE_MARKETS}
     data = _load(parquet_dir=str(PARQUET_DIR))
     panels = prepare_research_data(data, cfg)
     boxes = build_quality_box_panels(
@@ -395,7 +412,22 @@ def main() -> None:
     dates = [d for d in sorted(panels["closes"].index) if lo <= d <= hi]
     print(f"development {lo} ~ {hi}（{len(dates)} 個交易日）", flush=True)
 
-    print("building shared quality pool once for all five columns", flush=True)
+    # F0 part 1: unrestricted C0 must be bit-for-bit what it was before P3-9b.
+    print("F0 regression: C0 with universe_markets=None", flush=True)
+    pool_unrestricted = build_daily_quality_pool(data, dates, cfg_unrestricted)
+    f0_schedule = build_schedule(VARIANTS["C0_formal_5d"], pool_unrestricted, dates, boxes)
+    f0_trades = run_factorial_backtest(
+        data=data, panels=panels, start_date=lo, end_date=hi,
+        entry_mode="current", exit_mode="current", cfg=cfg_unrestricted,
+        rebalance=REBALANCE, entry_schedule=f0_schedule,
+    )
+    f0_trades = attach_unconditional_entry_paths(f0_trades, panels["closes"],
+                                                 horizons=HORIZONS)
+    f0_metrics = _metrics(f0_trades, [], data, len(dates), cfg_unrestricted)
+    f0 = _baseline_check(f0_metrics)
+    print(f"  observed {f0['observed']} -> passed={f0['passed']}", flush=True)
+
+    print(f"building shared quality pool (universe={UNIVERSE_MARKETS})", flush=True)
     pool = build_daily_quality_pool(data, dates, cfg)
     print(f"quality pool ready: {len(pool)} 個有候選的交易日", flush=True)
 
@@ -441,11 +473,17 @@ def main() -> None:
     payload = {
         "experiment": "quality_breakout_timing_v1",
         "run_date": str(date.today()),
-        "registered": "research/EXPERIMENTS.md P3-9（2026-08-06，跑之前登記）",
+        "registered": "research/EXPERIMENTS.md P3-9b（2026-08-06，跑之前登記）",
         # Without this, a failed reproduction on another machine is indistinguishable
         # from a code regression.  See research/provenance.py.
         "environment": environment_block(data, parquet_dir=str(PARQUET_DIR)),
         "spec": SPEC.to_dict(),
+        "universe_markets": list(UNIVERSE_MARKETS),
+        "second_look_warning": (
+            "本輪為對同一假說的第二次檢定（P3-9 已在含櫃買的宇宙上判過一次，"
+            "五列全數否決）。若本輪出現通過者，依 P3-9b 登記不得逕行採信，"
+            "須計入多重檢定並列為待下一輪獨立設計檢驗。"
+        ),
         "variants_declared": VARIANTS,
         "development": {
             "start": str(lo), "end": str(hi), "trading_days": len(dates),
@@ -455,7 +493,7 @@ def main() -> None:
         "holdout_touched": False,
     }
     if not args.only:
-        results["C0_formal_5d"]["_f0"] = _baseline_check(results["C0_formal_5d"])
+        results["C0_formal_5d"]["_f0"] = f0
         payload["assessment"] = _assessment(results)
     else:
         payload["assessment"] = {"status": "partial_diagnostic_only"}

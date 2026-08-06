@@ -451,8 +451,16 @@ def _hot_sectors_asof(data, d, top_n=5, min_stocks=10, window_days=7):
 
 # ── 某日（含當天）的候選股票，依正式評分排序取前 N ───────────────
 def _eligible_stock_ids_asof(data: dict, d, industry_codes=None,
-                             use_hot_sector_gate: bool = False) -> set[str]:
-    """Return securities that existed and were tradable on the given date."""
+                             use_hot_sector_gate: bool = False,
+                             markets=None) -> set[str]:
+    """Return securities that existed and were tradable on the given date.
+
+    ``markets`` restricts the universe to those listing venues (e.g. ``("TWSE",)``).
+    Research uses it because TPEX institutional data only begins 2018-01, so a
+    2015-2020 study that includes TPEX names silently switches universe halfway
+    through -- see EXPERIMENTS.md 2026-08-06.  Left as ``None`` the universe is
+    unrestricted, which is what live trading wants: its data is complete.
+    """
     history = data.get("universe_history")
     valid = None
     if history is not None and not history.empty:
@@ -484,12 +492,23 @@ def _eligible_stock_ids_asof(data: dict, d, industry_codes=None,
 
     stocks = data.get("stocks")
     listing_dates = {}
+    if markets is not None and (stocks is None or stocks.empty):
+        # Failing loudly matters here: silently ignoring the restriction would
+        # produce a mixed universe that is indistinguishable from a restricted
+        # one in every report.  That exact failure mode (missing stocks.parquet
+        # disabling the venue filter without a word) cost an afternoon on
+        # 2026-08-06.
+        raise RuntimeError(
+            f"universe_markets={markets} 需要 stocks.parquet 的市場別，但它缺失或為空；"
+            "拒絕在無法套用限制的情況下繼續，否則報告會宣稱受限而實際未受限"
+        )
     if stocks is not None and not stocks.empty:
         meta = stocks.copy()
         meta["stock_id"] = meta["stock_id"].astype(str)
+        allowed = list(markets) if markets is not None else ["TWSE", "TPEX"]
         meta = meta[
             meta["stock_id"].str.fullmatch(r"\d{4}", na=False)
-            & meta["market"].isin(["TWSE", "TPEX"])
+            & meta["market"].isin(allowed)
         ]
         valid = valid[valid["stock_id"].isin(meta["stock_id"])]
         listing_dates = meta.set_index("stock_id")["listing_date"].to_dict()
@@ -541,6 +560,7 @@ def _candidates_asof(data, d, industry_codes, top_n=5, cfg=None):
     sids = _eligible_stock_ids_asof(
         data, d, industry_codes=industry_codes,
         use_hot_sector_gate=use_gate,
+        markets=cfg.get("universe_markets"),
     )
 
     if use_gate:
