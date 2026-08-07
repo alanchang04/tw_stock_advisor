@@ -148,11 +148,27 @@ def run_daily_recommendation(with_entries: bool = True):
             hot_sector_names = candidates["industry"].unique().tolist()
             # debate_bull / debate_bear / judge 三段在 llm_advisor 內部各自記錄
             result = generate_recommendations(candidates_text, hot_sector_names, candidates)
-            try:
-                from agent.llm_ab_tracking import record_daily_picks
-                record_daily_picks(eval_date, candidates, result, pick_top_n=_ST.get("pick_top_n", 5))
-            except Exception as e:
-                logger.warning(f"LLM A/B量測記錄失敗（不影響正式推薦流程）: {e}")
+            # 前向 A/B 是目前唯一乾淨的證據來源，而它累積得極慢（每 5 個 pipeline 日
+            # 才 1 個訊號日）。原本失敗只寫 logger.warning，線上看不出來——2026-08-07
+            # 盤點發現 factor_screen 跑了 4 天、A/B 卻只有 3 天，差的那天無從追查。
+            # 故改為進 execution_log：仍不打斷正式流程，但失敗必定留下可稽核紀錄。
+            with exec_log.stage("llm_ab_tracking") as rec:
+                try:
+                    from agent.llm_ab_tracking import record_daily_picks
+                    ab = record_daily_picks(eval_date, candidates, result,
+                                            pick_top_n=_ST.get("pick_top_n", 5))
+                except Exception as e:
+                    ab = {"quant_only": 0, "llm": 0, "written": False,
+                          "error": f"{type(e).__name__}: {str(e)[:200]}"}
+                    logger.warning(f"LLM A/B量測記錄失敗（不影響正式推薦流程）: {e}")
+                if ab.get("written"):
+                    rec.summary = (f"前向A/B已記錄：量化 {ab['quant_only']} 檔、"
+                                   f"LLM {ab['llm']} 檔")
+                else:
+                    rec.summary = f"⚠️ 前向A/B未寫入：{ab.get('error') or '原因不明'}"
+                    # 借用 llm_errors 通道把原因寫進 error_msg，決策軌跡頁才看得到
+                    rec.add_llm_error(rec.summary, calls=0)
+                rec.payload = ab
             if result:
                 save_recommendations(result)
                 picks = [{"stock_id": r["stock_id"], "reason": r.get("reason", "")}
