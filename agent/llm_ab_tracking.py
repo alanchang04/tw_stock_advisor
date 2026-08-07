@@ -43,6 +43,11 @@ def ensure_llm_ab_tracking_table():
         """))
         s.execute(text("CREATE INDEX IF NOT EXISTS idx_llm_ab_tracking_date "
                        "ON llm_ab_tracking (signal_date)"))
+        # shadow：這筆是「影子日」的紀錄——市場濾網當天擋下新倉，所以這些選股
+        # 並未實際成交。訊號品質比較兩者都算數，但分析時必須分得出來，否則會
+        # 把「假設會買」誤讀成「真的買了」。既有列預設 FALSE，語意正確。
+        s.execute(text("ALTER TABLE llm_ab_tracking "
+                       "ADD COLUMN IF NOT EXISTS shadow BOOLEAN NOT NULL DEFAULT FALSE"))
 
 
 def build_quant_only_rows(candidates: pd.DataFrame, pick_top_n: int) -> list[dict]:
@@ -69,7 +74,7 @@ def build_llm_rows(result: dict | None) -> list[dict]:
 
 
 def record_daily_picks(signal_date: date, candidates: pd.DataFrame, result: dict | None,
-                       pick_top_n: int = 5) -> dict:
+                       pick_top_n: int = 5, shadow: bool = False) -> dict:
     """
     寫入當天的「量化自己選」+「LLM最終選」兩組紀錄。失敗不拋例外（不能因為記錄
     這個輔助功能失敗就打斷正式推薦流程）。
@@ -92,21 +97,24 @@ def record_daily_picks(signal_date: date, candidates: pd.DataFrame, result: dict
         with get_session() as s:
             for row in quant_rows:
                 s.execute(text("""
-                    INSERT INTO llm_ab_tracking (signal_date, source, stock_id, rank, score)
-                    VALUES (:d, 'quant_only', :sid, :rank, :score)
+                    INSERT INTO llm_ab_tracking (signal_date, source, stock_id, rank, score, shadow)
+                    VALUES (:d, 'quant_only', :sid, :rank, :score, :shadow)
                     ON CONFLICT (signal_date, source, stock_id) DO UPDATE SET
-                        rank = EXCLUDED.rank, score = EXCLUDED.score
+                        rank = EXCLUDED.rank, score = EXCLUDED.score,
+                        shadow = EXCLUDED.shadow
                 """), {"d": signal_date, "sid": row["stock_id"],
-                       "rank": row["rank"], "score": row["score"]})
+                       "rank": row["rank"], "score": row["score"], "shadow": shadow})
             for row in llm_rows:
                 s.execute(text("""
-                    INSERT INTO llm_ab_tracking (signal_date, source, stock_id, rank, reason)
-                    VALUES (:d, 'llm', :sid, :rank, :reason)
+                    INSERT INTO llm_ab_tracking (signal_date, source, stock_id, rank, reason, shadow)
+                    VALUES (:d, 'llm', :sid, :rank, :reason, :shadow)
                     ON CONFLICT (signal_date, source, stock_id) DO UPDATE SET
-                        rank = EXCLUDED.rank, reason = EXCLUDED.reason
+                        rank = EXCLUDED.rank, reason = EXCLUDED.reason,
+                        shadow = EXCLUDED.shadow
                 """), {"d": signal_date, "sid": row["stock_id"],
-                       "rank": row["rank"], "reason": row["reason"]})
-        logger.info(f"LLM A/B量測記錄：{signal_date} quant_only={len(quant_rows)}筆、llm={len(llm_rows)}筆")
+                       "rank": row["rank"], "reason": row["reason"], "shadow": shadow})
+        logger.info(f"LLM A/B量測記錄{'（影子日）' if shadow else ''}：{signal_date} "
+                    f"quant_only={len(quant_rows)}筆、llm={len(llm_rows)}筆")
     except Exception as e:
         logger.warning(f"LLM A/B量測記錄失敗（不影響正式推薦流程）: {e}")
         return {"quant_only": len(quant_rows), "llm": len(llm_rows),
