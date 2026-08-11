@@ -227,5 +227,17 @@ db_export.sql
 data/history/
 *.parquet
 data/research/
+
+# 跨本機開發用的重現快照（含上百MB parquet 與 zip，不進版控）
+# 上面的 *.parquet 只擋得住裡面的 parquet，txt/csv/json/zip 仍會是 untracked，
+# 一次 `git add .` 就可能把 126MB 的 zip 寫進 git 歷史，事後很難拔掉。
+repro_snapshot_*/
+repro_snapshot_*.zip
+
+# TWSE 原始檔落地區（2005-2014 行情、證券主檔與公司行動，不進版控）
+# 兩台機器靠檔案直接傳輸對齊，並用 reports/twse_raw_transfer_manifest_*.json 的
+# sha256 清單逐檔驗證；manifest 本身很小，進版控當作對齊憑證。
 data/raw/
+
+# 可由 raw cache 重建的 versioned research snapshots。
 data/research_versions/
