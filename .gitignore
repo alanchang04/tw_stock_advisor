@@ -227,3 +227,9 @@ db_export.sql
 data/history/
 *.parquet
 data/research/
+
+# 跨本機開發用的重現快照（含上百MB parquet 與 zip，不進版控）
+# 上面的 *.parquet 只擋得住裡面的 parquet，txt/csv/json/zip 仍會是 untracked，
+# 一次 `git add .` 就可能把 126MB 的 zip 寫進 git 歷史，事後很難拔掉。
+repro_snapshot_*/
+repro_snapshot_*.zip
