@@ -227,3 +227,5 @@ db_export.sql
 data/history/
 *.parquet
 data/research/
+data/raw/
+data/research_versions/

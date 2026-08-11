@@ -1,0 +1,25 @@
+{
+  "source_rows_sha256": "14CA3CA2CBD52E41888C80743BE9EA308711DA986E0A9C5AAC8087125BB5A458",
+  "selection_rule": "first_middle_last_per_source_report_and_event_year",
+  "sample_rows": 42,
+  "minimum_required": 30,
+  "source_report_counts": {
+    "TWT49U": 30,
+    "TWTAUU": 12
+  },
+  "year_counts": {
+    "2005": 3,
+    "2006": 3,
+    "2007": 3,
+    "2008": 3,
+    "2009": 3,
+    "2010": 3,
+    "2011": 6,
+    "2012": 6,
+    "2013": 6,
+    "2014": 6
+  },
+  "raw_sha256_mismatches": 0,
+  "normalized_field_mismatches": 0,
+  "passed": true
+}
