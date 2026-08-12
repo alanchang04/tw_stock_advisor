@@ -19,7 +19,7 @@
   },
   "data_release_id": "tw_stock_data_2005_2014_r1",
   "diagnostic": "MOM1 named-release PIT signal counts",
-  "git_commit": "31594635f38f5644547a68c873bf94c4d1570417",
+  "git_commit": "07bbe3262975ed49018eaa43a2abe3528c7e4111",
   "known_blockers": [
     "D3 actual-share execution ledger and unresolved official reference resets block returns",
     "TWSE stop-trading and full-delivery history are not complete in this restriction frame",
@@ -2917,7 +2917,7 @@
     "restrictions": "TWSE punish/disposition only; stop-trading/full-delivery not yet complete"
   },
   "strategy_paths_clean_at_run": true,
-  "strategy_spec_sha256": "0B7FE8AD5EF51AD8334C88A15EE94B022A1AF2F1127EAF1E891E153446D65169",
+  "strategy_spec_sha256": "63B21CB53B085FEC07BE04867EB592BEBA08B30910A3C6FE0C376DA92B3939DE",
   "summary": {
     "first_nonempty_decision": "2006-01-25",
     "last_nonempty_decision": "2014-12-31",

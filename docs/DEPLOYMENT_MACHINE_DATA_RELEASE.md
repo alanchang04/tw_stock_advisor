@@ -76,7 +76,19 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File `
 ```
 
 Expected diagnostic SHA-256:
-`48E705D1521282C03DF97BDD2857CCA67716CBB197D971790E080C4A4A64F81F`.
+`1E6876F420815A837BA2E10FE9C38E3241B596AAF38A17523D85737D1DC65F21`.
 The machine-readable result is `reports/mom1_release_diagnostic.json`; the
 human-readable readiness summary is `reports/MOM1_RELEASE_READINESS.md`.
 This command does not calculate or expose backward-holdout performance.
+
+Reproduce the F0 portfolio-construction and execution-readiness audit as well:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File `
+  .\scripts\verify_mom1_f0_execution.ps1
+```
+
+Expected SHA-256:
+`0DF4D693665A3D1DAEC7AC8FEC376EE5A0414AB91ACE9D16C40F47B06E2A6960`.
+The expected `f0_status` is currently `blocked`; that is a truthful gate status,
+not a failed verifier. The report must also say `performance_inspected: false`.

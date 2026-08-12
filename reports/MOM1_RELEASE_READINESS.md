@@ -12,7 +12,7 @@ This is the integration-owner update to the historical Claude MOM1-0 handoff in
 - Data release: `tw_stock_data_2005_2014_r1`.
 - Deterministic diagnostic: `reports/mom1_release_diagnostic.json`.
 - Diagnostic SHA-256:
-  `48E705D1521282C03DF97BDD2857CCA67716CBB197D971790E080C4A4A64F81F`.
+  `1E6876F420815A837BA2E10FE9C38E3241B596AAF38A17523D85737D1DC65F21`.
 - The same command was run twice locally and produced byte-identical output.
 - Holdout performance inspected: **no**. No return, NAV, Sharpe, drawdown, win
   rate, or parameter comparison was calculated.
@@ -61,10 +61,60 @@ F0 overall is **not passed**, and the 2008-2014 backward holdout remains closed:
    execution ledger and unresolved reference resets still block performance.
 2. D6 covers TWSE `punish` disposition events; historical stop-trading and
    full-delivery flags are not yet complete.
-3. The 3-name/30% sector cap cannot be formally applied in the 28 affected
-   months with missing PIT industry.
-4. Sizing, executable T+1 price/cost handling, volume caps, and broker
-   whole-lot/odd-lot splitting remain unimplemented.
+3. The named release has no official locked-limit state for fill validation.
+
+The shared fee/tax/slippage constants are no longer a blocker: `ca29852`
+imports `FEE_RATE`, `TAX_RATE`, `buy_fill`, and `sell_fill` from
+`agent/strategy.py` into the deterministic order ledger, so MOM1 and the
+existing strategy now use one cost definition instead of two. The three
+blockers above are exactly the `remaining_blockers` recorded in
+`reports/mom1_f0_execution_readiness.json`.
+
+## F0 execution package update
+
+Strategy contract commit: `ca2985292a3f77e68d2546cc673baaf974cde7cc`.
+The package now implements and tests:
+
+- PIT industry lookup with no future snapshots;
+- 3-name/30% industry cap across the full buffered candidate list;
+- a frozen fail-closed rule: missing/non-PIT industry makes that stock ineligible;
+- 10% equal-weight integer-share sizing and the 1% average-volume cap;
+- explicit common-lot and odd-lot broker quantities;
+- T+1-or-later execution attempts, side-specific locked-limit behavior, and
+  defer/cancel states without invented fills;
+- a deterministic cost ledger that records the raw open, the executable price
+  after slippage, gross notional, commission, transaction tax, and the resulting
+  cash delta per order, using the shared `agent/strategy.py` constants.
+
+The deterministic F0 diagnostic is
+`reports/mom1_f0_execution_readiness.json`, SHA-256
+`0DF4D693665A3D1DAEC7AC8FEC376EE5A0414AB91ACE9D16C40F47B06E2A6960`.
+Across 108 active decision months, the formal industry policy produced 1,080
+selected stock-months; 1,070 had a usable T+1 open and complete sizing inputs.
+The ten unavailable opens remain unfilled rather than being replaced by a
+close or forward-filled price.
+
+F0 remains blocked only by release/integration inputs: official locked-limit
+state, TWSE full-delivery/altered-trading history, and D3 execution-ledger
+reconciliation. All three are data gaps owned by the Data Authority, not code
+defects. Industry missingness no longer blocks the whole month because its
+conservative exclusion policy was frozen before any performance inspection.
+
+## When strategy effects may be inspected
+
+Signal membership and operational behavior are inspectable now. Historical
+effectiveness is intentionally not inspectable yet. The backward holdout opens
+once all of the following are true:
+
+1. a new immutable release resolves or formally disposes the remaining D3 and
+   TWSE execution-restriction blockers;
+2. cost-ledger integration and deterministic order-list replay pass F0;
+3. the two registered variants (MOM-1A and MOM-1B) and all acceptance thresholds
+   remain unchanged; and
+4. the one-time F1 command is committed before execution.
+
+At that point F1 is run once and reports the strategy effects. No preliminary
+return peek is allowed before these gates.
 
 ## Deployment-machine verification
 
@@ -77,3 +127,14 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File `
 
 Success requires `passed: true`, the exact diagnostic SHA above, and
 `performance_inspected: false`.
+
+Then verify the new portfolio/execution mechanics:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File `
+  .\scripts\verify_mom1_f0_execution.ps1
+```
+
+This second check currently reports `f0_status: blocked` by design and lists
+the remaining data/integration gates; its output must still match the committed
+SHA exactly.
