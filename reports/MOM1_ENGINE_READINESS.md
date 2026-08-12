@@ -13,6 +13,7 @@
 |---|---|
 | Branch | `research/mom1-engine` |
 | 基底 commit | `8c92938`（`origin/agent/swing-margin-research`） |
+| 交付 commit | `806d270`（本節的 SHA 由緊接其後的一個 commit 補記） |
 | Worktree | `../tw_stock_advisor_claude`，與 Codex 的 Data Authority checkout 完全分離 |
 | 新增 | `research/momentum.py`、`tests/test_momentum.py` |
 | 修改 | `scripts/analyze_momentum_signal_overlap.py` |
