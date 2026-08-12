@@ -12,19 +12,33 @@
 還原：使用 reports/twse_corporate_action_jump_audit_2005_2014_events.csv 的
 adjustment_factor 做反向還原。這是 D3 稽核的衍生產物，不是已 promotion 的 D3 snapshot，
 因此結論標記為 preliminary。
+
+MOM1-0 稽核修正（2026-08-12）：先前用 ``~stock_id.str.startswith("00")`` 猜測 ETF，
+是代號啟發式，不是 point-in-time 欄位——它同時漏掉不以 00 開頭的存託憑證與其他
+非普通股，也無法反映「當時是否仍有效上市」。現在改用 D1 security master 的
+``asset_type`` 官方分類與 ``effective_from`` / ``delisting_date`` 掛牌區間
+（見 research/momentum.py 的 build_pit_master／pit_common_stock_mask）。
+若 master 缺少這些欄位，該處直接 raise，不退回任何啟發式。
 """
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from research.momentum import build_pit_master, pit_common_stock_mask  # noqa: E402
+
 PRICES = ROOT / "data/research_versions/twse_prices_2005_2014_v1/prices.parquet"
 EVENTS = ROOT / "reports/twse_corporate_action_jump_audit_2005_2014_events.csv"
-MASTER = ROOT / "data/research_versions/twse_security_master_2005_2007_staging_v3/stocks.parquet"
+# D1 staging v1 涵蓋 2005~2014 全期（120 個月末 snapshot、1,042 個證券，與 D2 價量的
+# 證券代號數一致），structural_passed=true、普通股 effective_from 覆蓋 100%。
+# 仍為 staging（promotion_ready=false，產業 PIT 覆蓋 0%），因此本腳本結論維持 preliminary。
+MASTER = ROOT / "data/research_versions/twse_security_master_2005_2014_staging_v1/security_master_staging.parquet"
 OUT = ROOT / "reports/momentum_signal_overlap_2005_2014.json"
 
 MIN_PRICE = 10.0            # SPEC §7.1.4
@@ -76,6 +90,7 @@ def consecutive_true(mask: pd.DataFrame) -> pd.DataFrame:
 
 def main() -> None:
     adj, turnover, raw_close, applied = load_adjusted_close()
+    master = build_pit_master(pd.read_parquet(MASTER))
 
     ma5 = adj.rolling(5).mean()
     ma20 = adj.rolling(20).mean()
@@ -91,6 +106,7 @@ def main() -> None:
 
     rows = []
     for d in month_end_dates(adj.index):
+        pit_common = pit_common_stock_mask(master, d, adj.columns)
         eligible = (
             adj.loc[d].notna()
             & (raw_close.loc[d] >= MIN_PRICE)
@@ -99,7 +115,7 @@ def main() -> None:
             & rs20.loc[d].notna()
             & mom60.loc[d].notna()
             & liq20.loc[d].notna()
-            & ~adj.columns.str.startswith("00")        # 排除 ETF 代號段（近似，非 PIT）
+            & pit_common.to_numpy()
         )
         ids = adj.columns[eligible]
         if len(ids) < 50:
@@ -132,7 +148,13 @@ def main() -> None:
         "median_universe_size": float(monthly["n"].median()),
         "corporate_action_adjustments_applied": applied,
         "adjustment_source": "reports/twse_corporate_action_jump_audit_2005_2014_events.csv",
-        "caveat": "D3 未 promotion；還原係數取自稽核衍生檔，結論為 preliminary",
+        "pit_master_source": "data/research_versions/twse_security_master_2005_2014_staging_v1",
+        "universe_rule": "PIT asset_type == common_stock 且 effective_from <= d < delisting_date",
+        "caveat": (
+            "D3 未 promotion；還原係數取自稽核衍生檔，結論為 preliminary。"
+            "普通股資格已由代號前綴啟發式改為 D1 PIT security master 欄位；"
+            "D1 仍為 staging（產業 PIT 覆蓋 0%），因此本結果不得作為部署證據。"
+        ),
         "metrics": {},
     }
     for other in ("rs20", "mom60", "stack_days"):
