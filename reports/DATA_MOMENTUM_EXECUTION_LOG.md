@@ -525,3 +525,70 @@ missing 0、mismatched 0、passed=true。
   verify 與八個 component manifest／quality hash 全部通過。
 - 此 release 核准跨機 identity、PIT engine correctness、signal count 與 disposition
   filter；D3 actual-share ledger 仍有 blocker，因此 backward holdout 績效仍未開封。
+
+## D6 第二部分：TWSE 變更交易方法／全額交割（2026-08-12 晚）
+
+`SPEC_DATA_FOUNDATION_AND_MOMENTUM.md` §7.1.6 的不可交易排除有兩半：處置由
+D6 第一部分提供，本輪補上另一半。此項先前是 `reports/mom1_f0_execution_readiness.json`
+記錄的 remaining blocker 之一（TPEX 有 D5 的 `trading_restrictions`，TWSE 沒有等價物）。
+
+- 官方來源：`https://www.twse.com.tw/exchangeReport/TWT85U`，TWSE OpenAPI 目錄
+  登記為「集中市場證券變更交易」。實測 `date` 參數可回溯至 2005-01-03，
+  逐交易日一份完整名單。先前未使用此來源，並非它不存在。
+- 交易日曆取自已凍結的 D2 `twse_prices_2005_2014_v1`，不另外猜測開休市。
+  2,469 個交易日全部抓取成功，`downloaded=2469`、`failures=0`、`missing=0`，
+  逐年日數 247／247／243／249／248／250／247／247／244／247 與 D2 完全一致。
+- 原始回應 53,159 筆觀察列。raw 沿用處置回補慣例：固定 key 順序、緊縮
+  separators、gzip `mtime=0`；同一日以 `--force` 重抓，位元組完全相同。
+- raw transfer manifest：`reports/twse_altered_trading_transfer_manifest_2005_2014_20260812.json`，
+  2,469 檔、1,897,555 bytes，collection SHA-256：
+  `5F8F4AA1D2C1DBE03404F8AFE4728389C846846335B5760F62A309588326F00A`；
+  逐檔驗證 missing 0、mismatched 0、passed=true。
+
+### 跨年代 schema 變遷（保留，未合併）
+
+官方報表在期間內換過名稱與欄位，本輪刻意保留而不抹平：
+
+| 期間 | 標題 | 欄位 | 交易日 | 觀察列 |
+|---|---|---|---:|---:|
+| 2005-01-03 ～ **2007-10-31** | 全額交割證券 | 證券代號、證券名稱 | 694 | 15,754 |
+| **2007-11-01** ～ 2014-12-31 | 變更交易 | 加上「分盤集合競價(以**表示)」 | 1,775 | 37,405 |
+
+`altered_trading` 在整段期間語意一致，可直接用於 §7.1.6 排除。
+但 `periodic_call_auction` **只有後期揭露**，因此早期 15,754 列一律為 `NA`
+而非 `False`——依 §2.2.5「缺資料不等於 0」。補 `False` 會把「當時不揭露」
+誤述成「當時沒有分盤」，且方向剛好讓回測誤以為那些股票比實際更好成交。
+後期 37,405 列全部有值，其中 16,932 列為分盤集合競價。
+
+parser 遇到未知欄位組合直接 raise，不以欄位順序猜測；官方 `stat` 非 OK 亦直接
+拋出，不得視為「當日無變更交易」——查詢失敗與名單為空語意不同，混淆會讓
+缺漏的日子看起來像乾淨的日子。
+
+### 品質閘門
+
+- `twse_altered_trading_2005_2014_v1` 與 `_repeat` 從 clean commit `003b323`
+  獨立建置，兩者 content SHA-256 均為
+  `AFCD5A2DDA5A42F12B96A5C97AA63F5FDC62AB07DAD9FCC890CA63EA21B18E10`。
+- snapshot manifest `git.dirty=false`；53,159 列、209 個證券代號；
+  `(snapshot_date, stock_id)` 重複 0；交易日覆蓋 2,469/2,469；
+  官方 `stat` 全為 OK；早期分盤欄位確認全部缺值。
+- `twse_altered_trading_component_ready=true`、`promotion_ready=true`。
+- 品質閘門要求交易日**全覆蓋**：缺一天 raw 即 `promotion_ready=false`。
+  理由是官方每個交易日都發佈完整名單，缺的那天排除規則等於失效，
+  與其讓那天看起來乾淨，不如直接擋下。
+
+### 已知缺口
+
+- 早期不揭露分盤集合競價旗標，該段為 missing，永遠不是 False。
+- TWSE「停止交易」沒有獨立官方旗標；目前間接由「當日無行情列」處理。
+- TPEX 變更交易歷史由 D5 快照提供，不在本元件範圍。
+
+### 尚未做的事
+
+本元件**尚未納入任何 release**。`tw_stock_data_2005_2014_r1` 為
+`immutable_research_component_bundle`，不得就地追加；要讓 MOM-1 實際套用
+此排除規則，需發佈 r2 並更新部屬機文件的預期雜湊與 bundle。本輪沒有
+修改 r1、沒有動 `data/research`、沒有查看任何 holdout 績效。
+
+2026-08-12 本輪測試（`.venv-repro`，排除兩個需 DB 連線的模組）：
+662 passed、0 failed、4 個既有 warnings。
