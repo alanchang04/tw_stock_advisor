@@ -592,3 +592,47 @@ parser 遇到未知欄位組合直接 raise，不以欄位順序猜測；官方 
 
 2026-08-12 本輪測試（`.venv-repro`，排除兩個需 DB 連線的模組）：
 662 passed、0 failed、4 個既有 warnings。
+
+## 資料釋出 r2：納入變更交易元件（2026-08-12 晚）
+
+`tw_stock_data_2005_2014_r1` 是 `immutable_research_component_bundle`，不得就地
+追加元件，因此發佈 r2。r2 = r1 的八個元件 + `twse_altered_trading_2005_2014`。
+
+- 共 9 個元件、15,134 檔、546,374,841 bytes，collection SHA-256：
+  `93F20503A24BEE8EAFD6F45E12B591B073A670D6265EF42DF5E0CE5C14C73109`。
+- `verify_data_release.ps1` 通過：checked 15,134、missing 0、mismatched 0，
+  九個 component 的 manifest／quality／content hash 逐一相符。
+- descriptor 由 r1 程式化衍生，避免手抄；`supersedes: tw_stock_data_2005_2014_r1`。
+
+### 引擎接線
+
+`research/momentum_release.py` 新增該元件並**分開保存三個矩陣**：
+`disposition_restricted`、`altered_trading_restricted`，以及兩者 OR 的
+`restricted`。分開的理由是讓每一次排除都能回答「因為哪一條規則」，
+而不是只知道被排除了；兩個診斷改用合併後的 `restricted`。
+
+載入時強制檢查變更交易名單覆蓋全部交易日，缺一天即 raise，官方 `stat`
+非 OK 亦 raise。`restriction_scope` 更新為涵蓋變更交易，並明確記載
+停止交易仍無獨立官方旗標。
+
+### 診斷雜湊更新
+
+| 診斷 | r1 時期 | r2 |
+|---|---|---|
+| release 訊號診斷 | `1E6876F4…` | **`29CB56DA…`** |
+| F0 執行稽核 | `0DF4D693…` | **`95751DC4…`** |
+
+兩個 verifier 均 `passed: true`，`f0_status` 維持 `blocked`、
+`performance_inspected` 維持 false。
+
+### F0 阻擋項變化
+
+「TWSE full-delivery/altered-trading history remains incomplete」**已解除**。
+剩餘三項改為：官方漲跌停狀態未納入釋出、TWSE 停止交易無獨立官方旗標
+（目前只能由當日無行情間接推得）、D3 實際股數 ledger 未對帳。
+
+`docs/DEPLOYMENT_MACHINE_DATA_RELEASE.md` 已全面改指 r2；部屬機需重新打包
+與傳輸 bundle，舊的 r1 zip 不再對應現行預期雜湊。
+
+2026-08-12 本輪測試（`.venv-repro`，排除兩個需 DB 連線的模組）：
+662 passed、0 failed、4 個既有 warnings。

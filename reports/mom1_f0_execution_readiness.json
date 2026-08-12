@@ -1,6 +1,6 @@
 {
-  "command": ".\\.venv-repro\\Scripts\\python.exe .\\scripts\\diagnose_mom1_f0_execution.py --release-id tw_stock_data_2005_2014_r1 --output reports\\mom1_f0_execution_readiness.json",
-  "data_release_id": "tw_stock_data_2005_2014_r1",
+  "command": ".\\.venv-repro\\Scripts\\python.exe .\\scripts\\diagnose_mom1_f0_execution.py --release-id tw_stock_data_2005_2014_r2 --output reports\\mom1_f0_execution_readiness.json",
+  "data_release_id": "tw_stock_data_2005_2014_r2",
   "diagnostic": "MOM1 F0 portfolio construction and execution readiness",
   "f0_status": "blocked",
   "monthly": [
@@ -7214,19 +7214,19 @@
     },
     {
       "decision_date": "2009-05-27",
-      "eligible_count": 310,
+      "eligible_count": 309,
       "execution_date": "2009-06-01",
       "formal_selected_stock_ids": [
         "6145",
         "2384",
         "5534",
         "2458",
-        "2388",
         "3049",
         "6120",
         "2383",
         "1319",
-        "3474"
+        "3474",
+        "2363"
       ],
       "formal_target_orders": [
         {
@@ -7287,21 +7287,6 @@
           "side": "buy",
           "stock_id": "2458",
           "target_shares": 483,
-          "transaction_tax_twd": 0.0
-        },
-        {
-          "cash_delta_twd": -30007.6604499894,
-          "commission_twd": 24.780849989399997,
-          "common_lots": 1,
-          "current_shares": 0,
-          "executable_price": 17.452199999999998,
-          "gross_notional_twd": 29982.879599999997,
-          "odd_lot_shares": 718,
-          "raw_open_price": 17.4,
-          "shares": 1718,
-          "side": "buy",
-          "stock_id": "2388",
-          "target_shares": 1718,
           "transaction_tax_twd": 0.0
         },
         {
@@ -7378,6 +7363,21 @@
           "stock_id": "3474",
           "target_shares": 1718,
           "transaction_tax_twd": 0.0
+        },
+        {
+          "cash_delta_twd": -30013.984572560246,
+          "commission_twd": 24.786072560249995,
+          "common_lots": 1,
+          "current_shares": 0,
+          "executable_price": 15.546499999999998,
+          "gross_notional_twd": 29989.198499999995,
+          "odd_lot_shares": 929,
+          "raw_open_price": 15.5,
+          "shares": 1929,
+          "side": "buy",
+          "stock_id": "2363",
+          "target_shares": 1929,
+          "transaction_tax_twd": 0.0
         }
       ],
       "industry_cap_formal_ready": true,
@@ -7390,7 +7390,7 @@
     },
     {
       "decision_date": "2009-06-30",
-      "eligible_count": 307,
+      "eligible_count": 306,
       "execution_date": "2009-07-01",
       "formal_selected_stock_ids": [
         "3049",
@@ -7401,8 +7401,8 @@
         "6145",
         "1319",
         "2458",
-        "2388",
-        "1618"
+        "1618",
+        "2545"
       ],
       "formal_target_orders": [
         {
@@ -7526,21 +7526,6 @@
           "transaction_tax_twd": 0.0
         },
         {
-          "cash_delta_twd": -30016.694910804894,
-          "commission_twd": 24.788310804899996,
-          "common_lots": 2,
-          "current_shares": 0,
-          "executable_price": 12.236599999999997,
-          "gross_notional_twd": 29991.906599999995,
-          "odd_lot_shares": 451,
-          "raw_open_price": 12.2,
-          "shares": 2451,
-          "side": "buy",
-          "stock_id": "2388",
-          "target_shares": 2451,
-          "transaction_tax_twd": 0.0
-        },
-        {
           "cash_delta_twd": -30014.48648705,
           "commission_twd": 24.786487049999998,
           "common_lots": 1,
@@ -7553,6 +7538,21 @@
           "side": "buy",
           "stock_id": "1618",
           "target_shares": 1625,
+          "transaction_tax_twd": 0.0
+        },
+        {
+          "cash_delta_twd": -30023.019033375745,
+          "commission_twd": 24.79353337575,
+          "common_lots": 0,
+          "current_shares": 0,
+          "executable_price": 63.69049999999999,
+          "gross_notional_twd": 29998.225499999997,
+          "odd_lot_shares": 471,
+          "raw_open_price": 63.5,
+          "shares": 471,
+          "side": "buy",
+          "stock_id": "2545",
+          "target_shares": 471,
           "transaction_tax_twd": 0.0
         }
       ],
@@ -7918,7 +7918,7 @@
     },
     {
       "decision_date": "2009-09-30",
-      "eligible_count": 319,
+      "eligible_count": 318,
       "execution_date": "2009-10-01",
       "formal_selected_stock_ids": [
         "2455",
@@ -16014,7 +16014,7 @@
     },
     {
       "decision_date": "2013-07-31",
-      "eligible_count": 369,
+      "eligible_count": 368,
       "execution_date": "2013-08-01",
       "formal_selected_stock_ids": [
         "3054",
@@ -16026,7 +16026,7 @@
         "6230",
         "1532",
         "6116",
-        "3474"
+        "9906"
       ],
       "formal_target_orders": [
         {
@@ -16165,18 +16165,18 @@
           "transaction_tax_twd": 0.0
         },
         {
-          "cash_delta_twd": -30014.285721254102,
-          "commission_twd": 24.7863212541,
-          "common_lots": 2,
+          "cash_delta_twd": -29949.2376033825,
+          "commission_twd": 24.7326033825,
+          "common_lots": 0,
           "current_shares": 0,
-          "executable_price": 11.3339,
-          "gross_notional_twd": 29989.4994,
-          "odd_lot_shares": 646,
-          "raw_open_price": 11.3,
-          "shares": 2646,
+          "executable_price": 117.35099999999998,
+          "gross_notional_twd": 29924.504999999997,
+          "odd_lot_shares": 255,
+          "raw_open_price": 117.0,
+          "shares": 255,
           "side": "buy",
-          "stock_id": "3474",
-          "target_shares": 2646,
+          "stock_id": "9906",
+          "target_shares": 255,
           "transaction_tax_twd": 0.0
         }
       ],
@@ -16186,25 +16186,40 @@
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 1432, 2062, 9910, 9934, 9914",
       "tplus1_open_ready_count": 10,
       "uncapped_selected_count": 10,
-      "uncapped_selected_missing_pit_industry_count": 0
+      "uncapped_selected_missing_pit_industry_count": 1
     },
     {
       "decision_date": "2013-08-30",
-      "eligible_count": 368,
+      "eligible_count": 367,
       "execution_date": "2013-09-02",
       "formal_selected_stock_ids": [
+        "9906",
         "6116",
         "1707",
         "1476",
         "3054",
-        "3474",
         "3450",
-        "9906",
         "3665",
         "3229",
-        "2488"
+        "2488",
+        "8411"
       ],
       "formal_target_orders": [
+        {
+          "cash_delta_twd": -30006.455855213997,
+          "commission_twd": 24.779855213999994,
+          "common_lots": 0,
+          "current_shares": 0,
+          "executable_price": 53.15899999999999,
+          "gross_notional_twd": 29981.675999999996,
+          "odd_lot_shares": 564,
+          "raw_open_price": 53.0,
+          "shares": 564,
+          "side": "buy",
+          "stock_id": "9906",
+          "target_shares": 564,
+          "transaction_tax_twd": 0.0
+        },
         {
           "cash_delta_twd": -30016.694910804894,
           "commission_twd": 24.788310804899996,
@@ -16266,21 +16281,6 @@
           "transaction_tax_twd": 0.0
         },
         {
-          "cash_delta_twd": -30016.694910804894,
-          "commission_twd": 24.788310804899996,
-          "common_lots": 2,
-          "current_shares": 0,
-          "executable_price": 12.236599999999997,
-          "gross_notional_twd": 29991.906599999995,
-          "odd_lot_shares": 451,
-          "raw_open_price": 12.2,
-          "shares": 2451,
-          "side": "buy",
-          "stock_id": "3474",
-          "target_shares": 2451,
-          "transaction_tax_twd": 0.0
-        },
-        {
           "cash_delta_twd": -30021.9148214983,
           "commission_twd": 24.792621498299997,
           "common_lots": 0,
@@ -16293,21 +16293,6 @@
           "side": "buy",
           "stock_id": "3450",
           "target_shares": 458,
-          "transaction_tax_twd": 0.0
-        },
-        {
-          "cash_delta_twd": -30006.455855213997,
-          "commission_twd": 24.779855213999994,
-          "common_lots": 0,
-          "current_shares": 0,
-          "executable_price": 53.15899999999999,
-          "gross_notional_twd": 29981.675999999996,
-          "odd_lot_shares": 564,
-          "raw_open_price": 53.0,
-          "shares": 564,
-          "side": "buy",
-          "stock_id": "9906",
-          "target_shares": 564,
           "transaction_tax_twd": 0.0
         },
         {
@@ -16354,19 +16339,34 @@
           "stock_id": "2488",
           "target_shares": 1013,
           "transaction_tax_twd": 0.0
+        },
+        {
+          "cash_delta_twd": -29954.256748279997,
+          "commission_twd": 24.736748279999997,
+          "common_lots": 0,
+          "current_shares": 0,
+          "executable_price": 80.24,
+          "gross_notional_twd": 29929.519999999997,
+          "odd_lot_shares": 373,
+          "raw_open_price": 80.0,
+          "shares": 373,
+          "side": "buy",
+          "stock_id": "8411",
+          "target_shares": 373,
+          "transaction_tax_twd": 0.0
         }
       ],
       "industry_cap_formal_ready": true,
       "official_locked_limit_state_available": false,
       "sizing_ready_count": 10,
-      "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 2062, 1432, 9910",
+      "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 2062, 1432, 9910, 9934",
       "tplus1_open_ready_count": 10,
       "uncapped_selected_count": 10,
       "uncapped_selected_missing_pit_industry_count": 1
     },
     {
       "decision_date": "2013-09-30",
-      "eligible_count": 372,
+      "eligible_count": 371,
       "execution_date": "2013-10-01",
       "formal_selected_stock_ids": [
         "9906",
@@ -16374,11 +16374,11 @@
         "2488",
         "6116",
         "1476",
+        "8411",
         "1707",
         "2356",
         "1536",
-        "1539",
-        "1310"
+        "1539"
       ],
       "formal_target_orders": [
         {
@@ -16457,6 +16457,21 @@
           "transaction_tax_twd": 0.0
         },
         {
+          "cash_delta_twd": -29971.321840931498,
+          "commission_twd": 24.750840931499997,
+          "common_lots": 0,
+          "current_shares": 0,
+          "executable_price": 73.219,
+          "gross_notional_twd": 29946.570999999996,
+          "odd_lot_shares": 409,
+          "raw_open_price": 73.0,
+          "shares": 409,
+          "side": "buy",
+          "stock_id": "8411",
+          "target_shares": 409,
+          "transaction_tax_twd": 0.0
+        },
+        {
           "cash_delta_twd": -29980.356301746993,
           "commission_twd": 24.758301746999994,
           "common_lots": 0,
@@ -16515,21 +16530,6 @@
           "stock_id": "1539",
           "target_shares": 1754,
           "transaction_tax_twd": 0.0
-        },
-        {
-          "cash_delta_twd": -30009.01561911172,
-          "commission_twd": 24.781969111724994,
-          "common_lots": 1,
-          "current_shares": 0,
-          "executable_price": 20.110149999999997,
-          "gross_notional_twd": 29984.233649999995,
-          "odd_lot_shares": 491,
-          "raw_open_price": 20.05,
-          "shares": 1491,
-          "side": "buy",
-          "stock_id": "1310",
-          "target_shares": 1491,
-          "transaction_tax_twd": 0.0
         }
       ],
       "industry_cap_formal_ready": true,
@@ -16542,18 +16542,18 @@
     },
     {
       "decision_date": "2013-10-31",
-      "eligible_count": 367,
+      "eligible_count": 366,
       "execution_date": "2013-11-01",
       "formal_selected_stock_ids": [
         "3229",
         "1536",
         "2356",
         "2488",
-        "1310",
         "1539",
         "1476",
         "3665",
         "1533",
+        "1310",
         "2497"
       ],
       "formal_target_orders": [
@@ -16618,21 +16618,6 @@
           "transaction_tax_twd": 0.0
         },
         {
-          "cash_delta_twd": -30018.501802967992,
-          "commission_twd": 24.789802967999993,
-          "common_lots": 1,
-          "current_shares": 0,
-          "executable_price": 22.467199999999995,
-          "gross_notional_twd": 29993.711999999992,
-          "odd_lot_shares": 335,
-          "raw_open_price": 22.4,
-          "shares": 1335,
-          "side": "buy",
-          "stock_id": "1310",
-          "target_shares": 1335,
-          "transaction_tax_twd": 0.0
-        },
-        {
           "cash_delta_twd": -30022.41673598804,
           "commission_twd": 24.793035988049994,
           "common_lots": 1,
@@ -16690,6 +16675,21 @@
           "side": "buy",
           "stock_id": "1533",
           "target_shares": 812,
+          "transaction_tax_twd": 0.0
+        },
+        {
+          "cash_delta_twd": -30018.501802967992,
+          "commission_twd": 24.789802967999993,
+          "common_lots": 1,
+          "current_shares": 0,
+          "executable_price": 22.467199999999995,
+          "gross_notional_twd": 29993.711999999992,
+          "odd_lot_shares": 335,
+          "raw_open_price": 22.4,
+          "shares": 1335,
+          "side": "buy",
+          "stock_id": "1310",
+          "target_shares": 1335,
           "transaction_tax_twd": 0.0
         },
         {
@@ -18654,7 +18654,7 @@
     },
     {
       "decision_date": "2014-10-31",
-      "eligible_count": 371,
+      "eligible_count": 370,
       "execution_date": "2014-11-03",
       "formal_selected_stock_ids": [
         "5269",
@@ -19031,10 +19031,10 @@
     }
   ],
   "performance_inspected": false,
-  "release_descriptor_sha256": "CE3A396090E5E8FD19DBD712D8E7175D08C6011B8660DB1588AA7F67608130DD",
+  "release_descriptor_sha256": "B7406D2F81058A70F2EEDAD36C42BC07D9535013182D9054FE497B4C8894646E",
   "remaining_blockers": [
     "official TWSE locked-limit state is not present in the named release",
-    "TWSE full-delivery/altered-trading history remains incomplete",
+    "TWSE stop-trading has no separate official flag and is inferred only from a missing quote",
     "D3 actual-share execution ledger and unresolved reference resets block performance"
   ],
   "rules": {
@@ -19047,7 +19047,7 @@
     "target_weight_per_name": 0.1
   },
   "schema_version": 1,
-  "strategy_commit": "ca2985292a3f77e68d2546cc673baaf974cde7cc",
+  "strategy_commit": "abb6c2afb597690d141585896193f042c708ecf2",
   "strategy_spec_sha256": "63B21CB53B085FEC07BE04867EB592BEBA08B30910A3C6FE0C376DA92B3939DE",
   "summary": {
     "active_decision_months": 108,
@@ -19057,10 +19057,12 @@
     "sizing_ready_stock_months": 1070,
     "strict_complete_industry_audit_failed_months": 59,
     "tplus1_open_ready_stock_months": 1070,
-    "uncapped_selected_missing_industry_months": 13
+    "uncapped_selected_missing_industry_months": 14
   },
   "verified_input_sha256": {
-    "release_descriptor": "CE3A396090E5E8FD19DBD712D8E7175D08C6011B8660DB1588AA7F67608130DD",
+    "release_descriptor": "B7406D2F81058A70F2EEDAD36C42BC07D9535013182D9054FE497B4C8894646E",
+    "twse_altered_trading_2005_2014/altered_trading_observations.parquet": "FC1176B815825989F781215EE44ACA5C0FB5A59B6262631DBA4B5B4610AA2460",
+    "twse_altered_trading_2005_2014/twse_altered_trading_source_status.parquet": "0561627E39777F0E1BDEC581FCFA7B61E313D4D4067AD683529F9991DB809B59",
     "twse_corporate_actions_2005_2014/corporate_actions.parquet": "3EEB922DBF915C3164D6727C8CB131B236F839E9007B1CC5B69F162D107BB3B0",
     "twse_disposition_punish_2005_2014/disposition_events.parquet": "63A04BA052C25881936B44A368B217D4E50F0E13A24EE4A11CD0ADFC6E0069A9",
     "twse_disposition_punish_2005_2014/twse_disposition_source_status.parquet": "A27BB25C4A185F17560344A1E206311D84914AC82A8FDDA3FC075229AC53CE30",

@@ -1,6 +1,7 @@
 {
-  "command": ".\\.venv-repro\\Scripts\\python.exe .\\scripts\\diagnose_mom1_release.py --release-id tw_stock_data_2005_2014_r1 --output reports\\mom1_release_diagnostic.json",
+  "command": ".\\.venv-repro\\Scripts\\python.exe .\\scripts\\diagnose_mom1_release.py --release-id tw_stock_data_2005_2014_r2 --output reports\\mom1_release_diagnostic.json",
   "component_content_sha256": {
+    "twse_altered_trading_2005_2014": "AFCD5A2DDA5A42F12B96A5C97AA63F5FDC62AB07DAD9FCC890CA63EA21B18E10",
     "twse_corporate_actions_2005_2014": "7F0322EDD5FA6B67D8061204C48F7FA585EC75D3CBB4A552C1D0133682344780",
     "twse_disposition_punish_2005_2014": "025EEB28A2DEFE1DFC2082447A3E885211172878C808FB2462ACE04D498CAEFF",
     "twse_market_structure_2005_2014": "9327DD0F63DB1BCA440341BA270227EDA003A5A7834811C36AD9DA1AF796AC31",
@@ -8,6 +9,9 @@
     "twse_security_master_2005_2014": "983B1B51F11CD02D75A0EBC19072178DA28B9B4A8038CB8E6348896C8C1361ED"
   },
   "coverage": {
+    "altered_trading_observations": 53159,
+    "altered_trading_restricted_stock_sessions": 52301,
+    "combined_restricted_stock_sessions": 55403,
     "decision_months": 120,
     "disposition_events": 604,
     "disposition_restricted_stock_sessions": 3538,
@@ -17,9 +21,9 @@
     "price_stock_ids": 1042,
     "trading_sessions": 2469
   },
-  "data_release_id": "tw_stock_data_2005_2014_r1",
+  "data_release_id": "tw_stock_data_2005_2014_r2",
   "diagnostic": "MOM1 named-release PIT signal counts",
-  "git_commit": "07bbe3262975ed49018eaa43a2abe3528c7e4111",
+  "git_commit": "da5151accfd55ad677f4debde31a87fab97d3c37",
   "known_blockers": [
     "D3 actual-share execution ledger and unresolved official reference resets block returns",
     "TWSE stop-trading and full-delivery history are not complete in this restriction frame",
@@ -1197,10 +1201,10 @@
     },
     {
       "decision_date": "2009-05-27",
-      "disposition_excluded_count": 2,
-      "eligible_after_disposition_count": 310,
+      "disposition_excluded_count": 3,
+      "eligible_after_disposition_count": 309,
       "eligible_before_disposition_count": 312,
-      "entry_slot_count": 31,
+      "entry_slot_count": 30,
       "execution_date": "2009-06-01",
       "industry_snapshot_date": "2009-05-27",
       "monthly_history_mask_mismatch_count": 0,
@@ -1212,18 +1216,18 @@
         "3557",
         "5534",
         "2458",
-        "2388",
         "3049",
         "6120",
         "2384",
         "2383",
-        "6255"
+        "6255",
+        "1319"
       ]
     },
     {
       "decision_date": "2009-06-30",
-      "disposition_excluded_count": 0,
-      "eligible_after_disposition_count": 307,
+      "disposition_excluded_count": 1,
+      "eligible_after_disposition_count": 306,
       "eligible_before_disposition_count": 307,
       "entry_slot_count": 30,
       "execution_date": "2009-07-01",
@@ -1240,9 +1244,9 @@
         "2383",
         "5534",
         "6145",
+        "1319",
         "6255",
-        "2458",
-        "2388"
+        "2458"
       ]
     },
     {
@@ -1264,10 +1268,10 @@
         "6120",
         "2384",
         "2383",
+        "1319",
         "6145",
         "2458",
-        "2527",
-        "3504"
+        "2527"
       ]
     },
     {
@@ -1284,7 +1288,6 @@
       "selected_missing_pit_industry_count": 1,
       "selected_stock_ids": [
         "2527",
-        "3504",
         "3557",
         "3049",
         "6120",
@@ -1292,13 +1295,14 @@
         "2383",
         "2384",
         "2545",
-        "1903"
+        "1903",
+        "5522"
       ]
     },
     {
       "decision_date": "2009-09-30",
-      "disposition_excluded_count": 1,
-      "eligible_after_disposition_count": 319,
+      "disposition_excluded_count": 2,
+      "eligible_after_disposition_count": 318,
       "eligible_before_disposition_count": 320,
       "entry_slot_count": 31,
       "execution_date": "2009-10-01",
@@ -1309,12 +1313,12 @@
       "selected_missing_pit_industry_count": 1,
       "selected_stock_ids": [
         "2545",
-        "3504",
         "2527",
         "1903",
         "6120",
         "2383",
         "3557",
+        "5522",
         "2455",
         "2462",
         "1325"
@@ -1336,13 +1340,13 @@
         "2455",
         "2462",
         "6120",
-        "3504",
         "2545",
         "3557",
         "2406",
         "6225",
         "3450",
-        "3533"
+        "3533",
+        "8112"
       ]
     },
     {
@@ -1361,13 +1365,13 @@
         "2406",
         "3450",
         "3533",
+        "8112",
         "2455",
         "2462",
         "2408",
         "1455",
         "2428",
-        "1447",
-        "8112"
+        "1447"
       ]
     },
     {
@@ -2447,8 +2451,8 @@
     },
     {
       "decision_date": "2013-07-31",
-      "disposition_excluded_count": 1,
-      "eligible_after_disposition_count": 369,
+      "disposition_excluded_count": 2,
+      "eligible_after_disposition_count": 368,
       "eligible_before_disposition_count": 370,
       "entry_slot_count": 36,
       "execution_date": "2013-08-01",
@@ -2467,13 +2471,13 @@
         "6230",
         "1532",
         "6116",
-        "3474"
+        "9906"
       ]
     },
     {
       "decision_date": "2013-08-30",
-      "disposition_excluded_count": 1,
-      "eligible_after_disposition_count": 368,
+      "disposition_excluded_count": 2,
+      "eligible_after_disposition_count": 367,
       "eligible_before_disposition_count": 369,
       "entry_slot_count": 36,
       "execution_date": "2013-09-02",
@@ -2483,22 +2487,22 @@
       "selected_count": 10,
       "selected_missing_pit_industry_count": 2,
       "selected_stock_ids": [
+        "9906",
         "6116",
         "1432",
         "1707",
         "1476",
         "3054",
-        "3474",
         "3450",
-        "9906",
         "3665",
-        "2062"
+        "2062",
+        "3229"
       ]
     },
     {
       "decision_date": "2013-09-30",
-      "disposition_excluded_count": 1,
-      "eligible_after_disposition_count": 372,
+      "disposition_excluded_count": 2,
+      "eligible_after_disposition_count": 371,
       "eligible_before_disposition_count": 373,
       "entry_slot_count": 37,
       "execution_date": "2013-10-01",
@@ -2509,11 +2513,11 @@
       "selected_missing_pit_industry_count": 1,
       "selected_stock_ids": [
         "9906",
+        "3229",
         "2062",
         "6116",
         "1476",
         "1707",
-        "3229",
         "2488",
         "2356",
         "1536",
@@ -2522,8 +2526,8 @@
     },
     {
       "decision_date": "2013-10-31",
-      "disposition_excluded_count": 0,
-      "eligible_after_disposition_count": 367,
+      "disposition_excluded_count": 1,
+      "eligible_after_disposition_count": 366,
       "eligible_before_disposition_count": 367,
       "entry_slot_count": 36,
       "execution_date": "2013-11-01",
@@ -2822,8 +2826,8 @@
     },
     {
       "decision_date": "2014-10-31",
-      "disposition_excluded_count": 0,
-      "eligible_after_disposition_count": 371,
+      "disposition_excluded_count": 1,
+      "eligible_after_disposition_count": 370,
       "eligible_before_disposition_count": 371,
       "entry_slot_count": 37,
       "execution_date": "2014-11-03",
@@ -2897,8 +2901,8 @@
     }
   ],
   "performance_inspected": false,
-  "release_descriptor": "reports/data_releases/tw_stock_data_release_2005_2014_r1.json",
-  "release_descriptor_sha256": "CE3A396090E5E8FD19DBD712D8E7175D08C6011B8660DB1588AA7F67608130DD",
+  "release_descriptor": "reports/data_releases/tw_stock_data_release_2005_2014_r2.json",
+  "release_descriptor_sha256": "B7406D2F81058A70F2EEDAD36C42BC07D9535013182D9054FE497B4C8894646E",
   "rules": {
     "entry_top_fraction_floor": 0.1,
     "existing_holdings_have_buffer_priority": true,
@@ -2914,7 +2918,7 @@
     "adjustment": "official D3 factors; signal-only; blocked for performance promotion",
     "authoritative_pit_path": "interval master effective_from <= d < delisting_date",
     "monthly_history_path": "audit comparison only; never reads a future snapshot",
-    "restrictions": "TWSE punish/disposition only; stop-trading/full-delivery not yet complete"
+    "restrictions": "TWSE punish/disposition plus official altered-trading (full-delivery) listings; stop-trading has no separate official flag and is handled only as a missing quote"
   },
   "strategy_paths_clean_at_run": true,
   "strategy_spec_sha256": "63B21CB53B085FEC07BE04867EB592BEBA08B30910A3C6FE0C376DA92B3939DE",
@@ -2924,13 +2928,15 @@
     "maximum_master_history_mask_mismatch": 0,
     "median_eligible_after_disposition": 333.0,
     "median_eligible_before_disposition": 333.5,
-    "months_with_disposition_exclusion": 40,
+    "months_with_disposition_exclusion": 43,
     "months_with_master_history_mask_mismatch": 0,
     "months_with_selected_missing_pit_industry": 28,
-    "total_monthly_disposition_exclusions": 53
+    "total_monthly_disposition_exclusions": 61
   },
   "verified_input_sha256": {
-    "release_descriptor": "CE3A396090E5E8FD19DBD712D8E7175D08C6011B8660DB1588AA7F67608130DD",
+    "release_descriptor": "B7406D2F81058A70F2EEDAD36C42BC07D9535013182D9054FE497B4C8894646E",
+    "twse_altered_trading_2005_2014/altered_trading_observations.parquet": "FC1176B815825989F781215EE44ACA5C0FB5A59B6262631DBA4B5B4610AA2460",
+    "twse_altered_trading_2005_2014/twse_altered_trading_source_status.parquet": "0561627E39777F0E1BDEC581FCFA7B61E313D4D4067AD683529F9991DB809B59",
     "twse_corporate_actions_2005_2014/corporate_actions.parquet": "3EEB922DBF915C3164D6727C8CB131B236F839E9007B1CC5B69F162D107BB3B0",
     "twse_disposition_punish_2005_2014/disposition_events.parquet": "63A04BA052C25881936B44A368B217D4E50F0E13A24EE4A11CD0ADFC6E0069A9",
     "twse_disposition_punish_2005_2014/twse_disposition_source_status.parquet": "A27BB25C4A185F17560344A1E206311D84914AC82A8FDDA3FC075229AC53CE30",

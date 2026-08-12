@@ -9,10 +9,11 @@ This is the integration-owner update to the historical Claude MOM1-0 handoff in
 
 - Claude's signal-only engine was reviewed and integrated.
 - Strategy code commit: `31594635f38f5644547a68c873bf94c4d1570417`.
-- Data release: `tw_stock_data_2005_2014_r1`.
+- Data release: `tw_stock_data_2005_2014_r2` (supersedes `r1`; adds the
+  `twse_altered_trading_2005_2014` component, 9 components in total).
 - Deterministic diagnostic: `reports/mom1_release_diagnostic.json`.
 - Diagnostic SHA-256:
-  `1E6876F420815A837BA2E10FE9C38E3241B596AAF38A17523D85737D1DC65F21`.
+  `29CB56DA16F9D26417EDF630B68B8E868E5AECE5A9E97805AF014D617865211B`.
 - The same command was run twice locally and produced byte-identical output.
 - Holdout performance inspected: **no**. No return, NAV, Sharpe, drawdown, win
   rate, or parameter comparison was calculated.
@@ -59,9 +60,16 @@ F0 overall is **not passed**, and the 2008-2014 backward holdout remains closed:
 
 1. D3 is structurally usable for signal adjustment, but the actual-share
    execution ledger and unresolved reference resets still block performance.
-2. D6 covers TWSE `punish` disposition events; historical stop-trading and
-   full-delivery flags are not yet complete.
+2. TWSE stop-trading (停止交易) has no separate official flag; it is currently
+   inferred only from a missing quote on that session.
 3. The named release has no official locked-limit state for fill validation.
+
+Full-delivery/altered-trading is **no longer a blocker**: r2 adds
+`twse_altered_trading_2005_2014` (2,469/2,469 trading days, 53,159 observations,
+209 securities), and the loader now merges it with the disposition frame.
+The two exclusion sources are kept as separate matrices
+(`disposition_restricted`, `altered_trading_restricted`) plus their union
+(`restricted`), so every exclusion can still be attributed to a specific rule.
 
 The shared fee/tax/slippage constants are no longer a blocker: `ca29852`
 imports `FEE_RATE`, `TAX_RATE`, `buy_fill`, and `sell_fill` from
@@ -88,17 +96,17 @@ The package now implements and tests:
 
 The deterministic F0 diagnostic is
 `reports/mom1_f0_execution_readiness.json`, SHA-256
-`0DF4D693665A3D1DAEC7AC8FEC376EE5A0414AB91ACE9D16C40F47B06E2A6960`.
+`95751DC46196FB2837029D4AA64D0F0EFA225F9CDCDEB3C2AD617C1AF9DCD8DD`.
 Across 108 active decision months, the formal industry policy produced 1,080
 selected stock-months; 1,070 had a usable T+1 open and complete sizing inputs.
 The ten unavailable opens remain unfilled rather than being replaced by a
 close or forward-filled price.
 
 F0 remains blocked only by release/integration inputs: official locked-limit
-state, TWSE full-delivery/altered-trading history, and D3 execution-ledger
-reconciliation. All three are data gaps owned by the Data Authority, not code
-defects. Industry missingness no longer blocks the whole month because its
-conservative exclusion policy was frozen before any performance inspection.
+state, TWSE stop-trading flags, and D3 execution-ledger reconciliation.
+All three are data gaps owned by the Data Authority, not code defects.
+Industry missingness no longer blocks the whole month because its conservative
+exclusion policy was frozen before any performance inspection.
 
 ## When strategy effects may be inspected
 
