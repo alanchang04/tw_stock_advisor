@@ -16,12 +16,13 @@ data_pipeline/fetchers/corporate_actions_fetcher.py
   TPEX  除權息：https://www.tpex.org.tw/www/zh-tw/bulletin/exDailyQ（startDate/endDate，
                有分「權值」「息值」兩欄，比 TWSE 詳細）
   TWSE 下市清單：https://openapi.twse.com.tw/v1/company/suspendListingCsvAndHtml
-  TPEX 下市清單：**尚未找到對應端點**（已測試 tpex_delisted_stock/tpex_suspend_listing
-               皆為 404），暫缺——回測時上櫃股票仍只用現存清單，這是已知誠實缺口。
+  TPEX 下市清單：https://www.tpex.org.tw/www/zh-tw/company/deListed（年度查詢）。
+               D5 research staging 已封存；本 production DB fetcher 尚未整合，
+               因此舊 DB 回測路徑仍不得宣稱已修正上櫃倖存者偏誤。
 
 用法：
   backfill_dividend_events(start_year=2015)   — 逐月回補兩市場除權息事件
-  backfill_delisted_stocks()                  — 回補 TWSE 下市清單（TPEX 暫缺）
+  backfill_delisted_stocks()                  — 舊 production 路徑目前只匯入 TWSE
 """
 from __future__ import annotations
 import sys, os

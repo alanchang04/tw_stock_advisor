@@ -16,7 +16,7 @@ import sys
 import time
 import uuid
 from calendar import monthrange
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -103,6 +103,16 @@ def parse_twt49u(payload: dict) -> pd.DataFrame:
         }.get(raw_type, "ex_right_dividend")
         pre_close = _num(row.get("除權息前收盤價"))
         reference_price = _num(row.get("除權息參考價"))
+        combined_value = _num(row.get("權值+息值"))
+        rights_value = _num(row.get("權值"))
+        cash_value = _num(row.get("息值"))
+        # 2009 起部分 TWT49U 回應只保留「權值+息值」，不再拆成兩欄。純除息／
+        # 純除權事件仍可由事件種類無歧義還原；只有「除權息」合併事件維持缺值，
+        # 絕不把合計數任意當成現金或股票股利。
+        if cash_value is None and event_kind == "ex_dividend":
+            cash_value = combined_value
+        if rights_value is None and event_kind == "ex_right":
+            rights_value = combined_value
         records.append({
             "source_report": REPORT_EX_RIGHT,
             "stock_id": stock_id,
@@ -113,9 +123,9 @@ def parse_twt49u(payload: dict) -> pd.DataFrame:
             "reference_price": reference_price,
             "opening_reference_price": _num(row.get("開盤競價基準")),
             "ex_right_reference_price": _num(row.get("減除股利參考價")),
-            "rights_value": _num(row.get("權值")),
-            "cash_value": _num(row.get("息值")),
-            "combined_value": _num(row.get("權值+息值")),
+            "rights_value": rights_value,
+            "cash_value": cash_value,
+            "combined_value": combined_value,
             "upper_limit": _num(row.get("漲停價格")),
             "lower_limit": _num(row.get("跌停價格")),
             "reduction_reason": None,
@@ -187,6 +197,16 @@ def write_raw_response(path: str | Path, payload: dict) -> None:
 def read_raw_response(path: str | Path) -> dict:
     with gzip.open(path, "rt", encoding="utf-8") as handle:
         return json.load(handle)
+
+
+def raw_acquired_at(path: str | Path) -> str:
+    """Return the gzip member timestamp so cached rebuilds keep source metadata stable."""
+    with gzip.open(path, "rb") as handle:
+        handle.peek(1)  # force gzip header parsing; GzipFile.mtime is then available
+        timestamp = handle.mtime
+    if timestamp is None:
+        raise ValueError(f"gzip source has no acquisition timestamp: {path}")
+    return datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat()
 
 
 def connect(path: str | Path) -> sqlite3.Connection:
@@ -311,7 +331,7 @@ def upsert_period(connection: sqlite3.Connection, report: str, start: date, end:
              raw_path=excluded.raw_path, raw_sha256=excluded.raw_sha256,
              fetched_at=excluded.fetched_at""",
         (report, start.isoformat(), end.isoformat(), str(payload.get("stat", "UNKNOWN")),
-         len(frame), portable_path(archive), raw_sha, datetime.now().astimezone().isoformat()),
+         len(frame), portable_path(archive), raw_sha, raw_acquired_at(archive)),
     )
     connection.commit()
 

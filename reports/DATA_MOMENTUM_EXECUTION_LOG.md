@@ -267,3 +267,237 @@ D1 尚未 promotion，原因：
 missing 0、mismatched 0、passed=true。
 
 2026-08-11 D3 更新後完整正式測試：528 passed、55 skipped、0 failed、4 warnings。
+
+### D3 第二輪：參考價重設與實際股數 ledger 閘門
+
+- MI_INDEX 的 `change_pct` 是相對當日交易所參考價；不能一律拿最後一次有成交的收盤價
+  當分母。182 筆長觀察空窗的大跳動已全部反推出官方當日參考價：參考價相對上次收盤
+  重設超過 20%，但恢復交易當日相對新參考價的市場漲跌均在 10% 內。因此改列
+  `official_reference_reset_unresolved_cause`，不再描述成單日市場暴漲跌。
+- 182 筆只證實「參考價曾重設」，尚未證實一定是減資；在未配對減資／合併／分割等
+  官方原因前，`total_return_eligible=false`，本輪未擅自調整任何一筆。
+- MOPS 官網目前仍列出「公司增減資表」`IRB160`，前端查詢條件為市場、民國年、月份；
+  但官方 `redirectToIRB` 對不同市場、年度、月份及同系列新公司表都回覆查無相符資料。
+  因此 2005～2010 減資原因仍是外部來源缺口，不能把空回覆當成完整資料。
+- 搜尋索引仍可找到舊 `TWT49UDetail?STK_NO=...&T1=...` 公開明細網址，但 TWSE 現站所有
+  新舊路徑都已回 404／首頁，不能作可重現來源。TWSE 資訊商店另有自 2009-10-14 起、
+  含無償配股率／現增配股率／認購價／現金股利的付費資料產品；未取得授權資料前，
+  相關事件繼續阻擋而不猜值。
+- TWT49U 在部分年度只提供「權值＋息值」。parser v4 僅在純除息／純除權時依事件種類
+  無歧義補回 cash／rights value；除權息合併事件維持缺值，沒有任意拆分。
+- 獨立重建時發現 v3 的 `source_status.fetched_at` 錯記成本次重建時間，造成事件 parquet
+  雖相同、snapshot content hash 卻不同；v3 與 repeat 已標記 `INVALID_DO_NOT_USE.md`。
+  v4 改讀 gzip 原始檔內建 acquisition timestamp，兩個獨立 SQLite 重建結果完全相同：
+  `7F0322EDD5FA6B67D8061204C48F7FA585EC75D3CBB4A552C1D0133682344780`。
+- 實際股數／現金分解閘門共檢查 6,275 個 canonical 事件：4,979 筆可分解、1,296 筆阻擋。
+  阻擋原因為 cash／stock split 缺失 972、現金增資認購條件缺失 288、退還股款與換股率
+  缺失 36。138 筆大跳動已配對公司行動中，仍有 30 筆缺少可執行 ledger 條件。
+- 內部數量契約固定為整數 `shares`；券商委託前明確拆成 `common_lots=shares//1000` 與
+  `odd_lot_shares=shares%1000`。公司行動產生的畸零權利另存
+  `fractional_share_entitlement`，取得官方折現價格前不得塞回 shares 或現金。
+- 目前仍未把現行 backtest 切到 raw-open execution：缺少上述 1,296 筆事件條件時強行切換，
+  只會把既有的合成股數問題換成漏記股利／換股的新錯誤。D3 promotion 仍為 false。
+
+2026-08-11 本輪完整正式測試（`.venv-repro`）：540 passed、55 skipped、0 failed、4 warnings。
+
+### D3 第三輪：MOPS 股利條件與「不可反推股數」修正
+
+- 找到 MOPS 官方歷史股利彙總端點 `server-java/t05st09sub`；採用
+  `qryType=1`（董事會決議／擬議分配股利年度），封存民國 93～103 年共 11 份 Big5
+  原始 HTML，解析為 8,515 筆公司股利決議、923 個股票代號。舊表的現金股利、盈餘
+  配股、資本公積轉增資與新版表的兩種現金／兩種股票股利欄位均分開保留。
+- `mops_dividend_distributions_2004_2014_v1` 與 `_repeat` 均只從同一組 raw cache
+  獨立重建；兩者 snapshot content SHA-256 完全相同：
+  `95632FBB3A5CDDBC08DCAB78558AF25B9DD26238322BEB54D7DBC103F01ED42C`，
+  `dividend_terms.parquet` 檔案 SHA-256 同為
+  `E426FD79E5F2DFDEC1118EC4410DC76D25ACE707A10D041C0E69B61A375907A2`。
+- 配對先使用股票代號、決議年度與官方參考價方程式；早期員工股票紅利會稀釋參考價，
+  但不是舊股東取得的股票，因此方程式不連續時，只接受同決議年度內唯一的官方配股
+  條件，合併除權息另以 TWT49U 已拆出的現金股利交叉核對。沒有唯一解仍維持 blocked。
+- 先前把 `(前收盤價－現金股利)/除權參考價` 當成實際配股倍率並不夠嚴謹：參考價已
+  四捨五入，而且早期可能含員工紅利稀釋。現在只有 MOPS 公告的股票股利（元／股）
+  可換算為 `1 + 股票股利/10` 的實際股數倍率；price-implied factor 不再標示為 shares。
+  減資同理，未取得官方換股率前，原先 50 筆以價格比反推的彌補虧損事件已降回 blocked。
+- 重新檢查 6,275 個 canonical 事件：2,318 個除權事件找到唯一 MOPS 條件；ledger 為
+  5,622 筆 executable、653 筆 blocked。阻擋原因為現增認購條件 288、官方無償配股條件
+  219、cash／stock split 60、彌補虧損減資換股率 50、退還股款／換股率 36。
+  限普通股範圍仍有 642 筆 blocked，因此 D3 promotion 仍為 false。
+- 原本 972 筆 cash／stock split 缺失已降到 60；這一改善沒有犧牲實際股數語意。
+  以 2330 在 2005-06-13 為例，現金 1.9998 元、股東配股倍率 1.049997 直接來自 MOPS；
+  參考價中其餘稀釋不會誤灌成股東收到的股票。
+- TWT48U 現行預告表確實公開無償配股率、現增配股率與認購價，但實測 `date` 與
+  `startDate/endDate` 歷史參數均被忽略，查 2010 仍回傳民國 115 年預告資料；不能把
+  124 筆現行資料誤認成歷史檔。資訊商店自 2009-10-14 起的歷史產品仍是目前已確認
+  能直接補現增條件的官方來源。
+- 另確認 MOPS 新站 `api/t05st01` 與 `api/t05st01_detail` 可查 2005 年歷史重大訊息
+  與全文。以 2023 燁輝的現增案為 pilot，可分別讀到「每仟股認購 73.039 股」及
+  發行價由 22 元調為 20 元；因此 288 筆現增 blocker 有免費官方 backfill 路徑。
+  但同一案件可能有多次調價／調比率，且新股需經繳款與交付，不應在除權日直接當成
+  已持有 shares；下一輪須封存候選公告、依生效時序唯一配對，並建立 subscription
+  entitlement／cash contribution／delivery settlement 狀態後才可解除閘門。
+- 大跳動分類維持 138 筆公司行動、182 筆未解原因參考價重設、2 筆非普通股、2 筆
+  新上市，0 筆未解短空窗；因 actual-share 閘門收緊，138 筆公司行動中有 64 筆仍不可
+  執行，未開啟策略績效或 backward holdout。
+
+2026-08-11 本輪完整正式測試（`.venv-repro`）：546 passed、55 skipped、0 failed、4 warnings。
+
+### D3 第四輪：現金增資認購權利與交付狀態
+
+- 以 MOPS `api/t05st01`／`api/t05st01_detail` 封存 2005～2014 付現增 blocker
+  對應的 356 個 stock-year 歷史重大訊息清單及 1,812 份候選全文；除事件年度外，
+  另補 1～4 月事件的前一年度公告，避免跨年案件漏配。
+- 正規化後保留 1,556 個官方 fact：舊股東認購率 312、每股發行／認購價 663、
+  原股東占整筆新股分配比例 581。`mops_paid_subscription_announcements_2004_2014_v1`
+  與 `_repeat` 兩次獨立重建 content SHA-256 均為
+  `EC878498E51D4A64DDF951097602C8AEF2E496E5BB791A4BA233B3D4A98D926A`；
+  `subscription_facts.parquet` SHA-256 均為
+  `7D42322354BCBC1FFA15804A4CBC350D5B1EDA3F799B6FC625A06B33A2E69F7F`。
+- 修正兩種容易混淆的「配股率」：舊股東每千股可認購股數是個別投資人的 entitlement；
+  TWSE 參考價公式使用整筆現增相對舊股本的 dilution rate，還包含員工認購及公開承銷。
+  若原股東取得新股的 75%，則公式 dilution rate = shareholder entitlement rate / 0.75，
+  兩個倍率分欄保存，禁止互換。
+- 288 筆付現增事件中，112 筆已由公告日不晚於除權日的官方認購率、分配比例、認購價
+  找到唯一方程式解；其餘為 rate／price／allocation 缺一 90、完全沒有候選 fact 45、
+  方程式無解 18、同時缺 free-share／cash 條件 13、方程式多解 10。
+- 112 筆尚未改列 executable，而是把 blocker 從 `paid_subscription_terms_missing` 改為
+  `paid_subscription_settlement_timing_missing`。除權日只建立認購權利：原持有 shares
+  不變，另存可認購整股、畸零認購權、每股繳款金額與 total dilution rate；實際繳款及
+  新股交付日期完成前，不得扣現金或增加 shares。
+- 最新 6,275 筆 ledger 仍為 5,622 executable、653 blocked；blocked 分成官方無償配股
+  219、現增條件仍缺 176、現增條件已齊但 settlement timing 未齊 112、cash／stock split
+  60、彌補虧損減資換股率 50、退還股款／換股率 36。D3 promotion 維持 false。
+
+2026-08-11 本輪完整正式測試（`.venv-repro`）：550 passed、55 skipped、0 failed、4 warnings。
+
+### D3 第五輪：現增 settlement 日期與跨案件錯配防護
+
+- 針對前一輪 112 筆已取得認購條件的案件，補抓認股基準日、原股東／員工繳款起迄、
+  增資基準日與新股／股款繳納憑證上市日；除事件年度及年初事件的前一年外，也查詢
+  10～12 月事件的次一年度公告，避免跨年交付漏失。v4 共保留 2,501 個官方 fact，包含
+  認股基準日 443、繳款起日／迄日各 166、增資基準日 116、新股或繳納憑證上市日 32。
+- 初版日期配對曾出現 8011 的反例：把 2013 年 11 月下一次現增繳款期接到 2012 年
+  除權事件及 2013 年 1 月交付日，形成「先交付、後繳款」的不可能順序。正式 matcher
+  現限制事件後 240 日、付款起迄必須來自同一份公告，並強制
+  `除權日 <= 繳款起 <= 繳款迄 <= 新股交付日`；跨公告的付款起迄與歧義日期均不猜測。
+- 抽查另發現「2/22 股款收足、2/25 憑證上市」會被舊正則誤取 2/22。v3／v3 repeat
+  已標記 `INVALID_DO_NOT_USE.md`，從未 promotion 或用於策略績效；v4 改成只接受緊貼
+  上市／發放／交付語句的日期。
+- `mops_paid_subscription_announcements_2004_2015_v4` 與 `_repeat` 由同一批 raw cache
+  獨立重建，content SHA-256 均為
+  `4CA57CD97146F538D2DD070AF38B15ED45A9489A561DBCE8EE574BB39DB7203C`。
+- 288 筆付現增事件中，官方認購條件唯一配對由 112 增為 113；settlement 分類為日期全缺
+  63、付款完整但交付缺失 27、日期歧義 16、交付存在但付款缺失 7。沒有任何一筆同時
+  通過可信付款期與交付日，因此沒有把認購股數灌入持股，也沒有扣除認購款。
+- 最新 ledger 維持 6,275 筆事件、5,622 executable、653 blocked；現增條件缺失 175、
+  條件已齊但 settlement／認購執行語意未齊 113。內部數量仍固定為整數 shares，
+  `common_lots=shares//1000`、`odd_lot_shares=shares%1000`，本輪沒有股／張混用。
+- 大跳動稽核維持 138 筆公司行動、182 筆未解原因參考價重設、2 筆非普通股、2 筆
+  新上市；短空窗未解釋仍為 0。這是資料缺口的負結果，不以放寬配對或反推股數解除閘門，
+  D3 `promotion_ready=false`，MOM-1／backward holdout 仍未開封。
+
+2026-08-11 本輪完整正式測試（`.venv-repro`）：553 passed、55 skipped、0 failed、4 warnings。
+
+## D4：TWSE 已發行股數、市值與歷史產業 staging
+
+### D4 第一輪：月末 issued shares／market cap 與年度 PIT 產業觀察
+
+- 確認 TWSE 官方 `MI_QFIIS`「外資及陸資投資持股統計」自 2004-02-11 起提供；
+  2005-01-03 歷史回應已含逐檔 `發行股數`，且 `hints` 明示單位為「股」。D4 parser
+  只接受正整數股，禁止除以 1,000 或把欄位改稱張；空產業類別可無 unit hint，但非空
+  回應缺「股」會直接失敗。
+- 以 2005～2014 每月最後交易日建立 120 個 point-in-time snapshot。已發行股數每月查詢
+  `ALLBUT0999`，市場價值只以同日未復權 `close * issued_shares` 計算；停牌而缺同日 close
+  者保留 null，不以前次價格靜默 forward-fill。
+- 產業分類來自同一份官方報表的類別查詢，不使用 FinMind 現值或 2026 公司基本資料回填。
+  官方同時回傳 07「化學生技醫療」／13「電子工業」母類及 21／22、24～31 細類；matcher
+  採細類優先，母類只補沒有細分類者，多重不相干細類會直接報錯。第一版為降低官方站
+  負載，每年 1 月觀察一次並只向未來沿用，逐列保存 `industry_observation_date` 與
+  `industry_stale_days`；沒有任何 observation 晚於 snapshot，但最長可陳舊 344 日，
+  因此不能宣稱為每日精確 industry-as-of。
+- staging 共 90,281 列、963 個普通股代號、120 個月。逐月相對 D1 active common-stock
+  universe 的 issued-share 覆蓋最低 100%；非正股數 0、非整數股數 0。產業 PIT 覆蓋
+  95.7200%，同日市值覆蓋 99.0197%，市值方程式最大誤差 0。
+- `twse_market_structure_2005_2014_staging_v1` 與 `_repeat` 從 raw cache 獨立重建，
+  content SHA-256 均為
+  `1CEC86D976BDBA2FE5545CF8D10A8A64D62828546BEAE708058285B1B5E16F48`。
+  `issued_shares_market_cap_ready=true`；因產業只年度觀察，`exact_industry_asof_ready=false`，
+  整體 `promotion_ready=false`。
+- 以 TWSE Fact Book 2010 所列 2005～2009 年底總市值做 1／1,000 倍單位稽核，逐年差異
+  絕對值最大 0.8134%，通過 1% 門檻，排除把股誤當張。Fact Book 的「上市股數」與
+  MI_QFIIS 的「發行股數」語意不同，股數總和差異不當作 parser 錯誤或強制調平。
+- D4 跨主機 manifest：
+  `reports/twse_market_structure_transfer_manifest_2005_2014_d4_20260811.json`，涵蓋 raw
+  cache 與 v1 snapshot 共 1,435 個檔案、8,278,428 bytes；集合 SHA-256 為
+  `21AE01A4CE9E6A8DB2E6FDC2D32A1E4520E6EF94DD755039A01AB35288DEC9D6`，本機驗證
+  missing 0、mismatched 0、passed=true。
+- 本輪只完成 D4 第一版資料與品質閘門，沒有打開 MOM-1／2008～2014 backward holdout。
+  下一輪優先把產業觀察由年度升為月度（沿用已封存的部分月度 raw），並決定停牌股票
+  市值是否以明確、可稽核的 last-observed 規則另建欄位；D3 未 promotion 仍是總閘門。
+
+2026-08-11 本輪完整正式測試（`.venv-repro`）：557 passed、55 skipped、0 failed、4 warnings。
+
+### D4 第二輪：月頻 industry-as-of 與可重現性完成
+
+- 把 `MI_QFIIS` 產業查詢由每年 1 月提升為每個月末，2005～2014 共封存 3,840 份
+  官方 JSON（120 個月 × `ALLBUT0999` 與 31 個產業代碼）。正規化後仍為 90,281 列、
+  963 個普通股代號；逐月 issued-share universe 覆蓋最低 100%，非正／非整數股數均為 0。
+- 90,281 列的 `industry_observation_date` 現在全部等於該月 snapshot date，最大 stale
+  days 由 344 降為 0，`exact_industry_asof_ready=true`。官方產業欄位覆蓋由 95.7200%
+  提升至 96.7446%；仍無官方類別者保留 missing，沒有用今天分類回填歷史。
+- 同日未復權 close × issued shares 的市值覆蓋維持 99.0197%；停牌缺 close 的列繼續
+  保留 null，不把舊價冒充同日市值。`issued_shares_market_cap_ready=true`、
+  `d4_component_ready=true`，但 D3 未 promotion，因此整體 `promotion_ready=false`。
+- `twse_market_structure_2005_2014_staging_v2` 與 `_repeat` 從同一組 raw cache 獨立重建，
+  content SHA-256 均為
+  `9327DD0F63DB1BCA440341BA270227EDA003A5A7834811C36AD9DA1AF796AC31`。
+- D4 v2 跨主機 manifest：
+  `reports/twse_market_structure_transfer_manifest_2005_2014_d4_v2_20260811.json`，
+  3,845 個檔案、14,688,400 bytes，集合 SHA-256
+  `BAA1DC6DE97F6D19C6C2F031325E679BCA6E907947600ECD141C0D56BC461698`；本機驗證
+  missing 0、mismatched 0、passed=true。
+
+## D5：TPEX 2008～2014 官方歷史 staging
+
+### D5 第一輪：價量、universe、公司行動與交易限制
+
+- 確認官方 `afterTrading/dailyQuotes` 可回溯至 2008，而不是只能從 2009 開始。以已封存
+  臺灣交易日曆查 1,732 日，保留 1,015,339 個標準上櫃股票行情列、762 個四位數股票
+  代號；逐日 quote presence 直接形成 PIT universe，沒有把 2026 現存清單回填到歷史。
+- 官方早期回應會以 `0.00` 表示沒有有效成交價；v1 品質閘門抓出 10,896 個零價欄位後，
+  v2 起一律改為 null，連同原始 `----` 共 23,085 個 missing-price／停牌候選列。列仍留在
+  universe，價格不 forward-fill；OHLC 非正值、負成交股數、負成交金額均為 0。
+- 價量單位固定為股與元。992,254 個有成交列的 `turnover / volume / close` 中位數為
+  1.000546，最小 0.6595、最大 1.1475；若把股誤當張，中位數會接近 1,000。加上所有
+  volume 與 issued shares 皆為整數，`share_volume_unit_sanity_passed=true`，本輪沒有
+  股／張 1,000 倍錯置。少數隱含均價超出 regular-session OHLC，保留為包含其他交易
+  時段／交易類型的稽核差異，不用改單位硬調平。
+- `bulletin/exDailyQ` 逐月封存 2,855 筆除權息事件。TPEX 的「權值」是每股參考價扣減額，
+  不是持股增加比例；新 schema 改存 `stock_dividend_value`，單位明示
+  `TWD_per_share_reference_deduction`。`pre_close - ref_price - 權值 - 息值` 最大誤差
+  0.005 元，沒有超過 0.011 元的列。
+- 官方 `company/deListed` 年度端點補到 62 個下櫃代號；下櫃日後仍出現在標準行情的列為
+  0。注意事件 8,102 筆、處置事件 564 筆；另封存 60,289 個逐日交易限制列，包含變更
+  交易 46,877、分盤 23,578、管理股 7,600、停止交易 6,327 個日－證券觀察。
+- 2410、5207、5414 的注意事件不在標準行情 universe，但逐日限制表明確標示為管理股，
+  因此保留事件並排除可交易 universe，不為了通過檢查硬塞成普通上櫃股；未解釋事件代號
+  為 0。
+- 2008-04-09 起完整限制旗標來自 `afterTrading/chtm`；更早 62 個交易日使用櫃買官方
+  `hist.tpex.org.tw` 的 Big5 `CHTM_YYMMDD.HTML`。舊檔只提供變更交易名單，因此 1,645
+  列的其他旗標維持 unknown，不補 false。
+- 2008～2014 每年都用已證實的第一個交易日 probe `insti/dailyTrade`，7 日均為 0 筆；
+  schema 明示 `missing/unknown_not_zero`，不把不存在的法人觀察補 0，也不接回已否決來源。
+- v1 因把官方零價當價格而 structural fail；v2 修正後通過；v3 再固定 nullable boolean／
+  integer schema 並加入股／張 sanity gate。`tpex_history_2008_2014_staging_v3` 與
+  `_repeat` 獨立 cached rebuild 的 content SHA-256 均為
+  `CD5275B703A04DFD1B7B5D626E48BD1C08D3AB5B60563766292C9DB98332EB0A`。
+- D5 v3 為 `structural_passed=true`、`d5_staging_complete=true`；仍因 2008 年初部分限制
+  旗標 unknown、2018 前 TPEX 法人 missing、D3 execution ledger 未 promotion，維持
+  `all_market_deployment_ready=false` 與 `promotion_ready=false`。本輪沒有開啟 MOM-1、
+  全市場績效或 backward holdout。
+- D5 跨主機 manifest：`reports/tpex_history_transfer_manifest_2008_2014_d5_20260811.json`，
+  3,594 個檔案、143,492,042 bytes，集合 SHA-256
+  `CA7B0C2F7D8A8856A274974918D7AA9B6FDF4A438D5D167CA2CC7309778F0701`；本機驗證
+  missing 0、mismatched 0、passed=true。
+
+2026-08-11 D4 v2／D5 v3 完成後完整正式測試（`.venv-repro`）：562 passed、55 skipped、
+0 failed、4 個既有 warnings。

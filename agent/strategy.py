@@ -1098,6 +1098,17 @@ def format_size(shares: int) -> str:
     return f"{odd} 股（零股）"
 
 
+def split_order_quantity(shares: int) -> dict[str, int]:
+    """Convert internal share units to explicit broker common-lot/odd-lot fields."""
+    if isinstance(shares, bool) or not isinstance(shares, int) or shares < 0:
+        raise ValueError("shares must be a non-negative integer")
+    common_lots, odd_lot_shares = divmod(shares, 1000)
+    return {
+        "common_lots": common_lots,
+        "odd_lot_shares": odd_lot_shares,
+    }
+
+
 # ══════════════════════════════════════════════════════════════════
 #  出場輔助函式
 # ══════════════════════════════════════════════════════════════════

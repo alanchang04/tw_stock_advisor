@@ -3,7 +3,7 @@
 import math
 
 from agent.backtest import _entry_share_count, _portfolio_nav
-from agent.strategy import FEE_RATE, STRATEGY, entry_share_count
+from agent.strategy import FEE_RATE, STRATEGY, entry_share_count, split_order_quantity
 
 
 def test_portfolio_nav_is_cash_plus_marked_positions():
@@ -69,3 +69,14 @@ def test_backtest_wrapper_matches_shared_live_formula():
         size_scale=params["size_scale"],
     )
     assert backtest_shares == shared_shares
+
+
+def test_internal_shares_are_split_explicitly_for_broker_lot_units():
+    assert split_order_quantity(2_345) == {
+        "common_lots": 2,
+        "odd_lot_shares": 345,
+    }
+    assert split_order_quantity(999) == {
+        "common_lots": 0,
+        "odd_lot_shares": 999,
+    }

@@ -39,6 +39,12 @@ PRIMARY_KEYS: dict[str, tuple[str, ...]] = {
     "disposition_events.parquet": ("stock_id", "start_date"),
     "notice_events.parquet": ("stock_id", "notice_date", "reason"),
     "technical.parquet": ("stock_id", "trade_date"),
+    "market_structure_monthly.parquet": ("snapshot_date", "stock_id"),
+    "market_structure_source_status.parquet": ("snapshot_date", "select_type"),
+    "industry_categories.parquet": ("industry_code",),
+    "tpex_source_status.parquet": ("source_type", "query_key"),
+    "institutional_availability.parquet": ("probe_date",),
+    "trading_restrictions.parquet": ("snapshot_date", "stock_id"),
 }
 
 DATE_COLUMNS: dict[str, str] = {
@@ -53,6 +59,10 @@ DATE_COLUMNS: dict[str, str] = {
     "disposition_events.parquet": "start_date",
     "notice_events.parquet": "notice_date",
     "technical.parquet": "trade_date",
+    "market_structure_monthly.parquet": "snapshot_date",
+    "market_structure_source_status.parquet": "snapshot_date",
+    "institutional_availability.parquet": "probe_date",
+    "trading_restrictions.parquet": "snapshot_date",
 }
 
 CANONICAL_UNITS = {
@@ -64,6 +74,8 @@ CANONICAL_UNITS = {
     "orders.shares": "shares_integer",
     "broker.common_lots": "lots_of_1000_shares",
     "broker.odd_lot_quantity": "shares",
+    "market_structure_monthly.issued_shares": "shares",
+    "market_structure_monthly.market_cap_twd": "TWD",
 }
 
 CURRENT_REQUIRED_FILES = {

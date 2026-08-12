@@ -3,19 +3,29 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 import pandas as pd
 
-
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from research.corporate_action_ledger import build_execution_action_ledger
+from research.mops_dividend_distribution import match_mops_terms_to_events
+from research.mops_paid_subscription import match_subscription_terms_to_events
 
 
 def build_jump_audit(prices: pd.DataFrame, events: pd.DataFrame,
                      threshold: float = 0.20,
                      security_master: pd.DataFrame | None = None,
                      ) -> tuple[dict, pd.DataFrame, pd.DataFrame]:
-    prices = prices[["stock_id", "trade_date", "open", "close"]].copy()
+    price_columns = ["stock_id", "trade_date", "open", "close"]
+    if "change_pct" in prices.columns:
+        price_columns.append("change_pct")
+    prices = prices[price_columns].copy()
+    if "change_pct" not in prices.columns:
+        prices["change_pct"] = pd.NA
     prices["stock_id"] = prices["stock_id"].astype(str)
     prices["trade_date"] = pd.to_datetime(prices["trade_date"])
     prices = prices.sort_values(["stock_id", "trade_date"])
@@ -26,9 +36,25 @@ def build_jump_audit(prices: pd.DataFrame, events: pd.DataFrame,
     ).dt.days
     prices["close_return"] = prices["close"] / prices["previous_close"] - 1.0
     prices["open_gap"] = prices["open"] / prices["previous_close"] - 1.0
+    # MI_INDEX 的 change_pct 是相對「當日交易所參考價」，不是一律相對上次有成交的
+    # 收盤價。停牌後若因減資、重整或其他規則重設參考價，直接用 previous_close 算
+    # 報酬會製造假的單日暴漲跌。保留兩個維度，避免在原因尚未查明前誤調整價格：
+    #   1. reference_reset_return：參考價相對上次觀察收盤的變化；
+    #   2. market_return_from_reference：恢復交易當日真正的市場漲跌。
+    denominator = 1.0 + pd.to_numeric(prices["change_pct"], errors="coerce") / 100.0
+    valid_reference = denominator.gt(0)
+    prices["implied_official_reference_price"] = (
+        prices["close"] / denominator
+    ).where(valid_reference)
+    prices["reference_reset_return"] = (
+        prices["implied_official_reference_price"] / prices["previous_close"] - 1.0
+    )
+    prices["market_return_from_reference"] = (
+        prices["close"] / prices["implied_official_reference_price"] - 1.0
+    )
     prices["observation_number"] = prices.groupby("stock_id").cumcount() + 1
 
-    events = events.copy()
+    events = build_execution_action_ledger(events.copy())
     events["stock_id"] = events["stock_id"].astype(str)
     events["event_date"] = pd.to_datetime(events["event_date"])
 
@@ -39,7 +65,9 @@ def build_jump_audit(prices: pd.DataFrame, events: pd.DataFrame,
     mapped_records = []
     context_columns = [
         "trade_date", "previous_trade_date", "previous_close", "open", "close",
-        "calendar_gap_days", "open_gap", "close_return",
+        "change_pct", "calendar_gap_days", "open_gap", "close_return",
+        "implied_official_reference_price", "reference_reset_return",
+        "market_return_from_reference",
     ]
     for event in events.to_dict("records"):
         context = price_groups.get(event["stock_id"])
@@ -78,6 +106,11 @@ def build_jump_audit(prices: pd.DataFrame, events: pd.DataFrame,
         official_pre_close=("pre_event_close", "first"),
         official_reference_price=("reference_price", "first"),
         official_adjustment_factor=("adjustment_factor", "first"),
+        event_ledger_eligible=("total_return_eligible", "all"),
+        event_ledger_block_reasons=(
+            "ledger_block_reason",
+            lambda values: "|".join(sorted({str(value) for value in values if pd.notna(value)})),
+        ),
     )
 
     jumps = prices[prices["close_return"].abs().gt(threshold)].copy()
@@ -112,6 +145,22 @@ def build_jump_audit(prices: pd.DataFrame, events: pd.DataFrame,
         & jumps["calendar_gap_days"].gt(7),
         "classification",
     ] = "long_observation_gap_manual_review"
+    # 這只能證明「交易所重設參考價」，不能證明原因一定是減資。若沒有公司行動來源，
+    # 維持 total_return_eligible=False；待減資／合併／分割等官方證據配對後才能升級。
+    confirmed_reference_reset = (
+        jumps["classification"].eq("long_observation_gap_manual_review")
+        & jumps["implied_official_reference_price"].notna()
+        & jumps["reference_reset_return"].abs().gt(threshold)
+        & jumps["market_return_from_reference"].abs().le(0.10 + 1e-9)
+    )
+    jumps.loc[
+        confirmed_reference_reset,
+        "classification",
+    ] = "official_reference_reset_unresolved_cause"
+    jumps["total_return_eligible"] = (
+        jumps["classification"].eq("matched_corporate_action")
+        & jumps["event_ledger_eligible"].eq(True)
+    )
     jumps["official_pre_close_matches"] = (
         (jumps["previous_close"] - jumps["official_pre_close"]).abs() <= 0.011
     ).where(jumps["event_kinds"].notna())
@@ -126,6 +175,25 @@ def build_jump_audit(prices: pd.DataFrame, events: pd.DataFrame,
         "jump_classifications": classifications,
         "matched_jump_pre_close_checks": int(matched["official_pre_close_matches"].notna().sum()),
         "matched_jump_pre_close_mismatches": int(matched["official_pre_close_matches"].eq(False).sum()),
+        "official_reference_resets_unresolved_cause": int(
+            jumps["classification"].eq(
+                "official_reference_reset_unresolved_cause"
+            ).sum()
+        ),
+        "reference_resets_promoted_to_total_return_without_event": int(
+            (
+                jumps["classification"].eq(
+                    "official_reference_reset_unresolved_cause"
+                )
+                & jumps["total_return_eligible"]
+            ).sum()
+        ),
+        "matched_corporate_action_jumps_not_ledger_executable": int(
+            (
+                jumps["classification"].eq("matched_corporate_action")
+                & ~jumps["total_return_eligible"]
+            ).sum()
+        ),
         "events_with_effective_trade_date": int(event_checks["has_price_on_effective_date"].sum()),
         "events_without_effective_trade_date": int((~event_checks["has_price_on_effective_date"]).sum()),
         "events_shifted_to_later_trade_date": int(event_checks["effective_date_lag_days"].gt(0).sum()),
@@ -147,7 +215,7 @@ def main() -> None:
         "--action-snapshot",
         type=Path,
         default=(ROOT / "data" / "research_versions" /
-                 "twse_corporate_actions_2005_2014_staging_v1"),
+                 "twse_corporate_actions_2005_2014_staging_v4"),
     )
     parser.add_argument(
         "--security-master-snapshot",
@@ -157,6 +225,18 @@ def main() -> None:
     )
     parser.add_argument("--threshold", type=float, default=0.20)
     parser.add_argument(
+        "--mops-terms", type=Path,
+        default=(ROOT / "data" / "research_versions" /
+                 "mops_dividend_distributions_2004_2014_v1" /
+                 "dividend_terms.parquet"),
+    )
+    parser.add_argument(
+        "--subscription-facts", type=Path,
+        default=(ROOT / "data" / "research_versions" /
+                 "mops_paid_subscription_announcements_2004_2015_v4" /
+                 "subscription_facts.parquet"),
+    )
+    parser.add_argument(
         "--output-prefix",
         type=Path,
         default=ROOT / "reports" / "twse_corporate_action_jump_audit_2005_2014",
@@ -165,6 +245,10 @@ def main() -> None:
 
     prices = pd.read_parquet(args.price_snapshot / "prices.parquet")
     events = pd.read_parquet(args.action_snapshot / "corporate_actions.parquet")
+    terms = pd.read_parquet(args.mops_terms)
+    events = match_mops_terms_to_events(events, terms)
+    subscription_facts = pd.read_parquet(args.subscription_facts)
+    events = match_subscription_terms_to_events(events, subscription_facts)
     security_master = pd.read_parquet(
         args.security_master_snapshot / "security_master_staging.parquet"
     )
