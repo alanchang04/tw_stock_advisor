@@ -15,7 +15,13 @@ from typing import Iterable, Mapping
 
 import pandas as pd
 
-from agent.strategy import split_order_quantity
+from agent.strategy import (
+    FEE_RATE,
+    TAX_RATE,
+    buy_fill,
+    sell_fill,
+    split_order_quantity,
+)
 from research.momentum import (
     ENTRY_TOP_FRAC,
     EXIT_BOTTOM_FRAC,
@@ -178,7 +184,12 @@ class RebalanceOrder:
     shares: int
     current_shares: int
     target_shares: int
+    raw_open_price: float
     executable_price: float
+    gross_notional_twd: float
+    commission_twd: float
+    transaction_tax_twd: float
+    cash_delta_twd: float
     common_lots: int
     odd_lot_shares: int
 
@@ -190,11 +201,11 @@ def build_equal_weight_rebalance_orders(
     *,
     target_holdings: Iterable[str],
     current_shares: Mapping[str, int],
-    executable_prices: pd.Series,
+    raw_open_prices: pd.Series,
     average_volumes_shares: pd.Series,
     nav: float,
 ) -> list[RebalanceOrder]:
-    """Build deterministic sell-first share orders at a verified executable open."""
+    """Build deterministic sell-first orders with shared fee/tax/slippage costs."""
     targets = [str(stock_id) for stock_id in target_holdings]
     if len(targets) != len(set(targets)):
         raise ValueError("target_holdings 不可重複")
@@ -209,12 +220,13 @@ def build_equal_weight_rebalance_orders(
 
     target_quantities: dict[str, int] = {}
     for stock_id in targets:
-        if stock_id not in executable_prices.index:
-            raise ValueError(f"缺少 {stock_id} executable price")
+        if stock_id not in raw_open_prices.index:
+            raise ValueError(f"缺少 {stock_id} raw open price")
         if stock_id not in average_volumes_shares.index:
             raise ValueError(f"缺少 {stock_id} average volume")
+        raw_open = float(raw_open_prices[stock_id])
         target_quantities[stock_id] = equal_weight_target_shares(
-            executable_price=float(executable_prices[stock_id]),
+            executable_price=buy_fill(raw_open),
             nav=nav,
             average_volume_shares=float(average_volumes_shares[stock_id]),
         )
@@ -227,19 +239,30 @@ def build_equal_weight_rebalance_orders(
         delta = target - old
         if delta == 0:
             continue
-        if stock_id not in executable_prices.index:
-            raise ValueError(f"缺少 {stock_id} executable price")
-        price = float(executable_prices[stock_id])
-        if not math.isfinite(price) or price <= 0:
-            raise ValueError(f"{stock_id} executable price 必須是有限正數")
+        if stock_id not in raw_open_prices.index:
+            raise ValueError(f"缺少 {stock_id} raw open price")
+        raw_open = float(raw_open_prices[stock_id])
+        if not math.isfinite(raw_open) or raw_open <= 0:
+            raise ValueError(f"{stock_id} raw open price 必須是有限正數")
+        side = "buy" if delta > 0 else "sell"
+        price = buy_fill(raw_open) if side == "buy" else sell_fill(raw_open)
+        gross = abs(delta) * price
+        commission = gross * FEE_RATE
+        tax = gross * TAX_RATE if side == "sell" else 0.0
+        cash_delta = -(gross + commission) if side == "buy" else gross - commission - tax
         units = split_order_quantity(abs(delta))
         orders.append(RebalanceOrder(
             stock_id=stock_id,
-            side="buy" if delta > 0 else "sell",
+            side=side,
             shares=abs(delta),
             current_shares=old,
             target_shares=target,
+            raw_open_price=raw_open,
             executable_price=price,
+            gross_notional_twd=gross,
+            commission_twd=commission,
+            transaction_tax_twd=tax,
+            cash_delta_twd=cash_delta,
             common_lots=units["common_lots"],
             odd_lot_shares=units["odd_lot_shares"],
         ))

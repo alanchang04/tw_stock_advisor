@@ -5,6 +5,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from agent.strategy import FEE_RATE, SLIPPAGE, TAX_RATE
+
 from research.momentum_execution import (
     build_equal_weight_rebalance_orders,
     equal_weight_target_shares,
@@ -75,7 +77,7 @@ def test_rebalance_orders_are_sell_first_and_use_explicit_broker_units():
     orders = build_equal_weight_rebalance_orders(
         target_holdings=["1102", "1103"],
         current_shares={"1101": 2_345, "1102": 50},
-        executable_prices=pd.Series({"1101": 20.0, "1102": 100.0, "1103": 10.0}),
+        raw_open_prices=pd.Series({"1101": 20.0, "1102": 100.0, "1103": 10.0}),
         average_volumes_shares=pd.Series({"1102": 1_000_000.0, "1103": 1_000_000.0}),
         nav=300_000.0,
     )
@@ -84,8 +86,23 @@ def test_rebalance_orders_are_sell_first_and_use_explicit_broker_units():
     ]
     assert orders[0].common_lots == 2
     assert orders[0].odd_lot_shares == 345
-    assert orders[1].shares == 250  # target 300 less current 50
-    assert orders[2].target_shares == 3_000
+    assert orders[1].shares == 249  # floor(30,000 / slipped buy fill) less current 50
+    assert orders[2].target_shares == 2_991
+    assert orders[0].executable_price == pytest.approx(20.0 * (1 - SLIPPAGE))
+    assert orders[0].transaction_tax_twd == pytest.approx(
+        orders[0].gross_notional_twd * TAX_RATE
+    )
+    assert orders[0].cash_delta_twd == pytest.approx(
+        orders[0].gross_notional_twd
+        - orders[0].commission_twd
+        - orders[0].transaction_tax_twd
+    )
+    assert orders[1].executable_price == pytest.approx(100.0 * (1 + SLIPPAGE))
+    assert orders[1].commission_twd == pytest.approx(
+        orders[1].gross_notional_twd * FEE_RATE
+    )
+    assert orders[1].transaction_tax_twd == 0.0
+    assert orders[1].cash_delta_twd < 0
 
 
 def test_execution_rejects_same_day_attempt():

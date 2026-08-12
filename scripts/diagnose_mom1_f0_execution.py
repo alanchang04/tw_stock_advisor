@@ -16,7 +16,6 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from agent.strategy import split_order_quantity  # noqa: E402
 from research.momentum import (  # noqa: E402
     compute_mom_6_1,
     eligible_universe,
@@ -26,7 +25,7 @@ from research.momentum import (  # noqa: E402
     select_holdings,
 )
 from research.momentum_execution import (  # noqa: E402
-    equal_weight_target_shares,
+    build_equal_weight_rebalance_orders,
     pit_industry_map,
     select_holdings_with_industry_cap,
 )
@@ -118,19 +117,17 @@ def run(release_id: str) -> dict:
                 open_ready += 1
                 if pd.isna(avg_volume) or not np.isfinite(avg_volume) or avg_volume < 0:
                     continue
-                shares = equal_weight_target_shares(
-                    executable_price=float(open_price),
+                orders = build_equal_weight_rebalance_orders(
+                    target_holdings=[stock_id],
+                    current_shares={},
+                    raw_open_prices=pd.Series({stock_id: float(open_price)}),
+                    average_volumes_shares=pd.Series({stock_id: float(avg_volume)}),
                     nav=300_000.0,
-                    average_volume_shares=float(avg_volume),
                 )
-                units = split_order_quantity(shares)
+                if not orders:
+                    continue
                 sizing_ready += 1
-                sample_orders.append({
-                    "stock_id": stock_id,
-                    "target_shares": shares,
-                    "common_lots": units["common_lots"],
-                    "odd_lot_shares": units["odd_lot_shares"],
-                })
+                sample_orders.append(orders[0].to_dict())
 
         monthly.append({
             "decision_date": decision.date().isoformat(),
@@ -196,7 +193,6 @@ def run(release_id: str) -> dict:
             "official TWSE locked-limit state is not present in the named release",
             "TWSE full-delivery/altered-trading history remains incomplete",
             "D3 actual-share execution ledger and unresolved reference resets block performance",
-            "cost-ledger integration is not part of this signal-to-order diagnostic",
         ],
         "monthly": monthly,
     }
