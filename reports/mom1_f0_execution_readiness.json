@@ -11,7 +11,7 @@
       "formal_selected_stock_ids": [],
       "formal_target_orders": [],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 0,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 0,
@@ -25,7 +25,7 @@
       "formal_selected_stock_ids": [],
       "formal_target_orders": [],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 0,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 0,
@@ -39,7 +39,7 @@
       "formal_selected_stock_ids": [],
       "formal_target_orders": [],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 0,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 0,
@@ -53,7 +53,7 @@
       "formal_selected_stock_ids": [],
       "formal_target_orders": [],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 0,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 0,
@@ -67,7 +67,7 @@
       "formal_selected_stock_ids": [],
       "formal_target_orders": [],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 0,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 0,
@@ -81,7 +81,7 @@
       "formal_selected_stock_ids": [],
       "formal_target_orders": [],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 0,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 0,
@@ -95,7 +95,7 @@
       "formal_selected_stock_ids": [],
       "formal_target_orders": [],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 0,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 0,
@@ -109,7 +109,7 @@
       "formal_selected_stock_ids": [],
       "formal_target_orders": [],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 0,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 0,
@@ -123,7 +123,7 @@
       "formal_selected_stock_ids": [],
       "formal_target_orders": [],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 0,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 0,
@@ -137,7 +137,7 @@
       "formal_selected_stock_ids": [],
       "formal_target_orders": [],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 0,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 0,
@@ -151,7 +151,7 @@
       "formal_selected_stock_ids": [],
       "formal_target_orders": [],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 0,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 0,
@@ -165,7 +165,7 @@
       "formal_selected_stock_ids": [],
       "formal_target_orders": [],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 0,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 0,
@@ -341,7 +341,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 10,
@@ -517,7 +517,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 1736",
       "tplus1_open_ready_count": 10,
@@ -693,7 +693,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 2825",
       "tplus1_open_ready_count": 10,
@@ -869,7 +869,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 10,
@@ -1045,7 +1045,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 10,
@@ -1221,7 +1221,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 10,
@@ -1397,7 +1397,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 10,
@@ -1573,7 +1573,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 10,
@@ -1749,7 +1749,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 10,
@@ -1925,7 +1925,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 10,
@@ -2101,7 +2101,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 10,
@@ -2277,7 +2277,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 10,
@@ -2453,7 +2453,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 9914",
       "tplus1_open_ready_count": 10,
@@ -2629,7 +2629,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 10,
@@ -2805,7 +2805,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 10,
@@ -2981,7 +2981,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 10,
@@ -3157,7 +3157,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 10,
@@ -3333,7 +3333,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 10,
@@ -3509,7 +3509,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 10,
@@ -3533,21 +3533,6 @@
         "2497"
       ],
       "formal_target_orders": [
-        {
-          "cash_delta_twd": -30004.548580152947,
-          "commission_twd": 24.778280152949996,
-          "common_lots": 1,
-          "current_shares": 0,
-          "executable_price": 25.024849999999997,
-          "gross_notional_twd": 29979.770299999996,
-          "odd_lot_shares": 198,
-          "raw_open_price": 24.95,
-          "shares": 1198,
-          "side": "buy",
-          "stock_id": "2491",
-          "target_shares": 1198,
-          "transaction_tax_twd": 0.0
-        },
         {
           "cash_delta_twd": -30012.478829090996,
           "commission_twd": 24.784829090999995,
@@ -3685,8 +3670,8 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
-      "sizing_ready_count": 10,
+      "locked_limit_up_blocked_count": 1,
+      "sizing_ready_count": 9,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 9914",
       "tplus1_open_ready_count": 10,
       "uncapped_selected_count": 10,
@@ -3861,7 +3846,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 9914",
       "tplus1_open_ready_count": 10,
@@ -4037,7 +4022,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 10,
@@ -4137,21 +4122,6 @@
           "transaction_tax_twd": 0.0
         },
         {
-          "cash_delta_twd": -30022.61750178395,
-          "commission_twd": 24.79320178395,
-          "common_lots": 2,
-          "current_shares": 0,
-          "executable_price": 12.08615,
-          "gross_notional_twd": 29997.8243,
-          "odd_lot_shares": 482,
-          "raw_open_price": 12.05,
-          "shares": 2482,
-          "side": "buy",
-          "stock_id": "2491",
-          "target_shares": 2482,
-          "transaction_tax_twd": 0.0
-        },
-        {
           "cash_delta_twd": -29974.534093665898,
           "commission_twd": 24.7534936659,
           "common_lots": 0,
@@ -4213,8 +4183,8 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
-      "sizing_ready_count": 10,
+      "locked_limit_up_blocked_count": 1,
+      "sizing_ready_count": 9,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 9935",
       "tplus1_open_ready_count": 10,
       "uncapped_selected_count": 10,
@@ -4389,7 +4359,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 10,
@@ -4565,7 +4535,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 10,
@@ -4741,7 +4711,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 10,
@@ -4917,7 +4887,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 9935",
       "tplus1_open_ready_count": 10,
@@ -5093,7 +5063,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 10,
@@ -5269,7 +5239,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 10,
@@ -5445,7 +5415,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 10,
@@ -5621,7 +5591,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 9930, 9914",
       "tplus1_open_ready_count": 10,
@@ -5797,7 +5767,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 9930, 9914, 9921",
       "tplus1_open_ready_count": 10,
@@ -5973,7 +5943,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 9921, 9914, 9930",
       "tplus1_open_ready_count": 10,
@@ -6149,7 +6119,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 9921, 9930",
       "tplus1_open_ready_count": 10,
@@ -6325,7 +6295,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 9921",
       "tplus1_open_ready_count": 10,
@@ -6501,7 +6471,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 9921",
       "tplus1_open_ready_count": 10,
@@ -6677,7 +6647,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 9921",
       "tplus1_open_ready_count": 10,
@@ -6853,7 +6823,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 9930, 9921",
       "tplus1_open_ready_count": 10,
@@ -7029,7 +6999,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 3557, 9911",
       "tplus1_open_ready_count": 10,
@@ -7053,21 +7023,6 @@
         "2384"
       ],
       "formal_target_orders": [
-        {
-          "cash_delta_twd": -29993.606844276394,
-          "commission_twd": 24.769244276399995,
-          "common_lots": 0,
-          "current_shares": 0,
-          "executable_price": 33.901399999999995,
-          "gross_notional_twd": 29968.837599999995,
-          "odd_lot_shares": 884,
-          "raw_open_price": 33.8,
-          "shares": 884,
-          "side": "buy",
-          "stock_id": "1101",
-          "target_shares": 884,
-          "transaction_tax_twd": 0.0
-        },
         {
           "cash_delta_twd": -29997.923308888247,
           "commission_twd": 24.772808888249997,
@@ -7159,36 +7114,6 @@
           "transaction_tax_twd": 0.0
         },
         {
-          "cash_delta_twd": -29989.691911256345,
-          "commission_twd": 24.766011256349994,
-          "common_lots": 0,
-          "current_shares": 0,
-          "executable_price": 47.040699999999994,
-          "gross_notional_twd": 29964.925899999995,
-          "odd_lot_shares": 637,
-          "raw_open_price": 46.9,
-          "shares": 637,
-          "side": "buy",
-          "stock_id": "5534",
-          "target_shares": 637,
-          "transaction_tax_twd": 0.0
-        },
-        {
-          "cash_delta_twd": -30021.613672804448,
-          "commission_twd": 24.792372804449997,
-          "common_lots": 2,
-          "current_shares": 0,
-          "executable_price": 13.741099999999998,
-          "gross_notional_twd": 29996.821299999996,
-          "odd_lot_shares": 183,
-          "raw_open_price": 13.7,
-          "shares": 2183,
-          "side": "buy",
-          "stock_id": "2504",
-          "target_shares": 2183,
-          "transaction_tax_twd": 0.0
-        },
-        {
           "cash_delta_twd": -30019.706397743394,
           "commission_twd": 24.790797743399995,
           "common_lots": 1,
@@ -7205,8 +7130,8 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
-      "sizing_ready_count": 10,
+      "locked_limit_up_blocked_count": 3,
+      "sizing_ready_count": 7,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 3557, 9911",
       "tplus1_open_ready_count": 10,
       "uncapped_selected_count": 10,
@@ -7381,7 +7306,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 3557",
       "tplus1_open_ready_count": 10,
@@ -7557,7 +7482,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 3557",
       "tplus1_open_ready_count": 10,
@@ -7733,7 +7658,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 3557",
       "tplus1_open_ready_count": 10,
@@ -7909,7 +7834,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 3557",
       "tplus1_open_ready_count": 10,
@@ -7961,21 +7886,6 @@
           "side": "buy",
           "stock_id": "2545",
           "target_shares": 427,
-          "transaction_tax_twd": 0.0
-        },
-        {
-          "cash_delta_twd": -30016.393762111045,
-          "commission_twd": 24.788062111049996,
-          "common_lots": 1,
-          "current_shares": 0,
-          "executable_price": 20.360899999999997,
-          "gross_notional_twd": 29991.605699999996,
-          "odd_lot_shares": 473,
-          "raw_open_price": 20.3,
-          "shares": 1473,
-          "side": "buy",
-          "stock_id": "2527",
-          "target_shares": 1473,
           "transaction_tax_twd": 0.0
         },
         {
@@ -8085,8 +7995,8 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
-      "sizing_ready_count": 10,
+      "locked_limit_up_blocked_count": 1,
+      "sizing_ready_count": 9,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 3557",
       "tplus1_open_ready_count": 10,
       "uncapped_selected_count": 10,
@@ -8261,7 +8171,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 10,
@@ -8437,7 +8347,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 10,
@@ -8613,7 +8523,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 10,
@@ -8789,7 +8699,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 10,
@@ -8965,7 +8875,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 10,
@@ -9141,7 +9051,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 10,
@@ -9317,7 +9227,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 9911",
       "tplus1_open_ready_count": 10,
@@ -9493,7 +9403,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 9911",
       "tplus1_open_ready_count": 10,
@@ -9669,7 +9579,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 10,
@@ -9845,7 +9755,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 9911",
       "tplus1_open_ready_count": 10,
@@ -10021,7 +9931,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 9911",
       "tplus1_open_ready_count": 10,
@@ -10197,7 +10107,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 9911",
       "tplus1_open_ready_count": 10,
@@ -10373,7 +10283,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 10,
@@ -10549,7 +10459,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 10,
@@ -10725,7 +10635,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 10,
@@ -10901,7 +10811,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 10,
@@ -11077,7 +10987,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 10,
@@ -11253,7 +11163,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 10,
@@ -11429,7 +11339,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 10,
@@ -11605,7 +11515,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 10,
@@ -11781,7 +11691,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 1736",
       "tplus1_open_ready_count": 10,
@@ -11957,7 +11867,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 1736, 9914",
       "tplus1_open_ready_count": 10,
@@ -12133,7 +12043,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 1736",
       "tplus1_open_ready_count": 10,
@@ -12309,7 +12219,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 9914",
       "tplus1_open_ready_count": 10,
@@ -12485,7 +12395,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 9914, 9921",
       "tplus1_open_ready_count": 10,
@@ -12661,7 +12571,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 9914, 9921",
       "tplus1_open_ready_count": 10,
@@ -12837,7 +12747,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 9921",
       "tplus1_open_ready_count": 10,
@@ -13013,7 +12923,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 9904",
       "tplus1_open_ready_count": 10,
@@ -13189,7 +13099,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 9904",
       "tplus1_open_ready_count": 10,
@@ -13365,7 +13275,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 1736",
       "tplus1_open_ready_count": 10,
@@ -13541,7 +13451,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 1736",
       "tplus1_open_ready_count": 10,
@@ -13717,7 +13627,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 9914",
       "tplus1_open_ready_count": 10,
@@ -13893,7 +13803,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 9914",
       "tplus1_open_ready_count": 10,
@@ -14069,7 +13979,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 9914, 9930, 9921",
       "tplus1_open_ready_count": 10,
@@ -14245,7 +14155,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 9914, 9921",
       "tplus1_open_ready_count": 10,
@@ -14421,7 +14331,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 9904",
       "tplus1_open_ready_count": 10,
@@ -14597,7 +14507,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 10,
@@ -14773,7 +14683,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 9910",
       "tplus1_open_ready_count": 10,
@@ -14949,7 +14859,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 10,
@@ -15125,7 +15035,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 10,
@@ -15301,7 +15211,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 9914",
       "tplus1_open_ready_count": 10,
@@ -15477,7 +15387,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 9914, 1432",
       "tplus1_open_ready_count": 10,
@@ -15653,7 +15563,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 1432, 9914, 9910",
       "tplus1_open_ready_count": 10,
@@ -15829,7 +15739,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 1432, 2062, 9914, 3557",
       "tplus1_open_ready_count": 10,
@@ -16005,7 +15915,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 1432, 2062",
       "tplus1_open_ready_count": 10,
@@ -16181,7 +16091,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 1432, 2062, 9910, 9934, 9914",
       "tplus1_open_ready_count": 10,
@@ -16357,7 +16267,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 2062, 1432, 9910, 9934",
       "tplus1_open_ready_count": 10,
@@ -16533,7 +16443,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 2062, 9934",
       "tplus1_open_ready_count": 10,
@@ -16709,7 +16619,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 2062, 9910, 9934",
       "tplus1_open_ready_count": 10,
@@ -16885,7 +16795,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 9910, 2062",
       "tplus1_open_ready_count": 10,
@@ -17061,7 +16971,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 10,
@@ -17237,7 +17147,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 10,
@@ -17413,7 +17323,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 10,
@@ -17589,7 +17499,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 10,
@@ -17765,7 +17675,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 10,
@@ -17941,7 +17851,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 10,
@@ -18117,7 +18027,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 10,
@@ -18293,7 +18203,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": null,
       "tplus1_open_ready_count": 10,
@@ -18469,7 +18379,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 1736, 6165",
       "tplus1_open_ready_count": 10,
@@ -18645,7 +18555,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 1736",
       "tplus1_open_ready_count": 10,
@@ -18821,7 +18731,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 1736",
       "tplus1_open_ready_count": 10,
@@ -18997,7 +18907,7 @@
         }
       ],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 10,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 9802, 1736",
       "tplus1_open_ready_count": 10,
@@ -19022,7 +18932,7 @@
       ],
       "formal_target_orders": [],
       "industry_cap_formal_ready": true,
-      "official_locked_limit_state_available": false,
+      "locked_limit_up_blocked_count": 0,
       "sizing_ready_count": 0,
       "strict_missing_industry_audit_error": "PIT 產業缺值，§7.4 阻擋正式選股: 9802, 3130",
       "tplus1_open_ready_count": 0,
@@ -19033,12 +18943,12 @@
   "performance_inspected": false,
   "release_descriptor_sha256": "B7406D2F81058A70F2EEDAD36C42BC07D9535013182D9054FE497B4C8894646E",
   "remaining_blockers": [
-    "official TWSE locked-limit state is not present in the named release",
     "TWSE stop-trading has no separate official flag and is inferred only from a missing quote",
     "D3 actual-share execution ledger and unresolved reference resets block performance"
   ],
   "rules": {
     "capital_twd": 300000,
+    "locked_limit_policy": "exact_official_tick_limit_and_single_price_session",
     "maximum_average_volume_fraction": 0.01,
     "maximum_names_per_industry": 3,
     "maximum_positions": 10,
@@ -19047,14 +18957,15 @@
     "target_weight_per_name": 0.1
   },
   "schema_version": 1,
-  "strategy_commit": "abb6c2afb597690d141585896193f042c708ecf2",
-  "strategy_spec_sha256": "63B21CB53B085FEC07BE04867EB592BEBA08B30910A3C6FE0C376DA92B3939DE",
+  "strategy_commit": "bd65567aa2ecd7a34fa65cf9d55d5a9fdda8cd17",
+  "strategy_spec_sha256": "F96D2CB67DACC77E70462918C8A66647D57C0EEAF94DDEA600F5E436A3675E09",
   "summary": {
     "active_decision_months": 108,
     "decision_months": 120,
     "formal_selected_stock_months": 1080,
     "industry_cap_formal_ready_months": 108,
-    "sizing_ready_stock_months": 1070,
+    "locked_limit_up_blocked_stock_months": 6,
+    "sizing_ready_stock_months": 1064,
     "strict_complete_industry_audit_failed_months": 59,
     "tplus1_open_ready_stock_months": 1070,
     "uncapped_selected_missing_industry_months": 14

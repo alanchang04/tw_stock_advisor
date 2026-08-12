@@ -13,7 +13,7 @@ This is the integration-owner update to the historical Claude MOM1-0 handoff in
   `twse_altered_trading_2005_2014` component, 9 components in total).
 - Deterministic diagnostic: `reports/mom1_release_diagnostic.json`.
 - Diagnostic SHA-256:
-  `29CB56DA16F9D26417EDF630B68B8E868E5AECE5A9E97805AF014D617865211B`.
+  `50DED9226307D363EA926F61584DF3AEFF2A2A9527F9AFBE7DA9EAE26C080A9F`.
 - The same command was run twice locally and produced byte-identical output.
 - Holdout performance inspected: **no**. No return, NAV, Sharpe, drawdown, win
   rate, or parameter comparison was calculated.
@@ -62,7 +62,18 @@ F0 overall is **not passed**, and the 2008-2014 backward holdout remains closed:
    execution ledger and unresolved reference resets still block performance.
 2. TWSE stop-trading (停止交易) has no separate official flag; it is currently
    inferred only from a missing quote on that session.
-3. The named release has no official locked-limit state for fill validation.
+
+Locked-limit state is **no longer a blocker**. The official feed has no such
+field, so this was never a download problem; it is now a rule frozen in
+`SPEC_DATA_FOUNDATION_AND_MOMENTUM.md` §7.5.1 and implemented in
+`research/twse_price_limits.py`. A `change_pct` threshold was measured and
+rejected: across 1,917,768 rows the 6.5–7.0% region is smooth with no
+discontinuity, because limit prices must land on a legal tick and cross bands
+(a 9.99 reference gives a 10.65 limit, only +6.61%), so a 6.9% cut would miss
+54% of genuine limit-up sessions. The frozen rule instead recovers the official
+reference price from `change_pct`, applies the official tick table, and requires
+both an exact limit close **and** a single-price session
+(`open == high == low == close`). In the F0 run this blocks 6 stock-months.
 
 Full-delivery/altered-trading is **no longer a blocker**: r2 adds
 `twse_altered_trading_2005_2014` (2,469/2,469 trading days, 53,159 observations,
@@ -74,7 +85,7 @@ The two exclusion sources are kept as separate matrices
 The shared fee/tax/slippage constants are no longer a blocker: `ca29852`
 imports `FEE_RATE`, `TAX_RATE`, `buy_fill`, and `sell_fill` from
 `agent/strategy.py` into the deterministic order ledger, so MOM1 and the
-existing strategy now use one cost definition instead of two. The three
+existing strategy now use one cost definition instead of two. The two
 blockers above are exactly the `remaining_blockers` recorded in
 `reports/mom1_f0_execution_readiness.json`.
 
@@ -96,15 +107,16 @@ The package now implements and tests:
 
 The deterministic F0 diagnostic is
 `reports/mom1_f0_execution_readiness.json`, SHA-256
-`95751DC46196FB2837029D4AA64D0F0EFA225F9CDCDEB3C2AD617C1AF9DCD8DD`.
+`BF815DBF0264E49D1398447A7E3F2D48B7A6E7C57ED2AD4111CEA90CDAB6E260`.
 Across 108 active decision months, the formal industry policy produced 1,080
-selected stock-months; 1,070 had a usable T+1 open and complete sizing inputs.
-The ten unavailable opens remain unfilled rather than being replaced by a
-close or forward-filled price.
+selected stock-months; 1,070 had a usable T+1 open, of which 6 were blocked by
+a locked limit-up session, leaving 1,064 with complete sizing inputs. The ten
+unavailable opens and the six locked sessions remain unfilled rather than being
+replaced by a close or forward-filled price.
 
-F0 remains blocked only by release/integration inputs: official locked-limit
-state, TWSE stop-trading flags, and D3 execution-ledger reconciliation.
-All three are data gaps owned by the Data Authority, not code defects.
+F0 remains blocked only by TWSE stop-trading flags and D3 execution-ledger
+reconciliation. Both are data gaps owned by the Data Authority, not code
+defects.
 Industry missingness no longer blocks the whole month because its conservative
 exclusion policy was frozen before any performance inspection.
 
