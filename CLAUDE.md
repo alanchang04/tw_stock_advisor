@@ -36,6 +36,8 @@ from the Codex Data Authority checkout.
 - The new tests pass together with the existing suite relevant to the changed
   modules.
 - Every diagnostic is reproducible from a named immutable data release.
+- Use `tw_stock_data_2005_2014_r1` for released component diagnostics and record
+  that exact ID in the readiness report.
 - The readiness report clearly separates code defects, data defects, and open
   research choices.
 - Changes are committed to `research/mom1-engine`; they are not merged into the

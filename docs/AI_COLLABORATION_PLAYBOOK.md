@@ -47,9 +47,20 @@ descriptor that contains all of the following:
 Until then, Claude may build and test engine logic with fixtures and inspect
 signal counts, but may not treat local mutable data as a research result.
 
-The current local D3/D4/D5 manifests have been verified by Codex, but D4/D5 are
-still part of uncommitted Data Authority work. They are not a published data
-release merely because they exist on disk.
+The D3/D4/D5 manifests and implementations are committed and included in the
+published component release below. Their component-level blockers remain
+binding; inclusion proves identity and availability, not strategy readiness.
+
+### Published component release
+
+`tw_stock_data_2005_2014_r1` is the current immutable cross-machine component
+release. Its descriptor is
+`reports/data_releases/tw_stock_data_release_2005_2014_r1.json` and deployment-
+machine instructions are in `docs/DEPLOYMENT_MACHINE_DATA_RELEASE.md`.
+
+This release is approved for engine correctness, PIT signal counts, and
+disposition/universe verification. It does not open backward holdout returns;
+the descriptor's `known_gaps` and `usage_policy.blocked` remain binding.
 
 ## Create the Claude worktree
 

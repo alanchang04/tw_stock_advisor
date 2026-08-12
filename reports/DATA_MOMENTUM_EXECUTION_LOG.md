@@ -501,3 +501,27 @@ missing 0、mismatched 0、passed=true。
 
 2026-08-11 D4 v2／D5 v3 完成後完整正式測試（`.venv-repro`）：562 passed、55 skipped、
 0 failed、4 個既有 warnings。
+
+## D6：TWSE 處置歷史與跨機資料 release
+
+- TWSE 官方 `punish` 端點 2005～2014 共封存 10 個年度回應、681 個 raw rows；固定
+  JSON 編碼與 gzip `mtime=0`，相同 payload 可產生相同位元組。
+- raw transfer manifest 共 10 檔、37,738 bytes，collection SHA-256：
+  `0B49730946A78D9F8709A7C9F9D0B90B68F22DF87BCAF650EE3B425BF871C9FA`；逐檔驗證
+  missing 0、mismatched 0、passed=true。
+- 只保留可解析處置期間的四位數普通股，年度內 parser 後 620 source rows；跨年更正／
+  重覆依 `(stock_id, start_date)` 留最後一筆後為 604 事件、194 個股票代號。
+- `twse_disposition_punish_2005_2014_v1` 與 `_repeat` 從 clean commit `92c8480`
+  獨立建置，兩者 content SHA-256 均為
+  `025EEB28A2DEFE1DFC2082447A3E885211172878C808FB2462ACE04D498CAEFF`；
+  `disposition_events.parquet` SHA-256 均為
+  `63A04BA052C25881936B44A368B217D4E50F0E13A24EE4A11CD0ADFC6E0069A9`。
+- snapshot manifest 明確為 `git.dirty=false`，raw manifest 驗證、來源年度完整性、事件期間
+  方向與結構檢查全數通過，`twse_disposition_component_ready=true`。
+- `notice` 不在 MOM-1 必要處置排除規則，本輪明確不下載；TPEX 處置由 D5 提供。
+- 主 release `tw_stock_data_2005_2014_r1` 涵蓋 12,661 檔、543,984,330 bytes，
+  collection SHA-256：
+  `44EAF107359CA2754A7407A062E4ABD1A1F61A16298C6816E11994EEF604CD1E`；本機完整
+  verify 與八個 component manifest／quality hash 全部通過。
+- 此 release 核准跨機 identity、PIT engine correctness、signal count 與 disposition
+  filter；D3 actual-share ledger 仍有 blocker，因此 backward holdout 績效仍未開封。
