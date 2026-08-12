@@ -1,7 +1,7 @@
 param(
     [string]$RepoRoot = (Split-Path -Parent $PSScriptRoot),
-    [string]$Descriptor = "reports/data_releases/tw_stock_data_release_2005_2014_r1.json",
-    [string]$OutputPath = "data_release_bundles/tw_stock_data_2005_2014_r1.zip",
+    [string]$Descriptor = "reports/data_releases/tw_stock_data_release_2005_2014_r2.json",
+    [string]$OutputPath = "data_release_bundles/tw_stock_data_2005_2014_r2.zip",
     [switch]$Force
 )
 

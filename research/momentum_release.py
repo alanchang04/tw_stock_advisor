@@ -16,6 +16,9 @@ import numpy as np
 import pandas as pd
 
 from research.momentum import build_pit_master, disposition_restriction_frame
+from research.twse_altered_trading import (
+    restriction_frame as altered_trading_restriction_frame,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -31,6 +34,10 @@ REQUIRED_COMPONENT_FILES = {
     "twse_disposition_punish_2005_2014": (
         "disposition_events.parquet",
         "twse_disposition_source_status.parquet",
+    ),
+    "twse_altered_trading_2005_2014": (
+        "altered_trading_observations.parquet",
+        "twse_altered_trading_source_status.parquet",
     ),
 }
 
@@ -52,6 +59,9 @@ class MomentumReleaseInputs:
     market_structure: pd.DataFrame
     disposition_events: pd.DataFrame
     disposition_restricted: pd.DataFrame
+    altered_trading_observations: pd.DataFrame
+    altered_trading_restricted: pd.DataFrame
+    restricted: pd.DataFrame
     adjustment_scope: str
     restriction_scope: str
 
@@ -205,7 +215,7 @@ def build_backward_adjusted_close(
 
 
 def load_momentum_release(
-    release_id: str = "tw_stock_data_2005_2014_r1",
+    release_id: str = "tw_stock_data_2005_2014_r2",
     *,
     root: Path = ROOT,
 ) -> MomentumReleaseInputs:
@@ -271,6 +281,30 @@ def load_momentum_release(
         disposition_events, raw_close.index, raw_close.columns
     )
 
+    # §7.1.6 的另一半：變更交易方法／全額交割。與處置分開保存，
+    # 讓每一次排除都能回答「因為哪一條規則」，而不是只知道被排除了。
+    altered_observations = pd.read_parquet(
+        paths["twse_altered_trading_2005_2014/altered_trading_observations.parquet"]
+    )
+    altered_status = pd.read_parquet(
+        paths["twse_altered_trading_2005_2014/twse_altered_trading_source_status.parquet"]
+    )
+    # 官方每個交易日都發佈完整名單，因此缺一天就等於那天的排除規則失效。
+    covered = set(pd.to_datetime(altered_status["snapshot_date"]))
+    uncovered = sorted(set(raw_close.index) - covered)
+    if uncovered:
+        raise ValueError(
+            "變更交易官方名單未覆蓋全部交易日，缺 "
+            f"{len(uncovered)} 天（例如 {uncovered[0]:%Y-%m-%d}）；"
+            "缺漏的日子不得被當成當天沒有變更交易"
+        )
+    if not altered_status["official_stat"].eq("OK").all():
+        raise ValueError("變更交易來源有非 OK 的官方查詢狀態，不得視為當日無事件")
+    altered_trading_restricted = altered_trading_restriction_frame(
+        altered_observations, raw_close.index, raw_close.columns
+    )
+    restricted = disposition_restricted | altered_trading_restricted
+
     content_hashes = {
         component_id: manifests[component_id]["content_sha256"]
         for component_id in REQUIRED_COMPONENT_FILES
@@ -292,6 +326,12 @@ def load_momentum_release(
         market_structure=market_structure,
         disposition_events=disposition_events,
         disposition_restricted=disposition_restricted,
+        altered_trading_observations=altered_observations,
+        altered_trading_restricted=altered_trading_restricted,
+        restricted=restricted,
         adjustment_scope="official D3 factors; signal-only; blocked for performance promotion",
-        restriction_scope="TWSE punish/disposition only; stop-trading/full-delivery not yet complete",
+        restriction_scope=(
+            "TWSE punish/disposition plus official altered-trading (full-delivery) listings; "
+            "stop-trading has no separate official flag and is handled only as a missing quote"
+        ),
     )

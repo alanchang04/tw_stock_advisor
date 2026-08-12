@@ -116,7 +116,7 @@ def run(release_id: str) -> dict:
             turnover=inputs.turnover,
             signal=signal,
             pit_mask=master_mask,
-            restricted=inputs.disposition_restricted,
+            restricted=inputs.restricted,
         )
         values = signal.loc[decision, disposition_eligible]
         holdings = select_holdings(values, previous_holdings, max_positions=10)
@@ -191,6 +191,11 @@ def run(release_id: str) -> dict:
             "disposition_restricted_stock_sessions": int(
                 inputs.disposition_restricted.to_numpy().sum()
             ),
+            "altered_trading_observations": len(inputs.altered_trading_observations),
+            "altered_trading_restricted_stock_sessions": int(
+                inputs.altered_trading_restricted.to_numpy().sum()
+            ),
+            "combined_restricted_stock_sessions": int(inputs.restricted.to_numpy().sum()),
         },
         "summary": {
             "first_nonempty_decision": active[0]["decision_date"] if active else None,

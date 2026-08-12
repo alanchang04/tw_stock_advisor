@@ -1,7 +1,7 @@
 param(
     [string]$RepoRoot = (Split-Path -Parent $PSScriptRoot),
     [string]$Python = "",
-    [string]$ReleaseId = "tw_stock_data_2005_2014_r1",
+    [string]$ReleaseId = "tw_stock_data_2005_2014_r2",
     [string]$Output = "reports/mom1_release_diagnostic.json",
     [string]$ExpectedSha256 = "1E6876F420815A837BA2E10FE9C38E3241B596AAF38A17523D85737D1DC65F21"
 )

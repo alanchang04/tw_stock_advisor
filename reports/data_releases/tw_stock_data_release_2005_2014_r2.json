@@ -1,0 +1,177 @@
+{
+  "schema_version": 1,
+  "data_release_id": "tw_stock_data_2005_2014_r2",
+  "release_date": "2026-08-12",
+  "release_type": "immutable_research_component_bundle",
+  "authority": "Codex Data Authority",
+  "builder_contract": {
+    "branch": "agent/swing-margin-research",
+    "minimum_code_commit": "cb08c5a",
+    "python_environment": ".venv-repro",
+    "source_policy": "official_first_no_unreconciled_splicing"
+  },
+  "transfer": {
+    "manifest_path": "reports/tw_stock_data_release_2005_2014_r2_transfer_manifest.json",
+    "manifest_sha256": "B38BEE515AE53EB62951C6EEEB436956EC5FB1366CFEA7ACA93441056039B8A3",
+    "collection_sha256": "93F20503A24BEE8EAFD6F45E12B591B073A670D6265EF42DF5E0CE5C14C73109",
+    "file_count": 15134,
+    "total_bytes": 546374841,
+    "base_dir_contract": "repository_root"
+  },
+  "readiness": {
+    "cross_machine_byte_verification_ready": true,
+    "twse_disposition_filter_component_ready": true,
+    "pit_engine_correctness_work_ready": true,
+    "backward_holdout_performance_ready": false,
+    "all_market_strategy_promotion_ready": false,
+    "streamlit_runtime_requires_this_bundle": false,
+    "twse_altered_trading_filter_component_ready": true
+  },
+  "components": [
+    {
+      "component_id": "twse_prices_2005_2014",
+      "snapshot_path": "data/research_versions/twse_prices_2005_2014_v1",
+      "manifest_sha256": "D78577257A194D8E06913ADC5AE409F3D053F7BF2E036B449B21FD781AB3DF44",
+      "quality_sha256": "B6E3999FA3F4CF169F79574122EB7654D6CFBEA3026CB46D5EE753BA4186511C",
+      "content_sha256": "6E04C1E32BC93899E439D5DE2161C7F77170C227F03CB753207464BCFE2CBE59",
+      "structural_passed": true,
+      "component_status": "price_only_structural_ready"
+    },
+    {
+      "component_id": "twse_security_master_2005_2014",
+      "snapshot_path": "data/research_versions/twse_security_master_2005_2014_staging_v1",
+      "manifest_sha256": "5A8B456FE6EA5A5F1C8E47384DAFAE977F8FDB2DE381D06850E25F4915FEA859",
+      "quality_sha256": "5264978FA78F6AF8B0DFE0A27CB73930CDBEA63AD2462DD025C2E55882DC16ED",
+      "content_sha256": "983B1B51F11CD02D75A0EBC19072178DA28B9B4A8038CB8E6348896C8C1361ED",
+      "structural_passed": true,
+      "component_status": "pit_universe_structural_ready"
+    },
+    {
+      "component_id": "twse_corporate_actions_2005_2014",
+      "snapshot_path": "data/research_versions/twse_corporate_actions_2005_2014_staging_v4",
+      "manifest_sha256": "EE1382EB75B21143657AEB08B748EF30841A8CAB0FEB824357CB8A28A9734F8F",
+      "quality_sha256": "0253FD337359C16BF30A2B8642246D44A5CBF14B15DEEA727BBD5281713A015E",
+      "content_sha256": "7F0322EDD5FA6B67D8061204C48F7FA585EC75D3CBB4A552C1D0133682344780",
+      "structural_passed": true,
+      "component_status": "staging_blocked_for_strategy_promotion"
+    },
+    {
+      "component_id": "mops_dividend_terms_2004_2014",
+      "snapshot_path": "data/research_versions/mops_dividend_distributions_2004_2014_v1",
+      "manifest_sha256": "B7761863FEEF827072CD40A03A947D2C78AD672178FD5E587032DFBD258F1E60",
+      "quality_sha256": "7D1DC4B5334D44DBE27B1BFCAFFF2323C5754D1FF082623C022C6518A4E2DD3D",
+      "content_sha256": "95632FBB3A5CDDBC08DCAB78558AF25B9DD26238322BEB54D7DBC103F01ED42C",
+      "structural_passed": true,
+      "component_status": "official_terms_structural_ready"
+    },
+    {
+      "component_id": "mops_paid_subscription_2004_2015",
+      "snapshot_path": "data/research_versions/mops_paid_subscription_announcements_2004_2015_v4",
+      "manifest_sha256": "F4C91E9FCCBF490C8AE6C7033E034A85825FFBFF65D4A123C3AF630CA6826A4B",
+      "quality_sha256": "8C76183770E4E983DFDBC630CB5C29D7779EBB9B3EE0588DBE10748BA118582D",
+      "content_sha256": "4CA57CD97146F538D2DD070AF38B15ED45A9489A561DBCE8EE574BB39DB7203C",
+      "structural_passed": true,
+      "component_status": "official_terms_settlement_incomplete"
+    },
+    {
+      "component_id": "twse_market_structure_2005_2014",
+      "snapshot_path": "data/research_versions/twse_market_structure_2005_2014_staging_v2",
+      "manifest_sha256": "F480478D7AEEEC3417F92EA8434C890CE215EF5CCFF32B80A2258256AA88FC7F",
+      "quality_sha256": "1D3E3D36C98498E73E3A928583BC4816323912E17FC727698DDC97689226777E",
+      "content_sha256": "9327DD0F63DB1BCA440341BA270227EDA003A5A7834811C36AD9DA1AF796AC31",
+      "structural_passed": true,
+      "component_status": "d4_component_ready"
+    },
+    {
+      "component_id": "tpex_history_2008_2014",
+      "snapshot_path": "data/research_versions/tpex_history_2008_2014_staging_v3",
+      "manifest_sha256": "6F7AA1B067705FC40122CC58B1DCD4C46689BC0E005D9D16E92A25D3193AE706",
+      "quality_sha256": "BAEED6576851E61DA320B0A2D23DDE478DF3F6BBE1891347906C7967D42081A8",
+      "content_sha256": "CD5275B703A04DFD1B7B5D626E48BD1C08D3AB5B60563766292C9DB98332EB0A",
+      "structural_passed": true,
+      "component_status": "d5_staging_complete_with_known_unknowns"
+    },
+    {
+      "component_id": "twse_disposition_punish_2005_2014",
+      "snapshot_path": "data/research_versions/twse_disposition_punish_2005_2014_v1",
+      "manifest_sha256": "DE49FC17B5D39499B54EEBD08ABDBA5E6FA4A5424B5A9FD91FD178B03E3420B1",
+      "quality_sha256": "150145FAE339A370AD37EB8F2C80C75AF3FDC7EB13D145599AED7932E2DD32ED",
+      "content_sha256": "025EEB28A2DEFE1DFC2082447A3E885211172878C808FB2462ACE04D498CAEFF",
+      "structural_passed": true,
+      "component_status": "promotion_ready"
+    },
+    {
+      "component_id": "twse_altered_trading_2005_2014",
+      "snapshot_path": "data/research_versions/twse_altered_trading_2005_2014_v1",
+      "manifest_sha256": "0706AD4713C0342E96BF5CDDA085B5D2E240A051CEF75CA72721BD7233B2C88E",
+      "quality_sha256": "FA1A7019C9DDDFCA766894E0B56C69C536A67FCA548A9C8498E5AA88412AA9B1",
+      "content_sha256": "AFCD5A2DDA5A42F12B96A5C97AA63F5FDC62AB07DAD9FCC890CA63EA21B18E10",
+      "structural_passed": true,
+      "component_status": "promotion_ready"
+    }
+  ],
+  "repeat_build_evidence": [
+    {
+      "component_id": "twse_prices_2005_2014",
+      "content_sha256": "6E04C1E32BC93899E439D5DE2161C7F77170C227F03CB753207464BCFE2CBE59"
+    },
+    {
+      "component_id": "twse_security_master_2005_2014",
+      "content_sha256": "983B1B51F11CD02D75A0EBC19072178DA28B9B4A8038CB8E6348896C8C1361ED"
+    },
+    {
+      "component_id": "twse_corporate_actions_2005_2014",
+      "content_sha256": "7F0322EDD5FA6B67D8061204C48F7FA585EC75D3CBB4A552C1D0133682344780"
+    },
+    {
+      "component_id": "mops_dividend_terms_2004_2014",
+      "content_sha256": "95632FBB3A5CDDBC08DCAB78558AF25B9DD26238322BEB54D7DBC103F01ED42C"
+    },
+    {
+      "component_id": "mops_paid_subscription_2004_2015",
+      "content_sha256": "4CA57CD97146F538D2DD070AF38B15ED45A9489A561DBCE8EE574BB39DB7203C"
+    },
+    {
+      "component_id": "twse_market_structure_2005_2014",
+      "content_sha256": "9327DD0F63DB1BCA440341BA270227EDA003A5A7834811C36AD9DA1AF796AC31"
+    },
+    {
+      "component_id": "tpex_history_2008_2014",
+      "content_sha256": "CD5275B703A04DFD1B7B5D626E48BD1C08D3AB5B60563766292C9DB98332EB0A"
+    },
+    {
+      "component_id": "twse_disposition_punish_2005_2014",
+      "content_sha256": "025EEB28A2DEFE1DFC2082447A3E885211172878C808FB2462ACE04D498CAEFF"
+    },
+    {
+      "component_id": "twse_altered_trading_2005_2014",
+      "content_sha256": "AFCD5A2DDA5A42F12B96A5C97AA63F5FDC62AB07DAD9FCC890CA63EA21B18E10"
+    }
+  ],
+  "known_gaps": [
+    "TWSE 2005-2010 capital-reduction history and merger/split cause reconciliation remain incomplete",
+    "653 TWSE corporate-action rows remain blocked for an actual-share execution ledger",
+    "182 TWSE long-gap official reference resets have no reconciled corporate-action cause",
+    "D4 preserves missing official industry classifications and same-day market cap for suspended rows as null",
+    "TPEx institutional history before 2018 is missing/unknown and is never zero-filled",
+    "TWSE notice events are not downloaded because they are outside the MOM-1 disposition exclusion requirement",
+    "TWSE altered-trading reports disclose no periodic-call-auction flag before 2007-11-01; those rows are missing, never False",
+    "TWSE stop-trading (停止交易) has no separate official flag and is represented only as a missing quote"
+  ],
+  "usage_policy": {
+    "allowed": [
+      "TWSE altered-trading/full-delivery universe exclusion verification",
+      "TWSE and TPEx disposition/universe exclusion verification",
+      "cross-machine data identity verification",
+      "point-in-time engine correctness tests",
+      "signal-count diagnostics without returns"
+    ],
+    "blocked": [
+      "backward holdout performance inspection",
+      "parameter tuning on 2008-2014 returns",
+      "claiming all-market production readiness",
+      "uploading raw research data to Streamlit Cloud"
+    ]
+  },
+  "supersedes": "tw_stock_data_2005_2014_r1"
+}

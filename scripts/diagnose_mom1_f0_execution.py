@@ -82,7 +82,7 @@ def run(release_id: str) -> dict:
             turnover=inputs.turnover,
             signal=signal,
             pit_mask=pit_mask,
-            restricted=inputs.disposition_restricted,
+            restricted=inputs.restricted,
         )
         values = signal.loc[decision, eligible]
         uncapped = select_holdings(values, previous_holdings, max_positions=10)
