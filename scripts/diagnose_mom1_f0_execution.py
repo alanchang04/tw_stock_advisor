@@ -191,7 +191,7 @@ def run(release_id: str) -> dict:
         "f0_status": "blocked",
         "remaining_blockers": [
             "official TWSE locked-limit state is not present in the named release",
-            "TWSE full-delivery/altered-trading history remains incomplete",
+            "TWSE stop-trading has no separate official flag and is inferred only from a missing quote",
             "D3 actual-share execution ledger and unresolved reference resets block performance",
         ],
         "monthly": monthly,
