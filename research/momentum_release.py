@@ -42,7 +42,9 @@ class MomentumReleaseInputs:
     descriptor_sha256: str
     component_content_sha256: dict[str, str]
     verified_input_sha256: dict[str, str]
+    raw_open: pd.DataFrame
     raw_close: pd.DataFrame
+    volume_shares: pd.DataFrame
     adjusted_close: pd.DataFrame
     turnover: pd.DataFrame
     pit_master: pd.DataFrame
@@ -212,7 +214,7 @@ def load_momentum_release(
     descriptor, manifests, paths, input_hashes = verify_release_inputs(release_id, root=root)
 
     prices = pd.read_parquet(paths["twse_prices_2005_2014/prices.parquet"])
-    required_price = {"stock_id", "trade_date", "close", "turnover"}
+    required_price = {"stock_id", "trade_date", "open", "close", "volume", "turnover"}
     if required_price - set(prices.columns):
         raise ValueError(f"prices 缺少欄位: {sorted(required_price - set(prices.columns))}")
     prices = prices.loc[:, list(required_price)].copy()
@@ -223,10 +225,18 @@ def load_momentum_release(
     if prices.duplicated(["stock_id", "trade_date"]).any():
         raise ValueError("prices (stock_id, trade_date) 必須唯一")
 
+    price_manifest = manifests["twse_prices_2005_2014"]
+    if price_manifest.get("units", {}).get("prices.volume") != "shares":
+        raise ValueError("released prices.volume 單位必須明確宣告為 shares")
+
+    raw_open = prices.pivot(index="trade_date", columns="stock_id", values="open")
     raw_close = prices.pivot(index="trade_date", columns="stock_id", values="close")
+    volume_shares = prices.pivot(index="trade_date", columns="stock_id", values="volume")
     turnover = prices.pivot(index="trade_date", columns="stock_id", values="turnover")
     columns = sorted(map(str, raw_close.columns))
     raw_close = raw_close.reindex(columns=columns).sort_index()
+    raw_open = raw_open.reindex(index=raw_close.index, columns=columns)
+    volume_shares = volume_shares.reindex(index=raw_close.index, columns=columns)
     turnover = turnover.reindex(index=raw_close.index, columns=columns)
 
     actions = pd.read_parquet(
@@ -272,7 +282,9 @@ def load_momentum_release(
         descriptor_sha256=input_hashes["release_descriptor"],
         component_content_sha256=content_hashes,
         verified_input_sha256=input_hashes,
+        raw_open=raw_open,
         raw_close=raw_close,
+        volume_shares=volume_shares,
         adjusted_close=adjusted_close,
         turnover=turnover,
         pit_master=master,
