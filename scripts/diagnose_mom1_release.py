@@ -80,6 +80,8 @@ def run(release_id: str) -> dict:
             "strategy/release adapter 必須先 commit 才能產生可復現診斷:\n" + strategy_dirty
         )
 
+    strategy_commit = _git("log", "-1", "--format=%H", "--", *STRATEGY_PATHS)
+
     inputs = load_momentum_release(release_id, root=ROOT)
     signal = compute_mom_6_1(inputs.adjusted_close)
     decisions = month_end_sessions(inputs.trading_days)
@@ -152,7 +154,9 @@ def run(release_id: str) -> dict:
         "release_descriptor_sha256": inputs.descriptor_sha256,
         "component_content_sha256": inputs.component_content_sha256,
         "verified_input_sha256": inputs.verified_input_sha256,
-        "git_commit": _git("rev-parse", "HEAD"),
+        # Bind reproducibility to the last commit that changed the strategy contract.
+        # Later report/deployment-only commits must not change deterministic output.
+        "git_commit": strategy_commit,
         "strategy_paths_clean_at_run": True,
         "strategy_spec_sha256": sha256_file(spec_path),
         "command": (
