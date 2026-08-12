@@ -45,6 +45,7 @@ PRIMARY_KEYS: dict[str, tuple[str, ...]] = {
     "tpex_source_status.parquet": ("source_type", "query_key"),
     "institutional_availability.parquet": ("probe_date",),
     "trading_restrictions.parquet": ("snapshot_date", "stock_id"),
+    "twse_disposition_source_status.parquet": ("report", "year"),
 }
 
 DATE_COLUMNS: dict[str, str] = {

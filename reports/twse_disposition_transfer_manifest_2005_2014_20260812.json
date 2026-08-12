@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "created_at": "2026-08-12T18:08:26.828564+08:00",
+  "base_dir_contract": "repository_root",
+  "roots": [
+    "data/raw/twse/disposition/punish"
+  ],
+  "file_count": 10,
+  "total_bytes": 37738,
+  "files": [
+    {
+      "path": "data/raw/twse/disposition/punish/2005/punish_2005.json.gz",
+      "bytes": 1730,
+      "sha256": "64ECC912B55A652F7D0FA612B021478F1D6702B20E14CBADE88BC359AD3D5074"
+    },
+    {
+      "path": "data/raw/twse/disposition/punish/2006/punish_2006.json.gz",
+      "bytes": 2378,
+      "sha256": "825D7C14D83878F8069D84523F368F1BA0BA1FFE6E8387A1DBF5273EDA45236B"
+    },
+    {
+      "path": "data/raw/twse/disposition/punish/2007/punish_2007.json.gz",
+      "bytes": 3249,
+      "sha256": "A1F5292F29CFB02E945419C181BF1D01F3B4A62F8306871947435F447399CB3D"
+    },
+    {
+      "path": "data/raw/twse/disposition/punish/2008/punish_2008.json.gz",
+      "bytes": 1713,
+      "sha256": "C51F2709057A21F9001DF8266B14FA0D7C453DC71D9A14A1E9A9F30BCC77C21C"
+    },
+    {
+      "path": "data/raw/twse/disposition/punish/2009/punish_2009.json.gz",
+      "bytes": 4281,
+      "sha256": "4104805337AD77F2F17CD1705BBA09C59F7F945482628B961D25529C4F21B0C2"
+    },
+    {
+      "path": "data/raw/twse/disposition/punish/2010/punish_2010.json.gz",
+      "bytes": 2703,
+      "sha256": "85E6FEFADD62D25CD421237EB399E660F119E8C5718F7B35433B8A20C10B0471"
+    },
+    {
+      "path": "data/raw/twse/disposition/punish/2011/punish_2011.json.gz",
+      "bytes": 4852,
+      "sha256": "80DFC29B213B79B2DCAF0211DC7EC378ED77CCFACC2A9D8BBD1CAFF3AAF184CD"
+    },
+    {
+      "path": "data/raw/twse/disposition/punish/2012/punish_2012.json.gz",
+      "bytes": 5220,
+      "sha256": "04A938EAC7B3CB81C6CD002FADEDDC07BAB015B47022231CD83204570F3F8894"
+    },
+    {
+      "path": "data/raw/twse/disposition/punish/2013/punish_2013.json.gz",
+      "bytes": 5751,
+      "sha256": "C8D240AC045BFC24BEADD6128EEF17739FDE340269C3525A7A838B0E2C673E1A"
+    },
+    {
+      "path": "data/raw/twse/disposition/punish/2014/punish_2014.json.gz",
+      "bytes": 5861,
+      "sha256": "7131205EEADF50D284255ACEDDECF95D027082D2A2BF57B1AD9E6ECB7E94AA1C"
+    }
+  ],
+  "collection_sha256": "0B49730946A78D9F8709A7C9F9D0B90B68F22DF87BCAF650EE3B425BF871C9FA"
+}

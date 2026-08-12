@@ -23,9 +23,11 @@
 - 不建立 research snapshot，也不寫任何資料庫。正規化與 promotion 交給既有的
   versioned builder，本腳本只負責把官方原始回應凍結下來。
 
-⚠️ 跨機注意：gzip header 帶 mtime，兩台機器各自回補會產生不同位元組、
-sha256 對不上。**只能在一台機器執行**，另一台用
-`scripts/build_data_transfer_manifest.py` 走檔案傳輸驗證。
+跨機可重現性
+------------
+JSON 使用固定 key 順序與緊縮 separators，gzip member 的 mtime 固定為 0。
+相同官方 payload 在兩台機器會得到相同位元組；正式 release 仍以 transfer
+manifest 驗證，避免官方事後更正歷史資料時把不同版本誤當相同。
 """
 from __future__ import annotations
 
@@ -59,10 +61,11 @@ def raw_path(raw_root: Path, report: str, year: int) -> Path:
 def write_raw_response(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.tmp-{uuid.uuid4().hex}")
+    raw = (
+        json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n"
+    ).encode("utf-8")
     try:
-        with gzip.open(temporary, "wt", encoding="utf-8", newline="") as handle:
-            json.dump(payload, handle, ensure_ascii=False, separators=(",", ":"))
-            handle.write("\n")
+        temporary.write_bytes(gzip.compress(raw, compresslevel=9, mtime=0))
         os.replace(temporary, path)
     finally:
         temporary.unlink(missing_ok=True)
@@ -96,13 +99,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--start-year", type=int, default=2005)
     parser.add_argument("--end-year", type=int, default=2014)
-    parser.add_argument("--reports", nargs="+", default=["punish", "notice"],
+    parser.add_argument("--reports", nargs="+", default=["punish"],
                         choices=["punish", "notice"])
     parser.add_argument("--raw-root", default=str(ROOT / "data/raw/twse/disposition"))
     parser.add_argument("--delay", type=float, default=2.0,
                         help="每次請求後的間隔秒數；官方端點無明文限流，保守預設 2 秒")
     parser.add_argument("--force", action="store_true",
-                        help="即使 raw 已存在也重抓（會改變 sha256，跨機請勿使用）")
+                        help="即使 raw 已存在也重抓；官方若有歷史更正，sha256 會改變")
     parser.add_argument("--status", action="store_true",
                         help="只讀本地 raw cache，回報覆蓋狀況，不發任何請求")
     args = parser.parse_args()
