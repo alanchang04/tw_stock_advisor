@@ -105,6 +105,7 @@ def run(release_id: str) -> dict:
         execution_date = next_session(inputs.trading_days, decision)
         open_ready = 0
         sizing_ready = 0
+        locked_up_blocked = 0
         sample_orders: list[dict] = []
         if execution_date is not None:
             volume_window = inputs.volume_shares.loc[:decision].tail(20)
@@ -115,6 +116,10 @@ def run(release_id: str) -> dict:
                 if pd.isna(open_price) or not np.isfinite(open_price) or open_price <= 0:
                     continue
                 open_ready += 1
+                # §7.5：漲停鎖死時買方沒有對手盤，不得假成交。
+                if inputs.locked_limit.at[execution_date, stock_id] == "up":
+                    locked_up_blocked += 1
+                    continue
                 if pd.isna(avg_volume) or not np.isfinite(avg_volume) or avg_volume < 0:
                     continue
                 orders = build_equal_weight_rebalance_orders(
@@ -141,7 +146,7 @@ def run(release_id: str) -> dict:
             "tplus1_open_ready_count": open_ready,
             "sizing_ready_count": sizing_ready,
             "formal_target_orders": sample_orders,
-            "official_locked_limit_state_available": False,
+            "locked_limit_up_blocked_count": locked_up_blocked,
         })
 
     active = [row for row in monthly if row["eligible_count"] > 0]
@@ -166,6 +171,7 @@ def run(release_id: str) -> dict:
             "maximum_names_per_industry": 3,
             "target_weight_per_name": 0.10,
             "maximum_average_volume_fraction": 0.01,
+            "locked_limit_policy": "exact_official_tick_limit_and_single_price_session",
             "capital_twd": 300000,
             "pending_order_expiry": "next monthly decision or sample end",
             "missing_industry_policy": "exclude_stock_fail_closed_never_backfill",
@@ -183,6 +189,9 @@ def run(release_id: str) -> dict:
             "formal_selected_stock_months": sum(
                 len(row["formal_selected_stock_ids"]) for row in active
             ),
+            "locked_limit_up_blocked_stock_months": sum(
+                row["locked_limit_up_blocked_count"] for row in active
+            ),
             "tplus1_open_ready_stock_months": sum(
                 row["tplus1_open_ready_count"] for row in active
             ),
@@ -190,7 +199,6 @@ def run(release_id: str) -> dict:
         },
         "f0_status": "blocked",
         "remaining_blockers": [
-            "official TWSE locked-limit state is not present in the named release",
             "TWSE stop-trading has no separate official flag and is inferred only from a missing quote",
             "D3 actual-share execution ledger and unresolved reference resets block performance",
         ],

@@ -19,6 +19,7 @@ from research.momentum import build_pit_master, disposition_restriction_frame
 from research.twse_altered_trading import (
     restriction_frame as altered_trading_restriction_frame,
 )
+from research.twse_price_limits import locked_limit_frame
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -50,7 +51,11 @@ class MomentumReleaseInputs:
     component_content_sha256: dict[str, str]
     verified_input_sha256: dict[str, str]
     raw_open: pd.DataFrame
+    raw_high: pd.DataFrame
+    raw_low: pd.DataFrame
     raw_close: pd.DataFrame
+    change_pct: pd.DataFrame
+    locked_limit: pd.DataFrame
     volume_shares: pd.DataFrame
     adjusted_close: pd.DataFrame
     turnover: pd.DataFrame
@@ -224,7 +229,8 @@ def load_momentum_release(
     descriptor, manifests, paths, input_hashes = verify_release_inputs(release_id, root=root)
 
     prices = pd.read_parquet(paths["twse_prices_2005_2014/prices.parquet"])
-    required_price = {"stock_id", "trade_date", "open", "close", "volume", "turnover"}
+    required_price = {"stock_id", "trade_date", "open", "high", "low", "close",
+                      "volume", "turnover", "change_pct"}
     if required_price - set(prices.columns):
         raise ValueError(f"prices 缺少欄位: {sorted(required_price - set(prices.columns))}")
     prices = prices.loc[:, list(required_price)].copy()
@@ -240,9 +246,20 @@ def load_momentum_release(
         raise ValueError("released prices.volume 單位必須明確宣告為 shares")
 
     raw_open = prices.pivot(index="trade_date", columns="stock_id", values="open")
+    raw_high = prices.pivot(index="trade_date", columns="stock_id", values="high")
+    raw_low = prices.pivot(index="trade_date", columns="stock_id", values="low")
     raw_close = prices.pivot(index="trade_date", columns="stock_id", values="close")
     volume_shares = prices.pivot(index="trade_date", columns="stock_id", values="volume")
     turnover = prices.pivot(index="trade_date", columns="stock_id", values="turnover")
+    change_pct = prices.pivot(index="trade_date", columns="stock_id", values="change_pct")
+
+    # §7.5 的「漲跌停鎖死不得假成交」需要一個明確狀態；官方沒有這個欄位，
+    # 因此由官方 change_pct 反推參考價後，套官方檔位規則精確判定。
+    # 規則與否決 change_pct 門檻法的理由見 research/twse_price_limits.py。
+    locked_limit = locked_limit_frame(
+        open_=raw_open, high=raw_high, low=raw_low,
+        close=raw_close, change_pct=change_pct,
+    )
     columns = sorted(map(str, raw_close.columns))
     raw_close = raw_close.reindex(columns=columns).sort_index()
     raw_open = raw_open.reindex(index=raw_close.index, columns=columns)
@@ -317,7 +334,11 @@ def load_momentum_release(
         component_content_sha256=content_hashes,
         verified_input_sha256=input_hashes,
         raw_open=raw_open,
+        raw_high=raw_high,
+        raw_low=raw_low,
         raw_close=raw_close,
+        change_pct=change_pct,
+        locked_limit=locked_limit,
         volume_shares=volume_shares,
         adjusted_close=adjusted_close,
         turnover=turnover,
