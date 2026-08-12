@@ -1,5 +1,9 @@
 # MOM1-0：引擎正確性與 PIT universe 稽核
 
+> **Integration update:** 本文件保存 Claude 在 `research/mom1-engine` 的原始
+> fixture-only 交接狀態。DATA-3 與 D6 後續已完成並由 Codex 整合；目前具名 release
+> 結果、可復現 SHA 與剩餘 blocker 請以 `reports/MOM1_RELEASE_READINESS.md` 為準。
+
 > 日期：2026-08-12（Asia/Taipei）
 > 指派來源：`CLAUDE.md`、`docs/AI_COLLABORATION_PLAYBOOK.md` 工作分配表 MOM1-0
 > 規格來源：`docs/SPEC_DATA_FOUNDATION_AND_MOMENTUM.md` §7（固定策略規則）、§9.1（F0）

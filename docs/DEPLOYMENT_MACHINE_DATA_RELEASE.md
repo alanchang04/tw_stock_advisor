@@ -63,3 +63,20 @@ for backward holdout performance or parameter tuning because the corporate-
 action execution ledger still has documented blockers. The machine-readable
 details are in
 `reports/data_releases/tw_stock_data_release_2005_2014_r1.json`.
+
+## Reproduce the MOM1 signal-only diagnostic
+
+This step requires `.venv-repro` or `.venv` with pandas and pyarrow. It verifies
+the descriptor/component/input hashes again, builds only PIT universe and signal
+counts, and refuses to run when the strategy contract files are dirty:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File `
+  .\scripts\verify_mom1_release_diagnostic.ps1
+```
+
+Expected diagnostic SHA-256:
+`48E705D1521282C03DF97BDD2857CCA67716CBB197D971790E080C4A4A64F81F`.
+The machine-readable result is `reports/mom1_release_diagnostic.json`; the
+human-readable readiness summary is `reports/MOM1_RELEASE_READINESS.md`.
+This command does not calculate or expose backward-holdout performance.
