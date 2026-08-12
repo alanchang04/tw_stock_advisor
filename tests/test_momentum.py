@@ -18,6 +18,7 @@ from research.momentum import (
     MIN_HISTORY_SESSIONS,
     build_pit_master,
     compute_mom_6_1,
+    disposition_restriction_frame,
     eligible_universe,
     month_end_sessions,
     next_session,
@@ -136,6 +137,13 @@ def test_mom_6_1_rejects_unsorted_index(flat_panel):
         compute_mom_6_1(close.iloc[::-1])
 
 
+def test_mom_6_1_rejects_duplicate_sessions(flat_panel):
+    _, _, close, _ = flat_panel
+    duplicated = pd.concat([close.iloc[:1], close])
+    with pytest.raises(ValueError, match="不可重複"):
+        compute_mom_6_1(duplicated)
+
+
 def test_mom_6_1_shift_is_by_session_not_calendar_day():
     """跨越長假時，位移必須是交易日列數，不是日曆天數。"""
     sessions = pd.DatetimeIndex(
@@ -248,6 +256,33 @@ def test_both_pit_paths_agree_at_a_month_end():
     from_master = pit_common_stock_mask(master, "2006-06-30", ids)
     from_history = pit_common_stock_mask_from_universe_history(history, "2006-06-30", ids)
     pd.testing.assert_series_equal(from_master, from_history)
+
+
+def test_disposition_restriction_frame_expands_inclusive_trading_sessions():
+    sessions = pd.DatetimeIndex(["2006-01-02", "2006-01-03", "2006-01-06"])
+    events = pd.DataFrame({
+        "stock_id": ["1101"],
+        "announce_date": ["2006-01-01"],
+        "start_date": ["2006-01-03"],
+        "end_date": ["2006-01-06"],
+        "market": ["TWSE"],
+    })
+    restricted = disposition_restriction_frame(events, sessions, ["1101", "1102"])
+    assert not restricted.loc["2006-01-02", "1101"]
+    assert restricted.loc["2006-01-03", "1101"]
+    assert restricted.loc["2006-01-06", "1101"]
+    assert not restricted["1102"].any()
+
+
+def test_disposition_restriction_frame_rejects_future_announcement():
+    events = pd.DataFrame({
+        "stock_id": ["1101"],
+        "announce_date": ["2006-01-04"],
+        "start_date": ["2006-01-03"],
+        "end_date": ["2006-01-06"],
+    })
+    with pytest.raises(ValueError, match="前視"):
+        disposition_restriction_frame(events, ["2006-01-03"], ["1101"])
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -458,6 +493,18 @@ def test_selection_rejects_missing_signal_values():
     signal = pd.Series({"1101": 1.0, "1102": np.nan})
     with pytest.raises(ValueError, match="缺值"):
         select_holdings(signal)
+
+
+def test_selection_rejects_infinite_signal_values():
+    signal = pd.Series({"1101": 1.0, "1102": np.inf})
+    with pytest.raises(ValueError, match="有限數值"):
+        select_holdings(signal)
+
+
+def test_selection_rejects_negative_max_positions():
+    signal = pd.Series({f"{1000 + i}": float(i) for i in range(10)})
+    with pytest.raises(ValueError, match="非負整數"):
+        select_holdings(signal, max_positions=-1)
 
 
 def test_no_entrants_when_universe_too_small_for_a_full_slot():

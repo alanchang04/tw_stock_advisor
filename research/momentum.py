@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from typing import Iterable
 
+import numpy as np
 import pandas as pd
 
 # ── SPEC §7.1 universe 門檻 ───────────────────────────────────────────
@@ -86,6 +87,10 @@ def compute_mom_6_1(adjusted_close: pd.DataFrame) -> pd.DataFrame:
     但它只讀 ``t-20`` 與 ``t-120``，永遠不碰 ``t`` 之後的列，因此不引入
     look-ahead。成交價另用未還原原始價，見 SPEC §7.5。
     """
+    if adjusted_close.index.has_duplicates:
+        raise ValueError("adjusted_close 交易日不可重複，否則位移語意不唯一")
+    if adjusted_close.columns.has_duplicates:
+        raise ValueError("adjusted_close stock_id 不可重複，否則橫斷面排名不唯一")
     if not adjusted_close.index.is_monotonic_increasing:
         raise ValueError("adjusted_close 必須按交易日升冪排序，否則位移語意錯誤")
     return (
@@ -197,6 +202,56 @@ def pit_common_stock_mask_from_universe_history(
     return pd.Series([sid in eligible for sid in ids], index=ids, dtype=bool)
 
 
+def disposition_restriction_frame(
+    events: pd.DataFrame,
+    trading_days: Iterable,
+    stock_ids: Iterable[str],
+) -> pd.DataFrame:
+    """把 released D6 處置事件展開成交易日限制矩陣（True＝處置中）。
+
+    事件必須至少含 ``stock_id``、``announce_date``、``start_date``、``end_date``。
+    公告日晚於生效日會直接拒絕：若仍把該事件回填到較早日期，就會把未來公告
+    洩漏進 PIT universe。區間採兩端皆含，且只展開在實際交易日曆上。
+
+    這個 frame 只代表 TWSE ``punish``（處置）範圍；停止交易、全額交割等其他
+    investability 欄位仍須由呼叫端另外合併，不能把本函式的輸出宣稱為完整 §7.1.6。
+    """
+    required = {"stock_id", "announce_date", "start_date", "end_date"}
+    missing = required - set(events.columns)
+    if missing:
+        raise ValueError(f"處置事件缺少必要欄位: {sorted(missing)}")
+
+    idx = _trading_index(trading_days)
+    ids = pd.Index([str(sid) for sid in stock_ids], dtype=object)
+    if ids.has_duplicates:
+        raise ValueError("stock_ids 不可重複")
+    restricted = pd.DataFrame(False, index=idx, columns=ids, dtype=bool)
+    if events.empty or idx.empty or ids.empty:
+        return restricted
+
+    normalized = events.copy()
+    normalized["stock_id"] = normalized["stock_id"].astype(str)
+    for column in ("announce_date", "start_date", "end_date"):
+        normalized[column] = pd.to_datetime(normalized[column], errors="coerce")
+    if normalized[list(required - {"stock_id"})].isna().any().any():
+        raise ValueError("處置事件日期不可為空或無法解析")
+    if (normalized["announce_date"] > normalized["start_date"]).any():
+        raise ValueError("處置事件公告日晚於生效日；不得以前視方式回填限制")
+    if (normalized["start_date"] > normalized["end_date"]).any():
+        raise ValueError("處置事件 start_date 不可晚於 end_date")
+    if "market" in normalized.columns and normalized["market"].ne("TWSE").any():
+        raise ValueError("MOM-1 D6 restriction frame 只接受 TWSE 事件")
+
+    known = set(ids)
+    for event in normalized.itertuples(index=False):
+        sid = str(event.stock_id)
+        if sid not in known:
+            continue
+        active = (idx >= pd.Timestamp(event.start_date)) & (idx <= pd.Timestamp(event.end_date))
+        restricted.loc[active, sid] = True
+    return restricted
+
+
 def eligible_universe(
     *,
     as_of,
@@ -230,12 +285,37 @@ def eligible_universe(
     - **缺值**：要求 20 個 session 全部有值（不足即淘汰），因為 §7.1.7 明定
       缺值不得補 0；對缺幾天就改用較短窗平均，等於默默放寬流動性門檻。
 
-    ⑥``restricted`` 為當日不可交易旗標（True＝不可成交）。目前 TWSE
-    2005~2014 並沒有這份資料（見 MOM1_ENGINE_READINESS.md 的資料缺陷），
-    因此必須顯式傳 ``allow_missing_restrictions=True`` 才能在缺它的情況下
-    繼續——讓「這條規則還沒被套用」永遠是一個刻意的決定。
+    ⑥``restricted`` 為當日不可交易旗標（True＝不可成交）。released D6 已能提供
+    TWSE 處置事件，但停止交易／全額交割仍不完整；呼叫端必須把各來源合併後傳入。
+    若完全沒有資料，必須顯式傳 ``allow_missing_restrictions=True`` 才能繼續——
+    讓「這條規則還沒被完整套用」永遠是一個刻意的決定。
     """
     as_of = pd.Timestamp(as_of)
+    panels = {
+        "adjusted_close": adjusted_close,
+        "raw_close": raw_close,
+        "turnover": turnover,
+        "signal": signal,
+    }
+    for name, panel in panels.items():
+        if panel.index.has_duplicates:
+            raise ValueError(f"{name} 交易日不可重複")
+        if panel.columns.has_duplicates:
+            raise ValueError(f"{name} stock_id 不可重複")
+        if not panel.index.is_monotonic_increasing:
+            raise ValueError(f"{name} 必須按交易日升冪排序")
+        if as_of not in panel.index:
+            raise ValueError(f"{name} 查無決策日 {as_of.date()}")
+
+    stock_ids = adjusted_close.columns
+    if not all(isinstance(stock_id, str) for stock_id in stock_ids):
+        raise ValueError("所有 panel 的 stock_id 欄名必須先正規化為字串")
+    expected_ids = set(stock_ids)
+    for name in ("raw_close", "turnover", "signal"):
+        actual_ids = set(panels[name].columns)
+        if actual_ids != expected_ids:
+            raise ValueError(f"{name} stock_id 集合必須與 adjusted_close 完全一致")
+
     if restricted is None and not allow_missing_restrictions:
         raise ValueError(
             "SPEC §7.1.6 要求排除處置／停止交易／全額交割等不可成交股票；"
@@ -243,7 +323,6 @@ def eligible_universe(
             "並在報告中揭露這個缺口"
         )
 
-    stock_ids = adjusted_close.columns
     mask = pit_mask.reindex(stock_ids).fillna(False).astype(bool)
 
     history = adjusted_close.loc[:as_of].notna().sum() >= MIN_HISTORY_SESSIONS
@@ -298,9 +377,14 @@ def deterministic_rank(signal_values: pd.Series) -> pd.Series:
     DataFrame 的欄位排列上——兩者都不符合規格。建立顯式全序才能讓
     tie-break 真正決定「同分時誰入選」，且與輸入順序無關。
     """
+    if signal_values.index.has_duplicates:
+        raise ValueError("訊號 stock_id 不可重複")
     if signal_values.isna().any():
         raise ValueError("訊號有缺值；§7.1.7 要求缺值不得進入排名，也不得補 0")
-    ordered = sorted(signal_values.index, key=lambda sid: (-signal_values[sid], str(sid)))
+    numeric = pd.to_numeric(signal_values, errors="coerce")
+    if numeric.isna().any() or not np.isfinite(numeric.to_numpy(dtype=float)).all():
+        raise ValueError("訊號必須是有限數值，NaN／無限值不得進入排名")
+    ordered = sorted(numeric.index, key=lambda sid: (-numeric[sid], str(sid)))
     return pd.Series({sid: i + 1 for i, sid in enumerate(ordered)}, dtype=int)
 
 
@@ -328,8 +412,12 @@ def select_holdings(
     剩餘名額才給新進場者。理由是 §7.6 把賣出觸發條件列舉完畢，
     「排名跌出前 20%」是唯一與排名有關的賣出理由；若讓新進場者擠掉一檔
     仍在前 20% 的持股，等於新增一條規格沒有的賣出規則，也抵銷 buffer
-    本來要降低換手的目的。這個判讀已列入 readiness 報告的待確認事項。
+    本來要降低換手的目的。此優先序已在 2026-08-12 凍結寫入策略規格。
     """
+    if max_positions is not None and (
+        not isinstance(max_positions, int) or isinstance(max_positions, bool) or max_positions < 0
+    ):
+        raise ValueError("max_positions 必須是非負整數或 None")
     rank = deterministic_rank(signal_values)
     n = len(rank)
     entry_cutoff = _cutoff(n, ENTRY_TOP_FRAC)
