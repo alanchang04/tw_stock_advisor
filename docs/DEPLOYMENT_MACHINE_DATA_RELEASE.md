@@ -47,6 +47,10 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File `
   .\scripts\verify_data_release.ps1
 ```
 
+The verifier uses `.venv-repro` or `.venv` when available. On a fresh Windows
+checkout with no Python installation, it automatically falls back to native
+PowerShell SHA-256 verification.
+
 Success requires `passed: true`, 12,661 verified files, collection SHA-256
 `44EAF107359CA2754A7407A062E4ABD1A1F61A16298C6816E11994EEF604CD1E`,
 and all eight component checks passing.

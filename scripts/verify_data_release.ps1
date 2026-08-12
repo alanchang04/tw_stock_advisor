@@ -1,6 +1,7 @@
 param(
     [string]$RepoRoot = (Split-Path -Parent $PSScriptRoot),
-    [string]$Descriptor = "reports/data_releases/tw_stock_data_release_2005_2014_r1.json"
+    [string]$Descriptor = "reports/data_releases/tw_stock_data_release_2005_2014_r1.json",
+    [string]$Python = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -14,18 +15,52 @@ if ($actualManifestHash -ne $release.transfer.manifest_sha256) {
     throw "transfer manifest SHA-256 mismatch"
 }
 
-$python = Join-Path $repo ".venv-repro/Scripts/python.exe"
-if (-not (Test-Path -LiteralPath $python)) {
-    $python = Join-Path $repo ".venv/Scripts/python.exe"
+$pythonCandidates = @()
+if ($Python) {
+    $pythonCandidates += $Python
 }
-if (-not (Test-Path -LiteralPath $python)) {
-    $python = (Get-Command python -ErrorAction Stop).Source
+$pythonCandidates += (Join-Path $repo ".venv-repro/Scripts/python.exe")
+$pythonCandidates += (Join-Path $repo ".venv/Scripts/python.exe")
+$python = $pythonCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+
+$transfer = Get-Content -Raw -Encoding utf8 $transferPath | ConvertFrom-Json
+if ($transfer.collection_sha256 -ne $release.transfer.collection_sha256) {
+    throw "transfer collection SHA-256 does not match the release descriptor"
 }
 
-& $python (Join-Path $repo "scripts/build_data_transfer_manifest.py") verify `
-    --base $repo --manifest $transferPath
-if ($LASTEXITCODE -ne 0) {
-    throw "release file verification failed"
+if ($python) {
+    & $python (Join-Path $repo "scripts/build_data_transfer_manifest.py") verify `
+        --base $repo --manifest $transferPath
+    if ($LASTEXITCODE -ne 0) {
+        throw "release file verification failed"
+    }
+}
+else {
+    $missing = [System.Collections.Generic.List[string]]::new()
+    $mismatched = [System.Collections.Generic.List[string]]::new()
+    foreach ($file in $transfer.files) {
+        $path = Join-Path $repo $file.path
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+            $missing.Add($file.path)
+            continue
+        }
+        $item = Get-Item -LiteralPath $path
+        $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+        if ($item.Length -ne $file.bytes -or $hash -ne $file.sha256) {
+            $mismatched.Add($file.path)
+        }
+    }
+    if ($missing.Count -gt 0 -or $mismatched.Count -gt 0) {
+        throw "release verification failed: missing=$($missing.Count), mismatched=$($mismatched.Count)"
+    }
+    [PSCustomObject]@{
+        passed = $true
+        verifier = "powershell_sha256_fallback"
+        checked_files = $transfer.file_count
+        missing = 0
+        mismatched = 0
+        collection_sha256 = $transfer.collection_sha256
+    } | ConvertTo-Json -Depth 3
 }
 
 $componentResults = foreach ($component in $release.components) {
