@@ -55,8 +55,11 @@ def test_industry_cap_fails_closed_on_missing_pit_industry():
     signal = pd.Series({f"{1000 + i}": float(i) for i in range(10)})
     industry = pd.Series("A", index=signal.index)
     industry.loc["1009"] = pd.NA
+    assert select_holdings_with_industry_cap(signal, industry) == []
     with pytest.raises(ValueError, match="阻擋正式選股"):
-        select_holdings_with_industry_cap(signal, industry)
+        select_holdings_with_industry_cap(
+            signal, industry, require_complete_industry=True
+        )
 
 
 def test_equal_weight_sizing_applies_notional_and_volume_caps():

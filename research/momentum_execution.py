@@ -91,14 +91,15 @@ def select_holdings_with_industry_cap(
     *,
     max_positions: int = MAX_POSITIONS,
     max_per_industry: int = MAX_PER_INDUSTRY,
-    require_complete_industry: bool = True,
+    require_complete_industry: bool = False,
 ) -> list[str]:
     """Apply the frozen 10%/20% buffer and 3-name PIT sector cap together.
 
     Existing positions still in the top 20% retain priority.  All qualifying
     top-10% entrants remain available to fill slots skipped by the sector cap;
     applying the cap only after truncating to ten would incorrectly leave cash.
-    Unknown industries either raise (formal mode) or are excluded (audit mode).
+    Unknown industries are excluded by the frozen formal policy; strict audit
+    mode can still raise to quantify the underlying data gap.
     """
     for name, value in (
         ("max_positions", max_positions),

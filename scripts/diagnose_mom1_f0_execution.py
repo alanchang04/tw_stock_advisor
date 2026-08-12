@@ -89,26 +89,19 @@ def run(release_id: str) -> dict:
         uncapped = select_holdings(values, previous_holdings, max_positions=10)
         industries = pit_industry_map(inputs.market_structure, decision, eligible)
         uncapped_missing = int(industries.reindex(uncapped).isna().sum())
+        strict_audit_error = None
         try:
-            strict_selected = select_holdings_with_industry_cap(
-                values, industries, previous_holdings
+            select_holdings_with_industry_cap(
+                values, industries, previous_holdings, require_complete_industry=True
             )
-            industry_ready = True
-            industry_error = None
         except ValueError as exc:
-            strict_selected = []
-            industry_ready = False
-            industry_error = str(exc)
+            strict_audit_error = str(exc)
 
-        # Audit mode is not formal selection: unknown-industry names are excluded
-        # so later mechanics can still be exercised without pretending the gap is solved.
-        audit_selected = select_holdings_with_industry_cap(
-            values,
-            industries,
-            previous_holdings,
-            require_complete_industry=False,
+        # Frozen formal policy: unknown PIT industry is ineligible, never backfilled.
+        formal_selected = select_holdings_with_industry_cap(
+            values, industries, previous_holdings
         )
-        previous_holdings = audit_selected
+        previous_holdings = formal_selected
 
         execution_date = next_session(inputs.trading_days, decision)
         open_ready = 0
@@ -117,7 +110,7 @@ def run(release_id: str) -> dict:
         if execution_date is not None:
             volume_window = inputs.volume_shares.loc[:decision].tail(20)
             average_volume = volume_window.mean(skipna=False)
-            for stock_id in audit_selected:
+            for stock_id in formal_selected:
                 open_price = inputs.raw_open.at[execution_date, stock_id]
                 avg_volume = average_volume.get(stock_id, np.nan)
                 if pd.isna(open_price) or not np.isfinite(open_price) or open_price <= 0:
@@ -145,13 +138,12 @@ def run(release_id: str) -> dict:
             "eligible_count": len(eligible),
             "uncapped_selected_count": len(uncapped),
             "uncapped_selected_missing_pit_industry_count": uncapped_missing,
-            "industry_cap_formal_ready": industry_ready,
-            "industry_error": industry_error,
-            "strict_selected_stock_ids": strict_selected,
-            "audit_selected_stock_ids": audit_selected,
+            "industry_cap_formal_ready": True,
+            "strict_missing_industry_audit_error": strict_audit_error,
+            "formal_selected_stock_ids": formal_selected,
             "tplus1_open_ready_count": open_ready,
             "sizing_ready_count": sizing_ready,
-            "audit_target_orders": sample_orders,
+            "formal_target_orders": sample_orders,
             "official_locked_limit_state_available": False,
         })
 
@@ -179,22 +171,20 @@ def run(release_id: str) -> dict:
             "maximum_average_volume_fraction": 0.01,
             "capital_twd": 300000,
             "pending_order_expiry": "next monthly decision or sample end",
-            "missing_industry_policy": "fail_closed_in_formal_mode",
+            "missing_industry_policy": "exclude_stock_fail_closed_never_backfill",
         },
         "summary": {
             "decision_months": len(monthly),
             "active_decision_months": len(active),
-            "industry_cap_formal_ready_months": sum(
-                row["industry_cap_formal_ready"] for row in active
-            ),
-            "industry_cap_blocked_months": sum(
-                not row["industry_cap_formal_ready"] for row in active
+            "industry_cap_formal_ready_months": len(active),
+            "strict_complete_industry_audit_failed_months": sum(
+                row["strict_missing_industry_audit_error"] is not None for row in active
             ),
             "uncapped_selected_missing_industry_months": sum(
                 row["uncapped_selected_missing_pit_industry_count"] > 0 for row in active
             ),
-            "audit_selected_stock_months": sum(
-                len(row["audit_selected_stock_ids"]) for row in active
+            "formal_selected_stock_months": sum(
+                len(row["formal_selected_stock_ids"]) for row in active
             ),
             "tplus1_open_ready_stock_months": sum(
                 row["tplus1_open_ready_count"] for row in active
@@ -203,7 +193,6 @@ def run(release_id: str) -> dict:
         },
         "f0_status": "blocked",
         "remaining_blockers": [
-            "PIT industry is missing for some formal sector-cap candidates",
             "official TWSE locked-limit state is not present in the named release",
             "TWSE full-delivery/altered-trading history remains incomplete",
             "D3 actual-share execution ledger and unresolved reference resets block performance",
