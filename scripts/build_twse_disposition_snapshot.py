@@ -134,6 +134,14 @@ def main() -> None:
             temporary / "twse_disposition_source_status.parquet", index=False,
         )
         manifest = build_manifest(temporary, ROOT)
+        if not manifest["git"].get("commit"):
+            raise RuntimeError(
+                "release snapshot requires a readable Git commit; build from a trusted worktree"
+            )
+        if manifest["git"].get("dirty"):
+            raise RuntimeError(
+                "release snapshot requires a clean Git worktree"
+            )
         manifest.update({
             "snapshot_id": args.snapshot_id,
             "snapshot_dir": target.resolve().relative_to(
