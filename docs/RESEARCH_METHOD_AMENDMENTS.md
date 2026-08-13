@@ -43,6 +43,12 @@
 | M11 | 不得以執行面優化搶救 edge 不足的策略 | 已採納（規範） | — | — |
 | M12 | 事前指定主要觀察窗，其餘標為探索性 | 已採納（規範） | — | — |
 | M13 | 前瞻報酬不得以決策後才知道的合格條件過濾 | 已採納 | `research.fama_macbeth:build_forward_panel` | `tests/test_fama_macbeth.py::TestBuildForwardPanel` |
+| M14 | 因子須用真實可取得時點，不是資料所屬月份 | 已採納（規範） | — | — |
+| M15 | 延遲資訊：前瞻報酬須晚於確認窗結束 | 已採納 | `research.policy:landmark_confirmation`、`research.policy:assert_information_precedes_decision` | `tests/test_policy.py::TestLandmarkConfirmation`、`tests/test_policy.py::TestInformationOrderingGuard` |
+| M16 | 不得以未來事件篩選樣本，須比較完整 policy | 已採納 | `research.policy:wait_for_trigger_entry` | `tests/test_policy.py::TestWaitForTriggerEntry` |
+| M17 | 時機訊號的 MAE 須與曝險並列 | 已採納 | `research.policy:exposure_summary` | `tests/test_policy.py::TestExposureSummary` |
+| M18 | forward 資料一經檢視即成為 development 資料 | 已採納（規範） | — | — |
+| M19 | 覆蓋率斷點不得讀成 0 | 已採納（規範） | — | — |
 
 ---
 
@@ -408,3 +414,172 @@ Fama-MacBeth 的係數是**多空價差**，不是任何人拿得到的報酬。
 
 **結論：三個因子都不構成可部署的策略**（只做多皆不覆蓋經濟門檻），
 但月營收構成一個值得在乾淨期間前瞻驗證的假說。
+
+
+---
+
+## M14 — 因子須用真實可取得時點
+
+**主張成立。** 月營收不能只問「屬於哪個月」，要問**市場最早何時實際取得**。
+
+本專案目前的做法是保守估計（次月 10 日後第一個交易日，或公布月月末），
+方向偏保守不會前視，但會系統性錯過初期反應——這是**偽陰性風險**，
+已列為已知限制。
+
+**規則**：任何因子都必須在登記時寫明三個時點，缺一不可：
+
+| 時點 | H12 的例子 |
+|---|---|
+| information date | 營收實際可取得日 |
+| confirmation window | 其後 20 個交易日 |
+| decision date | 確認窗結束、資訊完整之日 |
+
+若要推翻既有的偽陰性判定，正確做法是補逐檔實際公布日重測，
+不是放寬統計門檻。
+
+---
+
+## M15 — 延遲資訊：前瞻報酬須晚於確認窗結束
+
+**主張成立，而且這是本輪最危險的一條。**
+
+H12 的「營收公布後 20 個交易日內投信累計買超 100 張」，
+**在營收公布當日並不知道**。若一邊用那 20 天決定 `Confirm`、
+一邊把那 20 天的報酬算進績效，就是前視——與先前那個把效果放大約 8 倍的
+「只取後來有 B2 的 B1」是同一類錯誤。
+
+**規則**：採 landmark design。
+
+```
+營收事件
+   │
+   ├──── 20 個交易日：觀察法人 ────┐
+   │                               │
+                              decision date
+                          （此刻 Confirm 才確定）
+                                   │
+                                   ▼
+                        前瞻報酬自此之後起算
+```
+
+`assert_information_precedes_decision` 在 `forward_start <= information_end`
+時直接拋錯。**這條不是提醒，是守門。**
+
+---
+
+## M16 — 不得以未來事件篩選樣本，須比較完整 policy
+
+**主張成立。** 「只取後來有出現 B1 的股票來比較」與
+「只取後來有 B2 的 B1」本質相同。
+
+**規則**：比較的必須是兩個**當下可執行**的 policy：
+
+| policy | 內容 |
+|---|---|
+| F | 條件成立 → T+1 買 |
+| F+timing | 條件成立 → 最多等 W 日；期間觸發就買，**W 日內未觸發則依事前規則不買** |
+
+`W` 與「沒觸發怎麼辦」都必須事前固定，兩者都是 policy 的一部分。
+**沒觸發的候選必須留在結果裡**（`entered=False`），不得從樣本消失。
+
+同時要承認測的是「等待確認的完整 policy」，
+而不是「同一筆交易進場漂亮一點」——那是兩個不同的命題。
+
+---
+
+## M17 — 時機訊號的 MAE 須與曝險並列
+
+**主張成立，而且沒有它會得到荒謬結論。**
+
+等越久、跳過越多股票，MAE 天生越好看。極端情況：**永遠不買的 MAE 是完美的 0%。**
+
+**規則**：任何以 MAE／time-to-profit 為主要指標的研究，
+必須同時報告下列全部，缺一不可：
+
+- `participation_rate`（進場比例）
+- `mean_wait_sessions` / `median_wait_sessions`
+- 等待期間放棄的報酬（missed return）
+- 最終 total return
+
+### 附帶：MAE 的統計檢定沒有想像中麻煩
+
+先前把「episode 內的極值」誤當成「全樣本的極值統計量」。
+每筆交易的 MAE 是一個普通的純量結果，研究的是 `Distribution(MAE_i)`，
+不是「全部交易裡最慘的那一筆」。因此 block／stationary bootstrap 仍然適用，
+只是**重抽單位必須是整個 episode 或整個日曆區塊**，不得把同一筆交易的
+Day1／Day2／Day3 拆開重抽。
+
+主要指標事前鎖定為 **median MAE 的組間差**（報酬分布極度厚尾，
+中位數比平均穩健），另附一個事前指定的下尾分位（Q25）。
+**不得** q10／q20／q25／q33／q50 全看——那又是多重檢定。
+
+time-to-profit 的門檻用**完整換手成本**（1.185%）而非 +3%／+5%／+10%，
+因為後者是三個自由度而成本是外生已知的。以設限平均而非 Cox hazard ratio
+為主要統計量：時機訊號的效果很可能集中在前段，那會直接違反
+proportional hazards 假設。
+
+---
+
+## M18 — forward 資料一經檢視即成為 development 資料
+
+**主張成立，而且是本專案最容易再犯的一條。**
+
+「反正都是 forward data，所以永遠乾淨」是錯的。
+
+```
+2026-08-14   MOM-1 凍結
+     ↓
+2026-11-30   看了結果
+     ↓
+發現熊市很差 → 加入 MA200+ATR 濾網
+     ↓
+8/14~11/30 從此是 MOM-2 的 development 資料
+MOM-2 真正乾淨的 OOS 從 2026-12-01 才開始
+```
+
+**規則**：`SPLIT_ACCESS_LOG.md` 必須記錄每一次 forward 結果的檢視日期。
+任何在檢視後所做的模型修改，其乾淨 OOS 起點一律推到檢視日之後。
+
+### 附帶：平行跑多條策略沒問題，但「事後挑贏的那條」是一次選擇
+
+同時對 MOM-1 與 H11~H15 做 forward paper trading **不會**因為共用同一段
+未來時間而自動污染。真正的 data snooping 發生在
+「看結果 → 選擇／修改模型 → 再把同一批資料稱為 OOS」。
+
+但若一年後以「MOM 比較強」為由選擇 MOM，**那個選擇本身就是一次
+model selection**，其結果是 `max(MOM, Fundamental)` 而非單一模型的 OOS 證據，
+必須計入 n_trials。
+
+---
+
+## M19 — 覆蓋率斷點不得讀成 0
+
+**主張成立。** 法人資料 TWSE 自 2015 起、**TPEX 自 2018 起**。
+H12 若把 TPEX 2015~2017 的缺值讀成 `Confirm = 0`，
+時間、市場別與法人訊號會糾纏在一起，係數無法解釋。
+
+**規則**：涉及覆蓋率有斷點的資料時，二擇一並在報告中言明：
+
+1. 限制在 **common-coverage universe**（本例：2018 起，或全期只用 TWSE）
+2. 或 TWSE／TPEX **分開報**，不合併
+
+專案既有規則「缺值不得補 0」在**面板**情境下要再強化一層：
+缺值不只不能補 0，**該觀測本身要退出橫斷面**，否則它會變成對照組的一員。
+
+---
+
+## 附錄：`long_only = (1 − p) × b` 的適用條件
+
+這個換算**只在**下列條件全部成立時有效：
+
+- `b` 來自**二元** dummy 的迴歸係數
+- **同一個等權樣本**
+- **沒有其他控制變數**
+
+一旦 `b` 是控制規模後的 partial regression coefficient，
+**就不能再機械地換算成實際的只做多組合報酬**。
+
+`docs/RESEARCH_STATUS_2026-08-14.md` §3.1 的表格已改用未控制規格，
+符合上述條件；但這個限制必須寫死，避免日後有人拿控制後的係數照樣換算。
+`research.fama_macbeth:long_only_excess` 是逐期直接計算而非套用換算，
+不受此限——這也是它存在的理由。
