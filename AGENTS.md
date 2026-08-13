@@ -21,8 +21,23 @@ the role-specific instructions for the agent you are running.
 
 ## Current ownership
 
-- Codex: Data Authority and integration owner.
-- Claude: MOM-1 strategy-engine research in a separate worktree.
+**Updated 2026-08-13: the Codex/Claude split is void — Codex ran out of quota.**
 
-The dated assignment and acceptance criteria are in
-`docs/AI_COLLABORATION_PLAYBOOK.md`.
+- Codex: **inactive**. No longer Data Authority, no longer integration owner.
+- Claude: owns data, engine research, and integration. Two Claude instances run
+  on two machines; the shared-rules section above still binds them.
+
+Data-authority *rules* survive the owner going away. Raw data and snapshots stay
+immutable, releases stay manifest-identified, and a machine that did not produce
+a raw file still verifies it by manifest instead of re-downloading — gzip bytes
+differ per machine, so re-downloading breaks cross-machine identity.
+
+### Two Claude instances, one remote
+
+`agent/swing-margin-research` is the coordination branch and both instances push
+to it. Before starting work: `git fetch` and check whether the other instance
+pushed. `app.py` has been touched by both instances on the same day; treat it as
+a shared file and re-check it before editing.
+
+The dated assignment history is in `docs/AI_COLLABORATION_PLAYBOOK.md`; entries
+naming Codex as owner are historical and no longer binding.

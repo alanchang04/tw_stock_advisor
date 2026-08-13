@@ -1,10 +1,24 @@
 # Claude Assignment: MOM-1 Engine Readiness
 
+> **Updated 2026-08-13 — Codex is out of quota; the two-agent split is void.**
+> Integration is no longer owned by Codex. The branch restriction below is
+> relaxed: use the coordination branch `agent/swing-margin-research`, or a
+> feature branch when the work is separable.
+>
+> **Two Claude instances still run on two machines.** `git fetch` before
+> starting and check what the other instance pushed. `app.py` is a shared file.
+> Never force-push the coordination branch.
+>
+> **The boundaries below still bind**, including the holdout ban. They exist
+> because looking at holdout returns destroys the evidence, not because Codex
+> was watching.
+>
+> **Item 1 is already done** — `analyze_momentum_signal_overlap.py` now uses the
+> D1 PIT security master. Items 2–4 continue; `reports/MOM1_ENGINE_READINESS.md`
+> already exists and should be extended rather than replaced.
+
 Read `AGENTS.md`, `docs/AI_COLLABORATION_PLAYBOOK.md`, and
 `docs/SPEC_REVERSAL_AND_MULTI_STRATEGY.md` before starting.
-
-Work only in branch `research/mom1-engine` and in a checkout that is separate
-from the Codex Data Authority checkout.
 
 ## Assignment
 
@@ -40,5 +54,6 @@ from the Codex Data Authority checkout.
   that exact ID in the readiness report.
 - The readiness report clearly separates code defects, data defects, and open
   research choices.
-- Changes are committed to `research/mom1-engine`; they are not merged into the
-  Data Authority branch by Claude.
+- Changes are committed to `agent/swing-margin-research` (or a feature branch
+  merged into it). The former "do not merge into the Data Authority branch"
+  rule no longer applies — there is no Data Authority.

@@ -1,8 +1,23 @@
 # AI Collaboration Playbook
 
-Date: 2026-08-12
+Date: 2026-08-12（**2026-08-13 起部分失效，見下方狀態說明**）
 
 Coordination branch: `agent/swing-margin-research`
+
+## 2026-08-13 狀態更新：Codex 額度用盡
+
+下面的 Codex／Claude 分工表、worktree 建立步驟與「Codex reviews and integrates」
+交接流程**已失效**，保留作為歷史紀錄。實際現況：
+
+- Codex 不再運作；資料權責與整合改由 Claude 承擔。
+- 兩台機器各有一個 Claude 實例，**都推同一條協調分支**。
+- DATA-1／DATA-2／DATA-3 已完成（D4/D5、處置回補、`tw_stock_data_2005_2014_r2`）。
+- Claude 的 MOM1-0 已交付 `reports/MOM1_ENGINE_READINESS.md`；F0 執行稽核亦已提交。
+
+**仍然有效且不因 Codex 離開而放寬的**：資料釋出閘門（§Data release gate）、
+`usage_policy.blocked` 的 holdout 禁令、不可變 raw／snapshot、
+以及「不同機器靠 manifest 驗證而非重新下載」。這些是為了資料完整性，
+不是為了配合某個 agent 的存在。
 
 ## Operating decision
 
