@@ -3,7 +3,7 @@ param(
     [string]$Python = "",
     [string]$ReleaseId = "tw_stock_data_2005_2014_r2",
     [string]$Output = "reports/mom1_f0_execution_readiness.json",
-    [string]$ExpectedSha256 = "BF815DBF0264E49D1398447A7E3F2D48B7A6E7C57ED2AD4111CEA90CDAB6E260"
+    [string]$ExpectedSha256 = "0A46959ECA385C4A53D399458976EF9035C80D6F21B7CA52EB64EAF45CC40D1D"
 )
 
 $ErrorActionPreference = "Stop"

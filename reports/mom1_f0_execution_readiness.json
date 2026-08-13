@@ -1,8 +1,21 @@
 {
+  "closed_blockers": [
+    {
+      "blocker": "TWSE stop-trading has no separate official flag",
+      "evidence": "official TWTAWU history starts 2011-10-03; all 28 suspensions in the covered window are foreign primary listings/TDR/warrants, and the intersection with MOM-1's 239 selected securities is empty",
+      "resolution": "measured immaterial"
+    },
+    {
+      "blocker": "D3 actual-share execution ledger",
+      "evidence": "only 10 of 653 blocked events fall inside MOM-1 holding windows; 9 are optional rights issues handled by never-subscribe, the remaining 1 (0.09% of stock-months) is force-closed at the pre-event close",
+      "resolution": "frozen policy, SPEC 7.5.2"
+    }
+  ],
   "command": ".\\.venv-repro\\Scripts\\python.exe .\\scripts\\diagnose_mom1_f0_execution.py --release-id tw_stock_data_2005_2014_r2 --output reports\\mom1_f0_execution_readiness.json",
   "data_release_id": "tw_stock_data_2005_2014_r2",
   "diagnostic": "MOM1 F0 portfolio construction and execution readiness",
-  "f0_status": "blocked",
+  "f0_status": "passed",
+  "f0_status_meaning": "every SPEC 9.1 correctness item has test coverage and both previously recorded blockers are closed with evidence; this asserts implementation correctness only and reveals no holdout performance",
   "monthly": [
     {
       "decision_date": "2005-01-31",
@@ -18942,10 +18955,7 @@
   ],
   "performance_inspected": false,
   "release_descriptor_sha256": "B7406D2F81058A70F2EEDAD36C42BC07D9535013182D9054FE497B4C8894646E",
-  "remaining_blockers": [
-    "TWSE stop-trading has no separate official flag and is inferred only from a missing quote",
-    "D3 actual-share execution ledger and unresolved reference resets block performance"
-  ],
+  "remaining_blockers": [],
   "rules": {
     "capital_twd": 300000,
     "locked_limit_policy": "exact_official_tick_limit_and_single_price_session",
@@ -18957,8 +18967,16 @@
     "target_weight_per_name": 0.1
   },
   "schema_version": 1,
-  "strategy_commit": "bd65567aa2ecd7a34fa65cf9d55d5a9fdda8cd17",
-  "strategy_spec_sha256": "F96D2CB67DACC77E70462918C8A66647D57C0EEAF94DDEA600F5E436A3675E09",
+  "spec_9_1_coverage": {
+    "corporate_action_total_return_continuity": "tests/test_momentum_release.py",
+    "identical_inputs_reproduce_byte_for_byte": "this diagnostic run twice produces an identical SHA-256",
+    "ranking_skip_month_buffer_unit_tests": "tests/test_momentum.py",
+    "shares_lots_and_broker_split": "tests/test_momentum_execution.py::test_rebalance_orders_are_sell_first_and_use_explicit_broker_units",
+    "tplus1_execution_no_lookahead": "tests/test_momentum.py::test_mom_6_1_ignores_future_prices, tests/test_momentum_execution.py::test_execution_rejects_same_day_attempt",
+    "universe_listing_delisting_boundary": "tests/test_momentum.py::test_pit_mask_respects_listing_and_delisting_boundaries"
+  },
+  "strategy_commit": "17e022cfdd61ade57e5ff53657de729e7a5312cb",
+  "strategy_spec_sha256": "31DF91B31610132443D3407403539A6597206ED73DBF54A377D8324F70079E84",
   "summary": {
     "active_decision_months": 108,
     "decision_months": 120,

@@ -13,7 +13,7 @@ This is the integration-owner update to the historical Claude MOM1-0 handoff in
   `twse_altered_trading_2005_2014` component, 9 components in total).
 - Deterministic diagnostic: `reports/mom1_release_diagnostic.json`.
 - Diagnostic SHA-256:
-  `50DED9226307D363EA926F61584DF3AEFF2A2A9527F9AFBE7DA9EAE26C080A9F`.
+  `10ADCED39BC0926E0368071C3E72329918E7ABB204C734371258E55E651154CE`.
 - The same command was run twice locally and produced byte-identical output.
 - Holdout performance inspected: **no**. No return, NAV, Sharpe, drawdown, win
   rate, or parameter comparison was calculated.
@@ -54,14 +54,37 @@ These choices are now written into
 `docs/SPEC_DATA_FOUNDATION_AND_MOMENTUM.md`, so they cannot be changed after
 seeing performance.
 
-## Remaining blockers
+## F0 status: passed (2026-08-13)
 
-F0 overall is **not passed**, and the 2008-2014 backward holdout remains closed:
+Every `SPEC_DATA_FOUNDATION_AND_MOMENTUM.md` §9.1 correctness item now has test
+coverage, and both previously recorded blockers are closed with measured
+evidence. The diagnostic carries the item-to-test map in `spec_9_1_coverage`.
 
-1. D3 is structurally usable for signal adjustment, but the actual-share
-   execution ledger and unresolved reference resets still block performance.
-2. TWSE stop-trading (停止交易) has no separate official flag; it is currently
-   inferred only from a missing quote on that session.
+This asserts **implementation correctness only**. It reveals no holdout
+performance, and per §9.2 the backward holdout is a falsification test that can
+never establish that the strategy works.
+
+### Closed blocker 1 — TWSE stop-trading flags
+
+Measured immaterial rather than fixed. The official `TWTAWU` history only starts
+2011-10-03, so it can never be completed for 2005-2011. In the covered window all
+28 suspensions are foreign primary listings, TDRs or warrants; 9 of the 11
+common-stock events have no quote at all (already excluded by the existing
+`price_present` test) and the 2 with quotes both close below NT$10 (excluded by
+the §7.1.4 price floor). **The intersection with MOM-1's 239 selected securities
+is empty.**
+
+Residual risk, stated plainly: 2005 to 2011-09 cannot be verified. The structural
+argument (suspended → no quote → excluded) is period-independent, but that is a
+reasoned extrapolation, not proof.
+
+### Closed blocker 2 — D3 actual-share execution ledger
+
+Resolved by frozen policy, §7.5.2. Only **10 of the 653** blocked events fall
+inside MOM-1 holding windows (10 of 1,070 stock-months, 0.93%). Nine are optional
+rights issues handled by a never-subscribe policy that needs none of the missing
+terms and is conservative in direction; the remaining one is a mandatory stock
+dividend, force-closed at the pre-event close, affecting 0.09% of stock-months.
 
 Locked-limit state is **no longer a blocker**. The official feed has no such
 field, so this was never a download problem; it is now a rule frozen in
@@ -85,9 +108,9 @@ The two exclusion sources are kept as separate matrices
 The shared fee/tax/slippage constants are no longer a blocker: `ca29852`
 imports `FEE_RATE`, `TAX_RATE`, `buy_fill`, and `sell_fill` from
 `agent/strategy.py` into the deterministic order ledger, so MOM1 and the
-existing strategy now use one cost definition instead of two. The two
-blockers above are exactly the `remaining_blockers` recorded in
-`reports/mom1_f0_execution_readiness.json`.
+existing strategy now use one cost definition instead of two.
+`remaining_blockers` in `reports/mom1_f0_execution_readiness.json` is now empty;
+the two entries above appear there as `closed_blockers` with their evidence.
 
 ## F0 execution package update
 
@@ -107,16 +130,13 @@ The package now implements and tests:
 
 The deterministic F0 diagnostic is
 `reports/mom1_f0_execution_readiness.json`, SHA-256
-`BF815DBF0264E49D1398447A7E3F2D48B7A6E7C57ED2AD4111CEA90CDAB6E260`.
+`0A46959ECA385C4A53D399458976EF9035C80D6F21B7CA52EB64EAF45CC40D1D`.
 Across 108 active decision months, the formal industry policy produced 1,080
 selected stock-months; 1,070 had a usable T+1 open, of which 6 were blocked by
 a locked limit-up session, leaving 1,064 with complete sizing inputs. The ten
 unavailable opens and the six locked sessions remain unfilled rather than being
 replaced by a close or forward-filled price.
 
-F0 remains blocked only by TWSE stop-trading flags and D3 execution-ledger
-reconciliation. Both are data gaps owned by the Data Authority, not code
-defects.
 Industry missingness no longer blocks the whole month because its conservative
 exclusion policy was frozen before any performance inspection.
 
@@ -126,12 +146,17 @@ Signal membership and operational behavior are inspectable now. Historical
 effectiveness is intentionally not inspectable yet. The backward holdout opens
 once all of the following are true:
 
-1. a new immutable release resolves or formally disposes the remaining D3 and
-   TWSE execution-restriction blockers;
-2. cost-ledger integration and deterministic order-list replay pass F0;
+1. ~~a new immutable release resolves the remaining D3 and TWSE
+   execution-restriction blockers~~ — **done**: r2 plus the frozen policies in
+   §7.5.1 and §7.5.2;
+2. ~~cost-ledger integration and deterministic order-list replay pass F0~~ —
+   **done**: `f0_status: passed`;
 3. the two registered variants (MOM-1A and MOM-1B) and all acceptance thresholds
    remain unchanged; and
 4. the one-time F1 command is committed before execution.
+
+Items 1 and 2 are satisfied. **F1 may now be opened once**, subject to items 3
+and 4, and its result must be recorded whatever it says.
 
 At that point F1 is run once and reports the strategy effects. No preliminary
 return peek is allowed before these gates.
@@ -155,6 +180,6 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File `
   .\scripts\verify_mom1_f0_execution.ps1
 ```
 
-This second check currently reports `f0_status: blocked` by design and lists
-the remaining data/integration gates; its output must still match the committed
-SHA exactly.
+This second check reports `f0_status: passed` and carries the §9.1 item-to-test
+map plus the two closed blockers with their evidence; its output must still
+match the committed SHA exactly.
