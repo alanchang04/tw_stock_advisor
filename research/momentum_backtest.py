@@ -7,11 +7,15 @@
 三個實作決定，全部由規格條文推得，不是自由選擇
 ------------------------------------------------
 
-1. **目標持股跨日持續，委託每個交易日重新推導。** 規格 §7.5 要求
-   「未成交單逐一實際交易日重試」「下一次月頻決策產生時，尚未成交的舊目標由新目標
-   取代」。因此本引擎不保存不可變的委託物件，而是保存**目標持股**；
-   每個交易日以當日開盤價重新推導委託。被擋下的部位隔日自然重試，
-   且一定用當日真實開盤價，不會出現「用昨天的價格假成交」。
+1. **目標股數在每次再平衡凍結，未成交的部分才逐日重試。** 規格 §7.3 是
+   **每月**再平衡、§7.5 要求「未成交單逐一實際交易日重試」。兩者合起來的意思是：
+   目標股數於該次再平衡的首個成交嘗試日決定後就固定，之後每個交易日只補未成交的差額。
+
+   **第一版寫錯成「每個交易日以當日開盤價重新推導目標股數」**，
+   於是目標股數隨價格逐日漂移，每天都產生一筆小額買賣——那是每日再平衡。
+   實測後果：每個決策月成交 38 筆（上限應為約 20），
+   holdout 成本被灌到本金的 18.8%~23.3%。單元測試沒抓到，因為 fixture 價格全程持平，
+   目標股數剛好不會漂移。**扁平價格的 fixture 無法偵測周轉率缺陷。**
 
 2. **sizing 用決策日收盤的 NAV 與決策日的 20 日均量，整月固定。**
    否則同一次再平衡會因為當日淨值波動而算出不同股數，變成沒有登記過的自由度。
@@ -35,8 +39,8 @@ from research.momentum import (
 )
 from research.momentum_corporate_actions import apply_corporate_action
 from research.momentum_execution import (
-    build_equal_weight_rebalance_orders, pit_industry_map,
-    select_holdings_with_industry_cap,
+    build_orders_from_target_shares, buy_fill, equal_weight_target_shares,
+    pit_industry_map, select_holdings_with_industry_cap,
 )
 
 CAPITAL_TWD = 300_000.0            # §7.4
@@ -170,6 +174,8 @@ def simulate(
     positions: dict[str, Position] = {}
     cash = float(capital)
     target_holdings: list[str] = []
+    # 本次再平衡凍結的目標股數；None 代表決策已下但尚未有可定價的成交嘗試日
+    frozen_target_shares: dict[str, int] | None = None
     sizing_nav = float(capital)
     average_volumes = pd.Series(dtype=float)
 
@@ -210,17 +216,29 @@ def simulate(
             orders = []
             if priced:
                 price_slice = prices.reindex(priced).astype(float)
-                volume_slice = average_volumes.reindex(priced)
-                missing_volume = [sid for sid in target_holdings
-                                  if sid in priced and not np.isfinite(
-                                      volume_slice.get(sid, np.nan))]
-                target_without_volume += len(missing_volume)
-                orders = build_equal_weight_rebalance_orders(
-                    target_holdings=[s for s in target_holdings if s in priced],
+                if frozen_target_shares is None:
+                    # 本次再平衡的第一個可定價交易日：決定目標股數並**凍結**
+                    volume_slice = average_volumes.reindex(priced)
+                    missing_volume = [sid for sid in target_holdings
+                                      if sid in priced and not np.isfinite(
+                                          volume_slice.get(sid, np.nan))]
+                    target_without_volume += len(missing_volume)
+                    frozen_target_shares = {
+                        sid: equal_weight_target_shares(
+                            executable_price=buy_fill(float(price_slice[sid])),
+                            nav=sizing_nav,
+                            average_volume_shares=float(
+                                volume_slice.get(sid, 0.0)
+                                if np.isfinite(volume_slice.get(sid, np.nan)) else 0.0),
+                        )
+                        for sid in target_holdings if sid in priced
+                    }
+                # 已凍結的目標股數只在下一次月頻決策時才會被取代
+                orders = build_orders_from_target_shares(
+                    target_shares={s: n for s, n in frozen_target_shares.items()
+                                   if s in priced},
                     current_shares={s: held[s] for s in priced if s in held},
-                    raw_open_prices=price_slice,
-                    average_volumes_shares=volume_slice.fillna(0.0).astype(float),
-                    nav=sizing_nav)
+                    raw_open_prices=price_slice)
             for order in orders:
                 ok, reason = _fillable(
                     side=order.side, stock_id=order.stock_id, session=session,
@@ -277,6 +295,8 @@ def simulate(
         eligible = pd.Index([])
         if risk_off:
             # §7.3：下一交易日開盤將目標曝險降為 0。回補要等下一個月頻決策日。
+            if target_holdings:
+                frozen_target_shares = None
             target_holdings = []
         elif session in decisions:
             pit_mask = pit_common_stock_mask(
@@ -296,6 +316,8 @@ def simulate(
             sizing_nav = nav
             volume_window = inputs.volume_shares.loc[:session].tail(LIQUIDITY_WINDOW)
             average_volumes = volume_window.mean(skipna=False)
+            # 新的月頻目標取代舊的，目標股數重新凍結（§7.5）
+            frozen_target_shares = None
 
         if session in decisions:
             monthly.append({

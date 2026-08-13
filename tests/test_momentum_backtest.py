@@ -208,6 +208,53 @@ class TestSpuriousSellGuard:
         assert result.diagnostics["fills"]["buy"] > 0     # 解鎖後仍然買到
 
 
+class TestRebalanceFrequency:
+    """§7.3 是**每月**再平衡。這一組測試存在，是因為第一版寫成了每日再平衡。
+
+    第一版每個交易日都用當日開盤價重算目標股數，股數隨價格漂移，於是每天都
+    產生一筆小額買賣。**扁平價格的 fixture 完全看不出來**——目標股數剛好不動。
+    因此這裡一律用會波動的價格。
+    """
+
+    @staticmethod
+    def moving_inputs(seed: int = 0):
+        inputs = build_inputs()
+        rng = np.random.default_rng(seed)
+        path = pd.DataFrame(
+            100.0 * np.cumprod(
+                1 + rng.normal(0.0002, 0.015, size=(len(SESSIONS), len(STOCKS))), axis=0),
+            index=SESSIONS, columns=STOCKS)
+        inputs.raw_close = path
+        inputs.raw_open = path
+        inputs.adjusted_close = path
+        return inputs
+
+    def test_fills_per_decision_month_stay_within_a_full_turnover(self):
+        """最多 10 檔全換＝約 20 筆／月。明顯超過就是在做每日再平衡。"""
+        result = run(self.moving_inputs())
+        months = max(result.diagnostics["decision_months"], 1)
+        fills = result.diagnostics["fills"]["buy"] + result.diagnostics["fills"]["sell"]
+        assert fills / months <= 2 * 10
+
+    def test_a_stable_ranking_does_not_trade_between_decision_dates(self):
+        """訊號不變、價格在動：兩個決策日之間不該有任何成交。"""
+        inputs = self.moving_inputs(seed=3)
+        result = run(inputs)
+        traded = result.monthly["decision_date"].tolist()
+        assert result.diagnostics["decision_months"] == len(traded)
+        months = max(len(traded), 1)
+        fills = result.diagnostics["fills"]["buy"] + result.diagnostics["fills"]["sell"]
+        # 首月建倉 10 檔，之後排名穩定不換股 → 總成交應接近 10，不是每月都在動
+        assert fills <= 10 + 2 * 10
+
+    def test_moving_prices_do_not_inflate_costs_versus_flat_prices(self):
+        flat = run(build_inputs())
+        moving = run(self.moving_inputs(seed=7))
+        flat_fills = flat.diagnostics["fills"]["buy"]
+        moving_fills = moving.diagnostics["fills"]["buy"]
+        assert moving_fills <= flat_fills * 4
+
+
 class TestMarketFilterBehaviour:
     def test_mom1b_liquidates_after_the_filter_triggers(self):
         crash = np.r_[np.full(300, 100.0), np.full(20, 40.0)]

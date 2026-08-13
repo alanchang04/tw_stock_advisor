@@ -230,9 +230,35 @@ def build_equal_weight_rebalance_orders(
             nav=nav,
             average_volume_shares=float(average_volumes_shares[stock_id]),
         )
+    return build_orders_from_target_shares(
+        target_shares=target_quantities, current_shares=current,
+        raw_open_prices=raw_open_prices)
+
+
+def build_orders_from_target_shares(
+    *,
+    target_shares: Mapping[str, int],
+    current_shares: Mapping[str, int],
+    raw_open_prices: pd.Series,
+) -> list[RebalanceOrder]:
+    """Build orders against an **already fixed** target share count.
+
+    分出這個入口是因為月頻再平衡的目標股數必須在該次再平衡**凍結**：
+    若每個交易日都用當日開盤價重算目標股數，股數會隨價格漂移，
+    於是每天都產生一筆小額買賣——那是每日再平衡，不是 SPEC §7.3 的每月再平衡。
+    未成交的部分後續重試時，比對的必須是同一組凍結目標。
+    """
+    current: dict[str, int] = {}
+    for stock_id, shares in current_shares.items():
+        if isinstance(shares, bool) or not isinstance(shares, Integral) or shares < 0:
+            raise ValueError("current shares 必須是非負整數股")
+        current[str(stock_id)] = int(shares)
+    target_quantities = {str(k): int(v) for k, v in target_shares.items()}
+    if len(target_quantities) > MAX_POSITIONS:
+        raise ValueError(f"target 不可超過 {MAX_POSITIONS} 檔")
 
     orders: list[RebalanceOrder] = []
-    order_ids = sorted(set(current) | set(targets))
+    order_ids = sorted(set(current) | set(target_quantities))
     for stock_id in order_ids:
         old = current.get(stock_id, 0)
         target = target_quantities.get(stock_id, 0)
