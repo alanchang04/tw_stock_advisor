@@ -60,7 +60,11 @@ def parse_mops_dividend_html(raw: bytes, distribution_year_roc: int) -> pd.DataF
     """Normalize all company tables in a Big5/CP950 MOPS aggregate response."""
     html = raw.decode("cp950", errors="replace")
     records: list[dict] = []
-    for table_index, table in enumerate(pd.read_html(StringIO(html))):
+    # flavor 明確指定為 bs4，不用 pandas 的預設順序（lxml → bs4）。
+    # requirements.txt 刻意不收 lxml（無 cp314 wheel），而預設順序在 lxml 缺席時
+    # 是直接拋 ImportError 而非退回 bs4，於是這個解析器在乾淨環境裡完全不能跑。
+    # 除此之外，剖析器的選擇會影響畸形 HTML 的解讀，寫死才可重現。
+    for table_index, table in enumerate(pd.read_html(StringIO(html), flavor="bs4")):
         stock_column = _first_column(table, "公司代號")
         if stock_column is None:
             continue
