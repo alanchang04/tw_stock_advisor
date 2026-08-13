@@ -32,10 +32,15 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from agent.strategy import total_return_adjust  # noqa: E402
-from research.event_study import DEFAULT_WINDOWS, run_event_study  # noqa: E402
+from research.event_study import run_event_study  # noqa: E402
+
+# 觀察窗涵蓋現行策略的實際持有分布（平均 39.9、中位 25、p95 110 交易日）
+STUDY_WINDOWS = (5, 10, 20, 40, 60, 120)
 
 BENCHMARK = "0050"
-INVEST_STREAK_DAYS = 3          # 沿用 agent/strategy.py 的投信連買定義
+# 沿用 agent/strategy.py 的**實際**定義：連續買超且累計量體 >= 100 張。
+# 2026-08-13 第一版誤用「連續 3 日」的簡化版，未含量體門檻，已更正。
+MIN_INVEST_STREAK_LOTS = 100
 MIN_PRICE = 10.0
 LIQUIDITY_WINDOW = 20
 
@@ -128,8 +133,14 @@ def institutional_events(snapshot: Path, mask: pd.DataFrame, kind: str) -> pd.Da
         # 外資由未買超轉為買超的首日
         trigger = buying & ~buying.shift(1, fill_value=False)
     elif kind == "streak":
-        streak = buying.rolling(INVEST_STREAK_DAYS).sum() == INVEST_STREAK_DAYS
-        trigger = streak & ~streak.shift(1, fill_value=False)
+        # agent/strategy.py::_trend_matrices 的實際定義：連續買超期間的累計張數
+        # 達到 MIN_INVEST_STREAK_LOTS 才算合格；事件日＝首次達標那一天。
+        positive = wide.where(buying, 0.0)
+        cumulative = positive.cumsum()
+        reset = cumulative.where(~buying).ffill().fillna(0.0)
+        streak_lots = (cumulative - reset).where(buying, 0.0) / 1000.0
+        qualified = streak_lots >= MIN_INVEST_STREAK_LOTS
+        trigger = qualified & ~qualified.shift(1, fill_value=False)
     elif kind == "new_entry":
         # 前 20 日都沒有買超，今日首次買超
         quiet = buying.rolling(20).sum().shift(1) == 0
@@ -211,7 +222,7 @@ def main() -> None:
         "benchmark": f"{BENCHMARK} total return",
         "entry_rule": "next session open after the event date",
         "return_type": "excess over benchmark",
-        "windows": list(DEFAULT_WINDOWS),
+        "windows": list(STUDY_WINDOWS),
         "not_tested": {
             "H08_etf_accum": "requires the etf_changes table in the operational DB; "
                              "absent from the parquet snapshot, so it is data-blocked "
@@ -227,7 +238,8 @@ def main() -> None:
             report["results"].append({"hypothesis": name, "events": 0})
             continue
         result = run_event_study(events=events, open_prices=opens,
-                                 benchmark_nav=benchmark, draws=args.draws)
+                                 benchmark_nav=benchmark, windows=STUDY_WINDOWS,
+                                 draws=args.draws)
         report["results"].append(summarise(name, result))
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
