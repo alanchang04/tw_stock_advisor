@@ -92,17 +92,42 @@ def revenue_events(snapshot: Path, sessions: pd.DatetimeIndex,
     return filter_by_mask(frame, mask)
 
 
+def trend_stack_events(closes: pd.DataFrame, mask: pd.DataFrame) -> pd.DataFrame:
+    """H09 多頭排列成立首日：MA5 > MA20 > MA60 由不成立轉為成立的那一天。
+
+    沿用 `agent/strategy.py::_trend_matrices` 的定義（stack_days 由此累計）。
+    """
+    ma5, ma20, ma60 = (closes.rolling(w).mean() for w in (5, 20, 60))
+    stack = ((ma5 > ma20) & (ma20 > ma60)).fillna(False)
+    trigger = stack & ~stack.shift(1, fill_value=False)
+    return stacked_to_events(trigger, mask)
+
+
+def stacked_to_events(trigger: pd.DataFrame, mask: pd.DataFrame) -> pd.DataFrame:
+    stacked = trigger.stack()
+    hits = stacked[stacked].index
+    frame = pd.DataFrame({
+        "event_date": [d for d, _ in hits],
+        "stock_id": [s for _, s in hits],
+    })
+    return filter_by_mask(frame, mask)
+
+
 def institutional_events(snapshot: Path, mask: pd.DataFrame, kind: str) -> pd.DataFrame:
-    """投信連買（連續 N 日買超的首日）或新進場（由 0 轉正的首日）。"""
+    """投信連買／新進場，或外資買超首日。"""
+    column = "foreign_net" if kind == "foreign_buy" else "invest_net"
     inst = pd.read_parquet(snapshot / "institutional.parquet",
-                           columns=["stock_id", "trade_date", "invest_net"])
+                           columns=["stock_id", "trade_date", column])
     inst["stock_id"] = inst["stock_id"].astype(str)
     inst["trade_date"] = pd.to_datetime(inst["trade_date"])
     wide = inst.pivot(index="trade_date", columns="stock_id",
-                      values="invest_net").sort_index()
+                      values=column).sort_index()
     buying = wide > 0
 
-    if kind == "streak":
+    if kind == "foreign_buy":
+        # 外資由未買超轉為買超的首日
+        trigger = buying & ~buying.shift(1, fill_value=False)
+    elif kind == "streak":
         streak = buying.rolling(INVEST_STREAK_DAYS).sum() == INVEST_STREAK_DAYS
         trigger = streak & ~streak.shift(1, fill_value=False)
     elif kind == "new_entry":
@@ -112,13 +137,7 @@ def institutional_events(snapshot: Path, mask: pd.DataFrame, kind: str) -> pd.Da
     else:
         raise ValueError(f"未知的 kind: {kind}")
 
-    stacked = trigger.stack()
-    hits = stacked[stacked].index
-    frame = pd.DataFrame({
-        "event_date": [d for d, _ in hits],
-        "stock_id": [s for _, s in hits],
-    })
-    return filter_by_mask(frame, mask)
+    return stacked_to_events(trigger, mask)
 
 
 def filter_by_mask(events: pd.DataFrame, mask: pd.DataFrame) -> pd.DataFrame:
@@ -176,7 +195,11 @@ def main() -> None:
         "H04b_rev_yoy_over_20": lambda: revenue_events(args.snapshot, sessions, mask, 20.0),
         "H05_invest_streak": lambda: institutional_events(args.snapshot, mask, "streak"),
         "H06_invest_new_entry": lambda: institutional_events(args.snapshot, mask, "new_entry"),
+        "H07_foreign_buy": lambda: institutional_events(args.snapshot, mask, "foreign_buy"),
+        "H09_trend_stack": lambda: trend_stack_events(closes, mask),
     }
+    # H08 etf_accum 無法測試：它需要 DB 的 etf_changes 表，不在 parquet 快照內。
+    # 依 PIPELINE §1 步驟 2，識別資料不存在即停，不以代理指標硬湊。
 
     report = {
         "study": "H04~H06 Phase 2 falsification test",
@@ -189,7 +212,12 @@ def main() -> None:
         "entry_rule": "next session open after the event date",
         "return_type": "excess over benchmark",
         "windows": list(DEFAULT_WINDOWS),
-        "trials_registered": 4,
+        "not_tested": {
+            "H08_etf_accum": "requires the etf_changes table in the operational DB; "
+                             "absent from the parquet snapshot, so it is data-blocked "
+                             "rather than falsified",
+        },
+        "trials_registered": 6,
         "results": [],
     }
     for name, builder in definitions.items():
