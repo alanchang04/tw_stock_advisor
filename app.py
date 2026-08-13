@@ -1003,6 +1003,124 @@ elif page == "🔄 歷史績效":
             "本系統的定位是研究平台與練習場，不是可以照抄的操作訊號。"
         )
 
+    # ── 已驗證回測曲線（凍結快照）──────────────────────────────
+    # 資料來源是 scripts/run_verified_backtest.py --curve-output 產出的小型 artifact
+    # （約 120 KB），不是原始價量。前端因此不必接觸任何研究資料，也不需要 Neon
+    # 補齊 2015~2026 全市場行情。artifact 內嵌快照 SHA-256，圖表可自證來源。
+    st.divider()
+    st.subheader("📈 已驗證回測曲線（凍結快照）")
+    try:
+        from agent.backtest_curve import (
+            concentration_summary, cumulative_pnl_excluding_top, drawdown,
+            load_curve, monthly_returns, rolling_return,
+        )
+
+        @st.cache_data(show_spinner=False)
+        def _load_bt_curve():
+            c = load_curve()
+            return c.nav, c.trades, c.provenance, c.has_benchmark
+
+        _nav, _trades, _prov, _has_bench = _load_bt_curve()
+
+        # 配色：經驗證的類別色票前三槽（藍/橘/水綠），與發散色票（藍↔紅，灰中點）。
+        # 台股慣例紅漲綠跌，但紅綠是色盲最難分辨的組合，因此跌用藍不用綠——
+        # 同時符合驗證過的發散配對，也避免紅綠對比失效。
+        C1, C2, C3 = "#2a78d6", "#eb6834", "#1baf7a"
+        DIVERGING = [[0.0, "#2a78d6"], [0.5, "#f0efec"], [1.0, "#d03b3b"]]
+
+        st.caption(
+            f"快照 `{(_prov.get('snapshot_content_sha256') or '')[:16]}…`　"
+            f"策略設定 `{(_prov.get('strategy_config_sha256') or '')[:16]}…`　"
+            f"{_prov.get('trading_days')} 個交易日　{_prov.get('trades')} 筆交易"
+        )
+
+        _summary = concentration_summary(_trades, top_n=4)
+        m1, m2, m3 = st.columns(3)
+        m1.metric("勝率", f"{_summary['win_rate']*100:.1f}%")
+        m2.metric("前 4 筆佔總淨利", f"{_summary['top_n_share_of_net']*100:.1f}%")
+        _dd = drawdown(_nav.set_index("trade_date")["strategy_nav"])
+        m3.metric("最大回撤", f"{_dd.min()*100:.2f}%")
+
+        bt1, bt2, bt3, bt4 = st.tabs(
+            ["權益曲線", "回撤", "月報酬", "移除最佳交易"])
+
+        with bt1:
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(
+                x=_nav["trade_date"], y=_nav["strategy_nav"], name="現行策略",
+                mode="lines", line=dict(color=C1, width=2)))
+            if _has_bench:
+                fig.add_trace(go.Scatter(
+                    x=_nav["trade_date"], y=_nav["benchmark_nav"], name="0050 含息",
+                    mode="lines", line=dict(color=C2, width=2)))
+            # 對數軸：相同百分比漲跌 = 相同視覺距離，這正是「平不平滑」的定義。
+            fig.update_layout(
+                height=420, margin=dict(l=0, r=0, t=10, b=0),
+                yaxis=dict(title="NAV（元，對數軸）", type="log"),
+                hovermode="x unified",
+                legend=dict(orientation="h", y=1.12))
+            st.plotly_chart(fig, use_container_width=True)
+            st.caption("對數軸：等比例變動呈現等距，斜率穩定才代表報酬平滑。")
+
+        with bt2:
+            fig = go.Figure(go.Scatter(
+                x=_nav["trade_date"], y=_dd.to_numpy() * 100, mode="lines",
+                line=dict(color=C1, width=1.5), fill="tozeroy",
+                fillcolor="rgba(42,120,214,0.18)", name="回撤"))
+            fig.update_layout(height=340, margin=dict(l=0, r=0, t=10, b=0),
+                              yaxis_title="回撤 %", hovermode="x unified",
+                              showlegend=False)
+            st.plotly_chart(fig, use_container_width=True)
+            _deep = int((_dd < -0.2).sum())
+            st.caption(f"回撤深於 -20% 的交易日共 {_deep} 天，佔 {_deep/len(_dd)*100:.0f}%。")
+
+        with bt3:
+            _mr = monthly_returns(_nav) * 100
+            fig = go.Figure(go.Heatmap(
+                z=_mr.to_numpy(), x=[f"{m}月" for m in _mr.columns],
+                y=_mr.index.astype(str), colorscale=DIVERGING, zmid=0,
+                colorbar=dict(title="%"), hovertemplate="%{y} %{x}：%{z:.1f}%<extra></extra>"))
+            fig.update_layout(height=380, margin=dict(l=0, r=0, t=10, b=0))
+            st.plotly_chart(fig, use_container_width=True)
+            st.caption("紅為正報酬、藍為負報酬，灰為零。跌用藍不用綠：紅綠是色盲最難分辨的組合。")
+
+            _roll = rolling_return(_nav, "strategy_nav") * 100
+            fig2 = go.Figure()
+            fig2.add_trace(go.Scatter(x=_roll.index, y=_roll.to_numpy(), name="現行策略",
+                                      mode="lines", line=dict(color=C1, width=2)))
+            if _has_bench:
+                _rb = rolling_return(_nav, "benchmark_nav") * 100
+                fig2.add_trace(go.Scatter(x=_rb.index, y=_rb.to_numpy(), name="0050 含息",
+                                          mode="lines", line=dict(color=C2, width=2)))
+            fig2.add_hline(y=0, line_dash="dash", line_color="#8a8a85")
+            fig2.update_layout(height=320, margin=dict(l=0, r=0, t=30, b=0),
+                               yaxis_title="滾動 12 個月報酬 %", hovermode="x unified",
+                               legend=dict(orientation="h", y=1.15))
+            st.plotly_chart(fig2, use_container_width=True)
+
+        with bt4:
+            _pnl = cumulative_pnl_excluding_top(_trades, exclude_counts=(0, 5, 10))
+            fig = go.Figure()
+            for _col, _color in zip(_pnl.columns, (C1, C2, C3)):
+                fig.add_trace(go.Scatter(x=_pnl.index, y=_pnl[_col], name=_col,
+                                         mode="lines", line=dict(color=_color, width=2)))
+            fig.add_hline(y=0, line_dash="dash", line_color="#8a8a85")
+            fig.update_layout(height=400, margin=dict(l=0, r=0, t=30, b=0),
+                              yaxis_title="累計已實現淨損益（元）", hovermode="x unified",
+                              legend=dict(orientation="h", y=1.12))
+            st.plotly_chart(fig, use_container_width=True)
+            st.caption(
+                "使用**已實現淨損益**而非 NAV：損益可加，移除某幾筆的結果精確；"
+                "改動 NAV 則必須重算複利路徑，只能近似。"
+                "這正是 SPEC §9.2 F1 門檻「移除最佳 5 筆後淨損益仍為正」檢驗的東西。")
+            st.dataframe(
+                pd.DataFrame({"期末累計淨損益": _pnl.iloc[-1].round(0)}),
+                use_container_width=True)
+    except FileNotFoundError as _e:
+        st.info(f"尚未產生回測曲線 artifact。{_e}")
+    except Exception as _e:
+        st.warning(f"回測曲線繪製失敗：{_e}")
+
     # 2026-07-23：策略版本改讀 agent/strategy.py 的 STRATEGY_ERAS 清單，不再寫死日期。
     # 原本寫死的 STRATEGY_V2_DATE 就是因為策略改了好幾輪沒人回頭更新，長期把舊策略的
     # 交易標成「現行策略績效」。清單化之後，加新版本＝在 strategy.py 加一筆。
