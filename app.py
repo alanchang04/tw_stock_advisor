@@ -59,7 +59,7 @@ USER = st.session_state.auth_user   # {user_id, username, display_name, role}
 st.sidebar.title("📈 台股顧問")
 _pages = ["📊 首頁", "📋 每日排行", "📓 選股日誌", "📦 持倉追蹤", "🔖 追蹤清單", "🔎 個股分析",
           "🎯 練習軌", "🔥 族群輪動", "🏦 法人動向", "📉 個股走勢", "🔄 歷史績效", "📰 市場情報",
-          "🧠 聰明資金", "🔍 決策軌跡"]
+          "🧠 聰明資金", "🔍 決策軌跡", "🔬 研究進度"]
 if USER["role"] == "admin":
     _pages.append("👤 帳號管理")
 # 跨頁跳轉：清單頁的「📈 走勢」按鈕會設 nav_goto，這裡在 radio 建立「之前」套用，
@@ -2846,6 +2846,107 @@ elif page == "🔍 決策軌跡":
                                      use_container_width=True, hide_index=True)
                     else:
                         st.json(_pl, expanded=False)
+
+
+# ══════════════════════════════════════════════════════════════════
+#  Page：研究進度（資料地基狀態）
+# ══════════════════════════════════════════════════════════════════
+# 只讀 reports/data_releases/*.json（8~9 KB 的釋出中繼資料，已進版控）。
+# 不讀 data/research_versions、不讀 data/raw——那些不進版控，Streamlit Cloud 上
+# 不存在，且釋出的 usage_policy.blocked 明文禁止把原始研究資料上傳到 Streamlit Cloud。
+# 本頁也刻意不顯示任何報酬／Sharpe／回撤：同一份 usage_policy 禁止 backward holdout
+# 績效查看，holdout 尚未開封。
+elif page == "🔬 研究進度":
+    st.title("🔬 研究進度")
+    st.caption("資料地基的具名不可變釋出狀態。不含任何績效數字——holdout 尚未開封。")
+
+    try:
+        from agent.research_status import (
+            available_releases, component_table, load_release,
+            readiness_table, repeat_build_consistency,
+        )
+
+        _releases = available_releases()
+        if not _releases:
+            st.info("尚未有任何釋出定義（reports/data_releases/）。")
+            st.stop()
+
+        _names = [p.stem for p in _releases]
+        _pick = st.selectbox("資料釋出版本", _names, index=0)
+        _rel = load_release(_releases[_names.index(_pick)])
+
+        if _rel.supersedes:
+            st.caption(f"本版取代 `{_rel.supersedes}`")
+
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("釋出 ID", _rel.release_id.replace("tw_stock_data_", ""))
+        m2.metric("元件可推進策略", f"{_rel.components_ready} / {len(_rel.components)}")
+        m3.metric("檔案數", f"{_rel.file_count:,}")
+        m4.metric("資料量", f"{_rel.total_bytes / 1024 / 1024:,.0f} MB")
+
+        st.caption(
+            f"發布日 {_rel.release_date}　權責 {_rel.authority}　"
+            f"collection SHA-256 `{_rel.collection_sha256[:16]}…`"
+        )
+
+        _t1, _t2, _t3 = st.tabs(["元件狀態", "閘門", "已知缺口與使用政策"])
+
+        with _t1:
+            _fails = _rel.structural_failures
+            if _fails:
+                st.error(f"結構閘門未通過：{'、'.join(_fails)}")
+            else:
+                st.success(f"全部 {len(_rel.components)} 個元件的結構閘門都通過")
+
+            st.dataframe(component_table(_rel), use_container_width=True,
+                         hide_index=True)
+
+            # 「同一份 raw 重建兩次是否得到同一份結果」——不一致代表建構器不確定，
+            # 下游任何研究結論都不可信，比元件少一項更嚴重。
+            _rep = repeat_build_consistency(_rel)
+            if not _rep["available"]:
+                st.caption("此版未附重複建構證據。")
+            elif _rep["mismatched"]:
+                st.error(
+                    f"重複建構雜湊不一致：{'、'.join(_rep['mismatched'])}。"
+                    "建構器不具決定性，下游結論不可信。"
+                )
+            else:
+                st.caption(
+                    f"重複建構驗證：{_rep['matched']} / {_rep['checked']} 個元件的 "
+                    "content SHA-256 兩次建構完全相同。"
+                )
+
+        with _t2:
+            st.dataframe(readiness_table(_rel), use_container_width=True,
+                         hide_index=True)
+            st.caption(
+                "🔒 未通過不代表落後，而是刻意的閘門——"
+                "`backward_holdout_performance_ready` 為 false 時，任何人（含 AI）"
+                "都不得查看 2008~2014 績效。"
+            )
+
+        with _t3:
+            st.markdown("**已知缺口**（明列而非靜默忽略）")
+            for _g in _rel.known_gaps:
+                st.markdown(f"- {_g}")
+
+            _allowed = _rel.usage_policy.get("allowed", [])
+            _blocked = _rel.usage_policy.get("blocked", [])
+            _c1, _c2 = st.columns(2)
+            with _c1:
+                st.markdown("**允許用途**")
+                for _a in _allowed:
+                    st.markdown(f"- ✅ {_a}")
+            with _c2:
+                st.markdown("**禁止用途**")
+                for _b in _blocked:
+                    st.markdown(f"- 🚫 {_b}")
+
+    except FileNotFoundError as _e:
+        st.info(f"找不到釋出定義：{_e}")
+    except Exception as _e:
+        st.warning(f"研究進度載入失敗：{_e}")
 
 
 # ══════════════════════════════════════════════════════════════════
