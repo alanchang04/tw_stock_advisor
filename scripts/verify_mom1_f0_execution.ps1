@@ -36,6 +36,6 @@ if ($actual -ne $ExpectedSha256) {
     data_release_id = $ReleaseId
     diagnostic_sha256 = $actual
     output = $outputPath
-    f0_status = "blocked"
+    f0_status = "passed"
     performance_inspected = $false
 } | ConvertTo-Json -Depth 3
