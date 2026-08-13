@@ -1,0 +1,222 @@
+{
+  "study": "H04~H06 Phase 2 falsification test",
+  "interpretation": "contaminated data can falsify but cannot confirm; a surviving effect may only be reported as 'not falsified', never as 'effective'",
+  "snapshot": "C:\\Users\\User\\Desktop\\tw_stock_advisor\\data\\research",
+  "benchmark": "0050 total return",
+  "entry_rule": "next session open after the event date",
+  "return_type": "excess over benchmark",
+  "windows": [
+    5,
+    10,
+    20,
+    40,
+    60
+  ],
+  "trials_registered": 4,
+  "results": [
+    {
+      "hypothesis": "H04a_rev_yoy_positive",
+      "events": 59950,
+      "distinct_event_dates": 137,
+      "stocks": 1660,
+      "block_sessions": 20,
+      "bootstrap_draws": 1000,
+      "monotonic_car_path": false,
+      "windows": {
+        "5": {
+          "car_mean_pct": -0.0051,
+          "car_median_pct": -0.4994,
+          "ci95_low_pct": -0.6244,
+          "ci95_high_pct": 0.624,
+          "p_value": 0.988,
+          "significant": false
+        },
+        "10": {
+          "car_mean_pct": 0.2751,
+          "car_median_pct": -0.6536,
+          "ci95_low_pct": -0.3724,
+          "ci95_high_pct": 0.9515,
+          "p_value": 0.472,
+          "significant": false
+        },
+        "20": {
+          "car_mean_pct": 0.2438,
+          "car_median_pct": -1.2873,
+          "ci95_low_pct": -0.8448,
+          "ci95_high_pct": 1.3292,
+          "p_value": 0.704,
+          "significant": false
+        },
+        "40": {
+          "car_mean_pct": 0.3865,
+          "car_median_pct": -2.8646,
+          "ci95_low_pct": -1.2245,
+          "ci95_high_pct": 2.5303,
+          "p_value": 0.742,
+          "significant": false
+        },
+        "60": {
+          "car_mean_pct": 0.7473,
+          "car_median_pct": -4.0173,
+          "ci95_low_pct": -1.482,
+          "ci95_high_pct": 3.5514,
+          "p_value": 0.594,
+          "significant": false
+        }
+      }
+    },
+    {
+      "hypothesis": "H04b_rev_yoy_over_20",
+      "events": 30294,
+      "distinct_event_dates": 137,
+      "stocks": 1597,
+      "block_sessions": 20,
+      "bootstrap_draws": 1000,
+      "monotonic_car_path": true,
+      "windows": {
+        "5": {
+          "car_mean_pct": 0.0166,
+          "car_median_pct": -0.5702,
+          "ci95_low_pct": -0.7913,
+          "ci95_high_pct": 0.8441,
+          "p_value": 0.954,
+          "significant": false
+        },
+        "10": {
+          "car_mean_pct": 0.5221,
+          "car_median_pct": -0.652,
+          "ci95_low_pct": -0.2507,
+          "ci95_high_pct": 1.3675,
+          "p_value": 0.26,
+          "significant": false
+        },
+        "20": {
+          "car_mean_pct": 0.7945,
+          "car_median_pct": -1.1969,
+          "ci95_low_pct": -0.5535,
+          "ci95_high_pct": 2.2263,
+          "p_value": 0.258,
+          "significant": false
+        },
+        "40": {
+          "car_mean_pct": 1.322,
+          "car_median_pct": -2.7609,
+          "ci95_low_pct": -0.5612,
+          "ci95_high_pct": 3.6597,
+          "p_value": 0.178,
+          "significant": false
+        },
+        "60": {
+          "car_mean_pct": 1.8828,
+          "car_median_pct": -4.0376,
+          "ci95_low_pct": -0.5839,
+          "ci95_high_pct": 4.9807,
+          "p_value": 0.162,
+          "significant": false
+        }
+      }
+    },
+    {
+      "hypothesis": "H05_invest_streak",
+      "events": 34832,
+      "distinct_event_dates": 2769,
+      "stocks": 1112,
+      "block_sessions": 20,
+      "bootstrap_draws": 1000,
+      "monotonic_car_path": false,
+      "windows": {
+        "5": {
+          "car_mean_pct": -0.0798,
+          "car_median_pct": -0.3933,
+          "ci95_low_pct": -0.2473,
+          "ci95_high_pct": 0.107,
+          "p_value": 0.434,
+          "significant": false
+        },
+        "10": {
+          "car_mean_pct": -0.0591,
+          "car_median_pct": -0.7302,
+          "ci95_low_pct": -0.4354,
+          "ci95_high_pct": 0.3698,
+          "p_value": 0.79,
+          "significant": false
+        },
+        "20": {
+          "car_mean_pct": -0.0653,
+          "car_median_pct": -1.3902,
+          "ci95_low_pct": -0.8154,
+          "ci95_high_pct": 0.8809,
+          "p_value": 0.846,
+          "significant": false
+        },
+        "40": {
+          "car_mean_pct": 0.298,
+          "car_median_pct": -2.3275,
+          "ci95_low_pct": -1.1414,
+          "ci95_high_pct": 2.1677,
+          "p_value": 0.788,
+          "significant": false
+        },
+        "60": {
+          "car_mean_pct": 0.5015,
+          "car_median_pct": -3.174,
+          "ci95_low_pct": -1.7448,
+          "ci95_high_pct": 3.1775,
+          "p_value": 0.742,
+          "significant": false
+        }
+      }
+    },
+    {
+      "hypothesis": "H06_invest_new_entry",
+      "events": 12641,
+      "distinct_event_dates": 2445,
+      "stocks": 1306,
+      "block_sessions": 20,
+      "bootstrap_draws": 1000,
+      "monotonic_car_path": false,
+      "windows": {
+        "5": {
+          "car_mean_pct": 0.2014,
+          "car_median_pct": -0.3981,
+          "ci95_low_pct": -0.0508,
+          "ci95_high_pct": 0.4603,
+          "p_value": 0.126,
+          "significant": false
+        },
+        "10": {
+          "car_mean_pct": 0.051,
+          "car_median_pct": -0.8342,
+          "ci95_low_pct": -0.395,
+          "ci95_high_pct": 0.5445,
+          "p_value": 0.858,
+          "significant": false
+        },
+        "20": {
+          "car_mean_pct": -0.0425,
+          "car_median_pct": -1.7656,
+          "ci95_low_pct": -0.8672,
+          "ci95_high_pct": 0.9279,
+          "p_value": 0.948,
+          "significant": false
+        },
+        "40": {
+          "car_mean_pct": -0.418,
+          "car_median_pct": -3.1705,
+          "ci95_low_pct": -1.7911,
+          "ci95_high_pct": 1.1692,
+          "p_value": 0.566,
+          "significant": false
+        },
+        "60": {
+          "car_mean_pct": -1.1425,
+          "car_median_pct": -4.8175,
+          "ci95_low_pct": -3.0565,
+          "ci95_high_pct": 1.0855,
+          "p_value": 0.306,
+          "significant": false
+        }
+      }
+    }
+  ]
+}
