@@ -1,0 +1,122 @@
+{
+  "study": "H13 Bollinger/volume as entry timing within Revenue+",
+  "registration": "research/HYPOTHESES.md H13",
+  "policies": {
+    "F": "Revenue+ -> buy at next session open",
+    "F+BB": "Revenue+ -> wait up to 20 sessions for a B1; buy at the session after the breakout; if none, do not buy"
+  },
+  "primary_horizon_sessions": 60,
+  "evidence_status": {
+    "historical": "falsification / development evidence ONLY",
+    "confirmatory": "forward period after 2026-08-14 only",
+    "reason": "the B1 definition was already tested, corrected and had its return distribution inspected on 2015-2026 under H01"
+  },
+  "trials_registered": 5,
+  "months": 132,
+  "primary_outcomes": {
+    "median_mae": {
+      "F": {
+        "months": 132,
+        "mean": -11.8367,
+        "t_stat": -12.259
+      },
+      "F+BB": {
+        "months": 132,
+        "mean": -13.2334,
+        "t_stat": -14.576
+      },
+      "difference_bb_minus_f": {
+        "months": 132,
+        "mean": -1.3966,
+        "t_stat": -5.95
+      }
+    },
+    "q25_mae": {
+      "F": {
+        "months": 132,
+        "mean": -18.0616,
+        "t_stat": -16.551
+      },
+      "F+BB": {
+        "months": 132,
+        "mean": -19.8341,
+        "t_stat": -18.94
+      },
+      "difference_bb_minus_f": {
+        "months": 132,
+        "mean": -1.7725,
+        "t_stat": -6.331
+      }
+    },
+    "restricted_mean_time_to_breakeven_sessions": {
+      "F": {
+        "months": 132,
+        "mean": 16.1544,
+        "t_stat": 20.645
+      },
+      "F+BB": {
+        "months": 132,
+        "mean": 18.611,
+        "t_stat": 35.11
+      },
+      "difference_bb_minus_f": {
+        "months": 132,
+        "mean": 2.4566,
+        "t_stat": 3.807
+      }
+    }
+  },
+  "returns": {
+    "per_entered_position": {
+      "F": {
+        "months": 132,
+        "mean": 4.3243,
+        "t_stat": 2.969
+      },
+      "F+BB": {
+        "months": 132,
+        "mean": 5.3316,
+        "t_stat": 3.333
+      },
+      "difference_bb_minus_f": {
+        "months": 132,
+        "mean": 1.0073,
+        "t_stat": 2.384
+      }
+    },
+    "per_candidate_cash_if_not_entered": {
+      "F": {
+        "months": 132,
+        "mean": 4.3234,
+        "t_stat": 2.971
+      },
+      "F+BB": {
+        "months": 132,
+        "mean": 1.2277,
+        "t_stat": 3.253
+      },
+      "difference_bb_minus_f": {
+        "months": 132,
+        "mean": -3.0957,
+        "t_stat": -2.799
+      }
+    }
+  },
+  "exposure": {
+    "participation_rate": {
+      "months": 132,
+      "mean": 0.2009,
+      "t_stat": 21.322
+    },
+    "mean_wait_sessions": {
+      "months": 132,
+      "mean": 9.1389,
+      "t_stat": 62.1
+    },
+    "missed_return_while_waiting": {
+      "months": 132,
+      "mean": 10.2287,
+      "t_stat": 25.187
+    }
+  }
+}
