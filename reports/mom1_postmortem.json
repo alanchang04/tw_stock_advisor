@@ -1,0 +1,119 @@
+{
+  "study": "MOM-1 post-mortem diagnostics",
+  "status": "EXPLORATORY — CANNOT REVERSE F1",
+  "note": "MOM-1 已依 SPEC 9.5 否決，判準開封前凍結。本檔僅供歸因與『動能這條線還值不值得存在』的判斷，不得用於翻案（SPEC 8.3）。",
+  "data_release_id": "tw_stock_data_2005_2014_r3",
+  "window": {
+    "start": "2008-01-01",
+    "end": "2014-12-31"
+  },
+  "block_months": 6,
+  "bootstrap_draws": 1000,
+  "B_baselines": {
+    "0050_total_return": {
+      "final_nav": 422207.28,
+      "cagr": 0.0511
+    },
+    "equal_weight_universe": {
+      "final_nav": 456283.08,
+      "total_return": 0.5209
+    },
+    "equal_weight_plus_ma200": {
+      "final_nav": 306304.52,
+      "total_return": 0.021
+    }
+  },
+  "A_paired_bootstrap": {
+    "MOM-1A": {
+      "vs_0050": {
+        "months": 83,
+        "mean_monthly_excess_pct": 0.444,
+        "annualised_excess_pct": 5.4606,
+        "ci95_monthly_pct": [
+          -0.9017,
+          1.8659
+        ],
+        "p_value_one_sided_le_zero": 0.26
+      },
+      "vs_equal_weight_universe": {
+        "months": 83,
+        "mean_monthly_excess_pct": 0.3339,
+        "annualised_excess_pct": 4.0812,
+        "ci95_monthly_pct": [
+          -0.5034,
+          1.4701
+        ],
+        "p_value_one_sided_le_zero": 0.2
+      },
+      "vs_attribution_baseline": {
+        "baseline": "equal weight (no timing)",
+        "months": 83,
+        "mean_monthly_excess_pct": 0.3339,
+        "annualised_excess_pct": 4.0812,
+        "ci95_monthly_pct": [
+          -0.5034,
+          1.4701
+        ],
+        "p_value_one_sided_le_zero": 0.2
+      }
+    },
+    "MOM-1B": {
+      "vs_0050": {
+        "months": 83,
+        "mean_monthly_excess_pct": 0.2491,
+        "annualised_excess_pct": 3.0306,
+        "ci95_monthly_pct": [
+          -1.0717,
+          2.0436
+        ],
+        "p_value_one_sided_le_zero": 0.333
+      },
+      "vs_equal_weight_universe": {
+        "months": 83,
+        "mean_monthly_excess_pct": 0.139,
+        "annualised_excess_pct": 1.6804,
+        "ci95_monthly_pct": [
+          -1.2719,
+          2.1664
+        ],
+        "p_value_one_sided_le_zero": 0.34
+      },
+      "vs_attribution_baseline": {
+        "baseline": "equal weight + MA200",
+        "months": 83,
+        "mean_monthly_excess_pct": 0.7834,
+        "annualised_excess_pct": 9.816,
+        "ci95_monthly_pct": [
+          -0.0983,
+          1.7311
+        ],
+        "p_value_one_sided_le_zero": 0.038
+      }
+    }
+  },
+  "C_top_decile_size_control": {
+    "median_cross_section": 339,
+    "raw": {
+      "months": 83,
+      "mean_monthly_pct": 0.3896,
+      "t_stat": 0.859
+    },
+    "size_controlled": {
+      "months": 83,
+      "mean_monthly_pct": 0.3945,
+      "t_stat": 0.957
+    }
+  },
+  "D_executable_from_next_open": {
+    "rank_ic": {
+      "months": 82,
+      "mean": 0.00695,
+      "t_stat": 0.446
+    },
+    "top_decile_minus_universe": {
+      "months": 82,
+      "mean": 0.4474,
+      "t_stat": 1.137
+    }
+  }
+}
