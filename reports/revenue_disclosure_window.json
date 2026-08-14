@@ -1,0 +1,1420 @@
+{
+  "study": "how much revenue reaction the month-end decision convention discards",
+  "status": "EXPLORATORY descriptive statistic — no hypothesis tested, no new trials",
+  "question": "H11/H12/H16 set the decision date at the month end of the disclosure month, but the statutory filing deadline is the 10th. How much excess return happens in the discarded window?",
+  "convention_in_use": {
+    "h04_h06_event_study": "first session on/after the 10th (correct)",
+    "h11_h12_h16_chain": "month end of the disclosure month (~20 days later)"
+  },
+  "no_look_ahead": "the statutory deadline is the 10th, so by that session every company has filed; the early anchor is the first session on/after the 10th, which is conservative",
+  "discarded_sessions": {
+    "median": 14,
+    "min": 5,
+    "max": 15
+  },
+  "discarded_excess_return": {
+    "rev_yoy_gt_0": {
+      "months": 138,
+      "mean_pct": 0.4778,
+      "t_stat": 8.469,
+      "share_of_months_positive": 0.8188
+    },
+    "rev_yoy_gt_20": {
+      "months": 138,
+      "mean_pct": 0.909,
+      "t_stat": 8.328,
+      "share_of_months_positive": 0.7899
+    }
+  },
+  "comparison_window_after_month_end": {
+    "note": "same number of sessions immediately AFTER the month end; distinguishes 'the discarded window is special' from 'the whole post-disclosure period drifts'",
+    "rev_yoy_gt_0": {
+      "months": 137,
+      "mean_pct": 0.203,
+      "t_stat": 3.176,
+      "share_of_months_positive": 0.6861
+    }
+  },
+  "monthly": [
+    {
+      "next_equal_span_excess": 0.0022588160912790298,
+      "period": "2015-02",
+      "deadline_session": "2015-02-10",
+      "month_end_session": "2015-02-26",
+      "discarded_sessions": 6,
+      "rev_plus_excess": 0.007814155483721639,
+      "rev_strong_excess": 0.012954964403228977,
+      "universe_return": 0.022188189346375016
+    },
+    {
+      "next_equal_span_excess": 0.005051758670941347,
+      "period": "2015-03",
+      "deadline_session": "2015-03-10",
+      "month_end_session": "2015-03-31",
+      "discarded_sessions": 15,
+      "rev_plus_excess": 0.013625977673583364,
+      "rev_strong_excess": 0.025223028725928444,
+      "universe_return": 0.002277587919570179
+    },
+    {
+      "next_equal_span_excess": 0.004883945462380933,
+      "period": "2015-04",
+      "deadline_session": "2015-04-10",
+      "month_end_session": "2015-04-30",
+      "discarded_sessions": 14,
+      "rev_plus_excess": 0.011497862089525695,
+      "rev_strong_excess": 0.026366522243567864,
+      "universe_return": -0.0009750251597705116
+    },
+    {
+      "next_equal_span_excess": 0.017771917057776684,
+      "period": "2015-05",
+      "deadline_session": "2015-05-11",
+      "month_end_session": "2015-05-29",
+      "discarded_sessions": 14,
+      "rev_plus_excess": 0.013544262273211944,
+      "rev_strong_excess": 0.02282309642639325,
+      "universe_return": 0.024076859138306764
+    },
+    {
+      "next_equal_span_excess": 0.010011080514398016,
+      "period": "2015-06",
+      "deadline_session": "2015-06-10",
+      "month_end_session": "2015-06-30",
+      "discarded_sessions": 13,
+      "rev_plus_excess": 0.0031452754769349823,
+      "rev_strong_excess": 0.009307380160762121,
+      "universe_return": 0.013550292262862145
+    },
+    {
+      "next_equal_span_excess": 0.013604517518298838,
+      "period": "2015-07",
+      "deadline_session": "2015-07-13",
+      "month_end_session": "2015-07-31",
+      "discarded_sessions": 14,
+      "rev_plus_excess": 0.010029565428900697,
+      "rev_strong_excess": -0.007694648614052488,
+      "universe_return": -0.08176024725998952
+    },
+    {
+      "next_equal_span_excess": 0.00028135199225284846,
+      "period": "2015-08",
+      "deadline_session": "2015-08-10",
+      "month_end_session": "2015-08-31",
+      "discarded_sessions": 15,
+      "rev_plus_excess": 0.0020583885774583116,
+      "rev_strong_excess": 0.007546196226014934,
+      "universe_return": -0.06559569530107344
+    },
+    {
+      "next_equal_span_excess": -0.011382743267851506,
+      "period": "2015-09",
+      "deadline_session": "2015-09-10",
+      "month_end_session": "2015-09-30",
+      "discarded_sessions": 12,
+      "rev_plus_excess": 0.01087000151874249,
+      "rev_strong_excess": 0.020088148668241677,
+      "universe_return": 0.01684522430604099
+    },
+    {
+      "next_equal_span_excess": 0.005805894575819567,
+      "period": "2015-10",
+      "deadline_session": "2015-10-12",
+      "month_end_session": "2015-10-30",
+      "discarded_sessions": 14,
+      "rev_plus_excess": 0.0033803935076296907,
+      "rev_strong_excess": 0.017333140588589264,
+      "universe_return": 0.03772728507246521
+    },
+    {
+      "next_equal_span_excess": 0.0006859962515786732,
+      "period": "2015-11",
+      "deadline_session": "2015-11-10",
+      "month_end_session": "2015-11-30",
+      "discarded_sessions": 14,
+      "rev_plus_excess": 0.015167537562928362,
+      "rev_strong_excess": 0.02130200405176424,
+      "universe_return": -0.013957511796784429
+    },
+    {
+      "next_equal_span_excess": 0.0014361390069757979,
+      "period": "2015-12",
+      "deadline_session": "2015-12-10",
+      "month_end_session": "2015-12-31",
+      "discarded_sessions": 15,
+      "rev_plus_excess": -0.0019179235904724294,
+      "rev_strong_excess": -0.003011069108614561,
+      "universe_return": 0.0048228405819089925
+    },
+    {
+      "next_equal_span_excess": 0.00867103351974896,
+      "period": "2016-01",
+      "deadline_session": "2016-01-11",
+      "month_end_session": "2016-01-29",
+      "discarded_sessions": 14,
+      "rev_plus_excess": 0.0021398223937556353,
+      "rev_strong_excess": 0.0013526505499910288,
+      "universe_return": 0.027405339098393555
+    },
+    {
+      "next_equal_span_excess": -0.0073192387820214914,
+      "period": "2016-02",
+      "deadline_session": "2016-02-15",
+      "month_end_session": "2016-02-26",
+      "discarded_sessions": 9,
+      "rev_plus_excess": 0.006124993454496089,
+      "rev_strong_excess": 0.01641129785922437,
+      "universe_return": 0.05145694768606487
+    },
+    {
+      "next_equal_span_excess": 0.006126114558720166,
+      "period": "2016-03",
+      "deadline_session": "2016-03-10",
+      "month_end_session": "2016-03-31",
+      "discarded_sessions": 15,
+      "rev_plus_excess": 0.009788994725988133,
+      "rev_strong_excess": 0.008216020849272934,
+      "universe_return": -0.018356644632106525
+    },
+    {
+      "next_equal_span_excess": 0.0033874039024207256,
+      "period": "2016-04",
+      "deadline_session": "2016-04-11",
+      "month_end_session": "2016-04-29",
+      "discarded_sessions": 14,
+      "rev_plus_excess": 0.002384735958563325,
+      "rev_strong_excess": 0.001717277173511167,
+      "universe_return": -0.03789390396574326
+    },
+    {
+      "next_equal_span_excess": -0.0017027134748434057,
+      "period": "2016-05",
+      "deadline_session": "2016-05-10",
+      "month_end_session": "2016-05-31",
+      "discarded_sessions": 15,
+      "rev_plus_excess": 0.005203665854183172,
+      "rev_strong_excess": 0.01571155794197774,
+      "universe_return": 0.042191769844098066
+    },
+    {
+      "next_equal_span_excess": 0.004497224739781015,
+      "period": "2016-06",
+      "deadline_session": "2016-06-13",
+      "month_end_session": "2016-06-30",
+      "discarded_sessions": 13,
+      "rev_plus_excess": 0.0020960797417949664,
+      "rev_strong_excess": 0.002158514887332534,
+      "universe_return": 0.026934093881647327
+    },
+    {
+      "next_equal_span_excess": 0.006260497917179508,
+      "period": "2016-07",
+      "deadline_session": "2016-07-11",
+      "month_end_session": "2016-07-29",
+      "discarded_sessions": 14,
+      "rev_plus_excess": 0.003893716422341119,
+      "rev_strong_excess": 0.00882128382547858,
+      "universe_return": 0.033806391930240785
+    },
+    {
+      "next_equal_span_excess": 0.0008329003322207467,
+      "period": "2016-08",
+      "deadline_session": "2016-08-10",
+      "month_end_session": "2016-08-31",
+      "discarded_sessions": 15,
+      "rev_plus_excess": 0.0035739248837933415,
+      "rev_strong_excess": 0.00999054500535699,
+      "universe_return": 0.011937140999059615
+    },
+    {
+      "next_equal_span_excess": 0.0025023377497306945,
+      "period": "2016-09",
+      "deadline_session": "2016-09-12",
+      "month_end_session": "2016-09-30",
+      "discarded_sessions": 10,
+      "rev_plus_excess": 0.0016628851575614181,
+      "rev_strong_excess": -0.001808320627570078,
+      "universe_return": 0.010115694502934038
+    },
+    {
+      "next_equal_span_excess": -0.0015628512286183366,
+      "period": "2016-10",
+      "deadline_session": "2016-10-11",
+      "month_end_session": "2016-10-31",
+      "discarded_sessions": 14,
+      "rev_plus_excess": 0.0029703332930978757,
+      "rev_strong_excess": -0.0003658092299433169,
+      "universe_return": -0.00489524255072121
+    },
+    {
+      "next_equal_span_excess": 0.0006765251612305435,
+      "period": "2016-11",
+      "deadline_session": "2016-11-10",
+      "month_end_session": "2016-11-30",
+      "discarded_sessions": 14,
+      "rev_plus_excess": -0.0018511880696195568,
+      "rev_strong_excess": 0.01637024463241649,
+      "universe_return": 0.026464681853917132
+    },
+    {
+      "next_equal_span_excess": 0.003555502071891873,
+      "period": "2016-12",
+      "deadline_session": "2016-12-12",
+      "month_end_session": "2016-12-30",
+      "discarded_sessions": 14,
+      "rev_plus_excess": -0.0038284184938779543,
+      "rev_strong_excess": 0.0014910944655803773,
+      "universe_return": 0.004971389123024807
+    },
+    {
+      "next_equal_span_excess": -0.0004645379352318166,
+      "period": "2017-01",
+      "deadline_session": "2017-01-10",
+      "month_end_session": "2017-01-24",
+      "discarded_sessions": 10,
+      "rev_plus_excess": 0.0031863711217616254,
+      "rev_strong_excess": 0.011679654561092274,
+      "universe_return": 0.010495075693297645
+    },
+    {
+      "next_equal_span_excess": 0.007809228263580702,
+      "period": "2017-02",
+      "deadline_session": "2017-02-10",
+      "month_end_session": "2017-02-24",
+      "discarded_sessions": 10,
+      "rev_plus_excess": -0.0016799455079924315,
+      "rev_strong_excess": -0.004833226618852455,
+      "universe_return": 0.026065258619589256
+    },
+    {
+      "next_equal_span_excess": 0.007721879581759216,
+      "period": "2017-03",
+      "deadline_session": "2017-03-10",
+      "month_end_session": "2017-03-31",
+      "discarded_sessions": 15,
+      "rev_plus_excess": 0.003158022984049196,
+      "rev_strong_excess": 0.0029331769700432046,
+      "universe_return": 0.015696533195715495
+    },
+    {
+      "next_equal_span_excess": 0.005728576276251814,
+      "period": "2017-04",
+      "deadline_session": "2017-04-10",
+      "month_end_session": "2017-04-28",
+      "discarded_sessions": 14,
+      "rev_plus_excess": 0.0032858391678720986,
+      "rev_strong_excess": -0.004807008618608461,
+      "universe_return": -0.01496722818892018
+    },
+    {
+      "next_equal_span_excess": 0.0003511415405631369,
+      "period": "2017-05",
+      "deadline_session": "2017-05-10",
+      "month_end_session": "2017-05-31",
+      "discarded_sessions": 13,
+      "rev_plus_excess": 0.0047491405043914164,
+      "rev_strong_excess": -0.0008508723778683867,
+      "universe_return": 0.014244991008012568
+    },
+    {
+      "next_equal_span_excess": 0.012384633526076532,
+      "period": "2017-06",
+      "deadline_session": "2017-06-12",
+      "month_end_session": "2017-06-30",
+      "discarded_sessions": 14,
+      "rev_plus_excess": -3.370491908605646e-05,
+      "rev_strong_excess": -0.004248656771830628,
+      "universe_return": 0.0017719750708765157
+    },
+    {
+      "next_equal_span_excess": 0.010461524225127083,
+      "period": "2017-07",
+      "deadline_session": "2017-07-10",
+      "month_end_session": "2017-07-31",
+      "discarded_sessions": 15,
+      "rev_plus_excess": 0.011334859922420976,
+      "rev_strong_excess": 0.03216574887740574,
+      "universe_return": 0.035074095491821694
+    },
+    {
+      "next_equal_span_excess": -0.003109625300061123,
+      "period": "2017-08",
+      "deadline_session": "2017-08-10",
+      "month_end_session": "2017-08-31",
+      "discarded_sessions": 15,
+      "rev_plus_excess": 0.00902336506660601,
+      "rev_strong_excess": 0.0276023152269678,
+      "universe_return": 0.05950986728275475
+    },
+    {
+      "next_equal_span_excess": 0.00356895777264115,
+      "period": "2017-09",
+      "deadline_session": "2017-09-11",
+      "month_end_session": "2017-09-29",
+      "discarded_sessions": 14,
+      "rev_plus_excess": -0.00423579940430684,
+      "rev_strong_excess": -0.016320756517357437,
+      "universe_return": -0.02743131569044448
+    },
+    {
+      "next_equal_span_excess": 0.005566946144875024,
+      "period": "2017-10",
+      "deadline_session": "2017-10-11",
+      "month_end_session": "2017-10-31",
+      "discarded_sessions": 14,
+      "rev_plus_excess": 0.004703382396887702,
+      "rev_strong_excess": 0.011556561906624532,
+      "universe_return": 0.018018209487644682
+    },
+    {
+      "next_equal_span_excess": 0.00021934420559642336,
+      "period": "2017-11",
+      "deadline_session": "2017-11-10",
+      "month_end_session": "2017-11-30",
+      "discarded_sessions": 14,
+      "rev_plus_excess": 0.0020036251815756887,
+      "rev_strong_excess": 0.014334819574754094,
+      "universe_return": 0.004927663047254766
+    },
+    {
+      "next_equal_span_excess": 0.004329542033111446,
+      "period": "2017-12",
+      "deadline_session": "2017-12-11",
+      "month_end_session": "2017-12-29",
+      "discarded_sessions": 14,
+      "rev_plus_excess": 0.0012766925444431011,
+      "rev_strong_excess": 0.003941136305976995,
+      "universe_return": 0.021312960006908563
+    },
+    {
+      "next_equal_span_excess": 0.007614035049189276,
+      "period": "2018-01",
+      "deadline_session": "2018-01-10",
+      "month_end_session": "2018-01-31",
+      "discarded_sessions": 15,
+      "rev_plus_excess": 0.0020767699311190855,
+      "rev_strong_excess": 0.016621096154542665,
+      "universe_return": 0.010651700734616557
+    },
+    {
+      "next_equal_span_excess": 0.001932411483918289,
+      "period": "2018-02",
+      "deadline_session": "2018-02-12",
+      "month_end_session": "2018-02-27",
+      "discarded_sessions": 5,
+      "rev_plus_excess": 0.0009789008197050586,
+      "rev_strong_excess": 0.004976398790842142,
+      "universe_return": 0.057599257978170164
+    },
+    {
+      "next_equal_span_excess": 0.005776359103468499,
+      "period": "2018-03",
+      "deadline_session": "2018-03-12",
+      "month_end_session": "2018-03-30",
+      "discarded_sessions": 14,
+      "rev_plus_excess": 0.006328694362568176,
+      "rev_strong_excess": 0.006107550662267092,
+      "universe_return": 0.008653196996181865
+    },
+    {
+      "next_equal_span_excess": 0.015146378798035053,
+      "period": "2018-04",
+      "deadline_session": "2018-04-10",
+      "month_end_session": "2018-04-30",
+      "discarded_sessions": 14,
+      "rev_plus_excess": 0.003686495808943608,
+      "rev_strong_excess": 0.005892492511568526,
+      "universe_return": -0.03293774285161139
+    },
+    {
+      "next_equal_span_excess": -0.05342235654661996,
+      "period": "2018-05",
+      "deadline_session": "2018-05-10",
+      "month_end_session": "2018-05-31",
+      "discarded_sessions": 15,
+      "rev_plus_excess": 0.006186283964454028,
+      "rev_strong_excess": 0.01609294450306573,
+      "universe_return": 0.027702383796218224
+    },
+    {
+      "next_equal_span_excess": 0.0003379237186090737,
+      "period": "2018-06",
+      "deadline_session": "2018-06-11",
+      "month_end_session": "2018-06-29",
+      "discarded_sessions": 13,
+      "rev_plus_excess": 0.001751565236888214,
+      "rev_strong_excess": -0.0006399576678141443,
+      "universe_return": -0.02509164290003432
+    },
+    {
+      "next_equal_span_excess": 0.0034227659170386684,
+      "period": "2018-07",
+      "deadline_session": "2018-07-10",
+      "month_end_session": "2018-07-31",
+      "discarded_sessions": 15,
+      "rev_plus_excess": 0.00015660094864932902,
+      "rev_strong_excess": -0.0013538466640688925,
+      "universe_return": 0.026106795636509004
+    },
+    {
+      "next_equal_span_excess": -0.0013050858215613304,
+      "period": "2018-08",
+      "deadline_session": "2018-08-10",
+      "month_end_session": "2018-08-31",
+      "discarded_sessions": 15,
+      "rev_plus_excess": 0.005970653953807569,
+      "rev_strong_excess": 0.0025084286856918853,
+      "universe_return": -0.014170521533238173
+    },
+    {
+      "next_equal_span_excess": 9.799810332242198e-05,
+      "period": "2018-09",
+      "deadline_session": "2018-09-10",
+      "month_end_session": "2018-09-28",
+      "discarded_sessions": 13,
+      "rev_plus_excess": -0.0011813735984254614,
+      "rev_strong_excess": -0.002632635354854168,
+      "universe_return": 0.022342934335615506
+    },
+    {
+      "next_equal_span_excess": -0.002647244721638624,
+      "period": "2018-10",
+      "deadline_session": "2018-10-11",
+      "month_end_session": "2018-10-31",
+      "discarded_sessions": 14,
+      "rev_plus_excess": 0.003488982518140433,
+      "rev_strong_excess": -0.0012237688236094047,
+      "universe_return": -0.01357055535707576
+    },
+    {
+      "next_equal_span_excess": 0.0033206026145172797,
+      "period": "2018-11",
+      "deadline_session": "2018-11-12",
+      "month_end_session": "2018-11-30",
+      "discarded_sessions": 14,
+      "rev_plus_excess": 0.0007945988888916761,
+      "rev_strong_excess": -0.0003005929847814809,
+      "universe_return": 0.06405136790533515
+    },
+    {
+      "next_equal_span_excess": 0.006591595516043179,
+      "period": "2018-12",
+      "deadline_session": "2018-12-10",
+      "month_end_session": "2018-12-28",
+      "discarded_sessions": 14,
+      "rev_plus_excess": 0.009474956639222449,
+      "rev_strong_excess": 0.004606016837677826,
+      "universe_return": 0.0021527209733272655
+    },
+    {
+      "next_equal_span_excess": 0.004021440437221621,
+      "period": "2019-01",
+      "deadline_session": "2019-01-10",
+      "month_end_session": "2019-01-30",
+      "discarded_sessions": 14,
+      "rev_plus_excess": 0.005568705896807715,
+      "rev_strong_excess": 0.011021731061566665,
+      "universe_return": 0.027516508264707983
+    },
+    {
+      "next_equal_span_excess": 0.008256837979667267,
+      "period": "2019-02",
+      "deadline_session": "2019-02-11",
+      "month_end_session": "2019-02-27",
+      "discarded_sessions": 12,
+      "rev_plus_excess": 0.004430279663426913,
+      "rev_strong_excess": 0.003623996161962864,
+      "universe_return": 0.043665300237261485
+    },
+    {
+      "next_equal_span_excess": -0.0028601385530394284,
+      "period": "2019-03",
+      "deadline_session": "2019-03-11",
+      "month_end_session": "2019-03-29",
+      "discarded_sessions": 14,
+      "rev_plus_excess": 0.006161745477002965,
+      "rev_strong_excess": 0.012465893190270572,
+      "universe_return": 0.029679009437852535
+    },
+    {
+      "next_equal_span_excess": 0.011249980456980863,
+      "period": "2019-04",
+      "deadline_session": "2019-04-10",
+      "month_end_session": "2019-04-30",
+      "discarded_sessions": 14,
+      "rev_plus_excess": 0.005329761897221237,
+      "rev_strong_excess": 0.014269030973829809,
+      "universe_return": -0.018170258774348642
+    },
+    {
+      "next_equal_span_excess": -0.00012195957030459309,
+      "period": "2019-05",
+      "deadline_session": "2019-05-10",
+      "month_end_session": "2019-05-31",
+      "discarded_sessions": 15,
+      "rev_plus_excess": 0.004992197634483914,
+      "rev_strong_excess": 0.006788858214644027,
+      "universe_return": -0.014272469312490769
+    },
+    {
+      "next_equal_span_excess": 0.008884673120735112,
+      "period": "2019-06",
+      "deadline_session": "2019-06-10",
+      "month_end_session": "2019-06-28",
+      "discarded_sessions": 14,
+      "rev_plus_excess": -0.001507561108197157,
+      "rev_strong_excess": -0.003552253865480113,
+      "universe_return": 0.03211539661765269
+    },
+    {
+      "next_equal_span_excess": 0.011419574242378288,
+      "period": "2019-07",
+      "deadline_session": "2019-07-10",
+      "month_end_session": "2019-07-31",
+      "discarded_sessions": 15,
+      "rev_plus_excess": 0.009645061540370443,
+      "rev_strong_excess": 0.01564198404218126,
+      "universe_return": 0.01930548699106031
+    },
+    {
+      "next_equal_span_excess": 0.0008544435129819415,
+      "period": "2019-08",
+      "deadline_session": "2019-08-12",
+      "month_end_session": "2019-08-30",
+      "discarded_sessions": 14,
+      "rev_plus_excess": 0.0032446431531427747,
+      "rev_strong_excess": 0.004484259533432532,
+      "universe_return": 0.02189702439992585
+    },
+    {
+      "next_equal_span_excess": 0.0009188459554671027,
+      "period": "2019-09",
+      "deadline_session": "2019-09-10",
+      "month_end_session": "2019-09-27",
+      "discarded_sessions": 12,
+      "rev_plus_excess": 0.004926283711307995,
+      "rev_strong_excess": 0.010379380685032961,
+      "universe_return": -0.005382661798535576
+    },
+    {
+      "next_equal_span_excess": 0.0033561142635401063,
+      "period": "2019-10",
+      "deadline_session": "2019-10-14",
+      "month_end_session": "2019-10-31",
+      "discarded_sessions": 13,
+      "rev_plus_excess": 0.003530352577104795,
+      "rev_strong_excess": 0.0005980418615681507,
+      "universe_return": 0.02242954263866399
+    },
+    {
+      "next_equal_span_excess": -0.002266492190513312,
+      "period": "2019-11",
+      "deadline_session": "2019-11-11",
+      "month_end_session": "2019-11-29",
+      "discarded_sessions": 14,
+      "rev_plus_excess": -0.0021728633338625424,
+      "rev_strong_excess": 0.0012113268378816586,
+      "universe_return": 0.018395907950639577
+    },
+    {
+      "next_equal_span_excess": 0.0006602165648007668,
+      "period": "2019-12",
+      "deadline_session": "2019-12-10",
+      "month_end_session": "2019-12-31",
+      "discarded_sessions": 15,
+      "rev_plus_excess": -0.001567413347247991,
+      "rev_strong_excess": -0.002066010272216,
+      "universe_return": 0.02326324876337305
+    },
+    {
+      "next_equal_span_excess": 0.004202575416175955,
+      "period": "2020-01",
+      "deadline_session": "2020-01-10",
+      "month_end_session": "2020-01-31",
+      "discarded_sessions": 8,
+      "rev_plus_excess": 0.004621579476414096,
+      "rev_strong_excess": 0.0003563109328197159,
+      "universe_return": -0.0452992563896354
+    },
+    {
+      "next_equal_span_excess": 0.00028248963534527327,
+      "period": "2020-02",
+      "deadline_session": "2020-02-10",
+      "month_end_session": "2020-02-27",
+      "discarded_sessions": 13,
+      "rev_plus_excess": 0.013374748217686638,
+      "rev_strong_excess": 0.014295334300971543,
+      "universe_return": -0.0028717769034580483
+    },
+    {
+      "next_equal_span_excess": 0.0016143285650891126,
+      "period": "2020-03",
+      "deadline_session": "2020-03-10",
+      "month_end_session": "2020-03-31",
+      "discarded_sessions": 15,
+      "rev_plus_excess": 0.007460786769732747,
+      "rev_strong_excess": 0.012731386784367277,
+      "universe_return": -0.16039764936831638
+    },
+    {
+      "next_equal_span_excess": 0.011274771143134396,
+      "period": "2020-04",
+      "deadline_session": "2020-04-10",
+      "month_end_session": "2020-04-30",
+      "discarded_sessions": 14,
+      "rev_plus_excess": 0.008780714600979456,
+      "rev_strong_excess": 0.029995359250283182,
+      "universe_return": 0.10950879648904491
+    },
+    {
+      "next_equal_span_excess": 0.004871775624427352,
+      "period": "2020-05",
+      "deadline_session": "2020-05-11",
+      "month_end_session": "2020-05-29",
+      "discarded_sessions": 14,
+      "rev_plus_excess": 0.007187230679149399,
+      "rev_strong_excess": 0.025869283023522288,
+      "universe_return": 0.02424069698591133
+    },
+    {
+      "next_equal_span_excess": 0.01199304589201309,
+      "period": "2020-06",
+      "deadline_session": "2020-06-10",
+      "month_end_session": "2020-06-30",
+      "discarded_sessions": 12,
+      "rev_plus_excess": 0.013895319639359922,
+      "rev_strong_excess": 0.020433841924894947,
+      "universe_return": 0.02099885164458199
+    },
+    {
+      "next_equal_span_excess": -0.004656276396194587,
+      "period": "2020-07",
+      "deadline_session": "2020-07-10",
+      "month_end_session": "2020-07-31",
+      "discarded_sessions": 15,
+      "rev_plus_excess": 0.017061959880999764,
+      "rev_strong_excess": 0.024503074615465477,
+      "universe_return": -0.014935115334687386
+    },
+    {
+      "next_equal_span_excess": -0.003943677672872042,
+      "period": "2020-08",
+      "deadline_session": "2020-08-10",
+      "month_end_session": "2020-08-31",
+      "discarded_sessions": 15,
+      "rev_plus_excess": 0.0008437231711025082,
+      "rev_strong_excess": 0.024889016773917305,
+      "universe_return": 0.024377319035724897
+    },
+    {
+      "next_equal_span_excess": 0.0025921465068164534,
+      "period": "2020-09",
+      "deadline_session": "2020-09-10",
+      "month_end_session": "2020-09-30",
+      "discarded_sessions": 14,
+      "rev_plus_excess": 0.0017262418714390354,
+      "rev_strong_excess": -0.0001480520477370323,
+      "universe_return": -0.03364495724763908
+    },
+    {
+      "next_equal_span_excess": -0.0004098705645958628,
+      "period": "2020-10",
+      "deadline_session": "2020-10-12",
+      "month_end_session": "2020-10-30",
+      "discarded_sessions": 14,
+      "rev_plus_excess": 0.0006592473378062812,
+      "rev_strong_excess": 0.0021776272459125556,
+      "universe_return": -0.007928137591383631
+    },
+    {
+      "next_equal_span_excess": 0.0016242148527454356,
+      "period": "2020-11",
+      "deadline_session": "2020-11-10",
+      "month_end_session": "2020-11-30",
+      "discarded_sessions": 14,
+      "rev_plus_excess": 0.006909552425980264,
+      "rev_strong_excess": 0.0016919986757630567,
+      "universe_return": 0.06564833186406277
+    },
+    {
+      "next_equal_span_excess": 0.004268640788896574,
+      "period": "2020-12",
+      "deadline_session": "2020-12-10",
+      "month_end_session": "2020-12-31",
+      "discarded_sessions": 15,
+      "rev_plus_excess": -1.374086750229736e-05,
+      "rev_strong_excess": 0.005794899990974919,
+      "universe_return": 0.029745618304469403
+    },
+    {
+      "next_equal_span_excess": 0.004205324898893609,
+      "period": "2021-01",
+      "deadline_session": "2021-01-11",
+      "month_end_session": "2021-01-29",
+      "discarded_sessions": 14,
+      "rev_plus_excess": 0.0053811895540830865,
+      "rev_strong_excess": 0.007623609065934359,
+      "universe_return": -0.057661930870816655
+    },
+    {
+      "next_equal_span_excess": -0.0008526933990201033,
+      "period": "2021-02",
+      "deadline_session": "2021-02-17",
+      "month_end_session": "2021-02-26",
+      "discarded_sessions": 7,
+      "rev_plus_excess": 0.0028555754965222738,
+      "rev_strong_excess": 0.007575370278565079,
+      "universe_return": 0.056520386513313335
+    },
+    {
+      "next_equal_span_excess": 0.004039516229466619,
+      "period": "2021-03",
+      "deadline_session": "2021-03-10",
+      "month_end_session": "2021-03-31",
+      "discarded_sessions": 15,
+      "rev_plus_excess": 0.01506830369807377,
+      "rev_strong_excess": 0.029128531307692634,
+      "universe_return": 0.09316414490062162
+    },
+    {
+      "next_equal_span_excess": -0.004770835271491303,
+      "period": "2021-04",
+      "deadline_session": "2021-04-12",
+      "month_end_session": "2021-04-29",
+      "discarded_sessions": 13,
+      "rev_plus_excess": 0.004420826448847705,
+      "rev_strong_excess": 0.006703289213910633,
+      "universe_return": 0.0318210339407314
+    },
+    {
+      "next_equal_span_excess": 0.004601689861541337,
+      "period": "2021-05",
+      "deadline_session": "2021-05-10",
+      "month_end_session": "2021-05-31",
+      "discarded_sessions": 15,
+      "rev_plus_excess": 0.00025822621667929285,
+      "rev_strong_excess": -0.003466779624381862,
+      "universe_return": -0.03676798114281367
+    },
+    {
+      "next_equal_span_excess": 0.007822392047705545,
+      "period": "2021-06",
+      "deadline_session": "2021-06-10",
+      "month_end_session": "2021-06-30",
+      "discarded_sessions": 13,
+      "rev_plus_excess": 0.013813353553592547,
+      "rev_strong_excess": 0.024160204471685875,
+      "universe_return": 0.06967229640894253
+    },
+    {
+      "next_equal_span_excess": 0.0003081374269480325,
+      "period": "2021-07",
+      "deadline_session": "2021-07-12",
+      "month_end_session": "2021-07-30",
+      "discarded_sessions": 14,
+      "rev_plus_excess": 0.0003351899517147726,
+      "rev_strong_excess": -0.0055050244570138615,
+      "universe_return": -0.019413375124365778
+    },
+    {
+      "next_equal_span_excess": -0.00507043176867026,
+      "period": "2021-08",
+      "deadline_session": "2021-08-10",
+      "month_end_session": "2021-08-31",
+      "discarded_sessions": 15,
+      "rev_plus_excess": 0.0015978953762751961,
+      "rev_strong_excess": 0.00425948023433253,
+      "universe_return": -0.008182063723889276
+    },
+    {
+      "next_equal_span_excess": -0.004094604279835198,
+      "period": "2021-09",
+      "deadline_session": "2021-09-10",
+      "month_end_session": "2021-09-30",
+      "discarded_sessions": 12,
+      "rev_plus_excess": -0.003514630177971047,
+      "rev_strong_excess": -0.00767411350924542,
+      "universe_return": -0.010703107963252148
+    },
+    {
+      "next_equal_span_excess": 0.006417773564667752,
+      "period": "2021-10",
+      "deadline_session": "2021-10-12",
+      "month_end_session": "2021-10-29",
+      "discarded_sessions": 13,
+      "rev_plus_excess": 0.0007771628781575446,
+      "rev_strong_excess": 0.0016883806966604964,
+      "universe_return": 0.06334533395005854
+    },
+    {
+      "next_equal_span_excess": 0.0013440047472917573,
+      "period": "2021-11",
+      "deadline_session": "2021-11-10",
+      "month_end_session": "2021-11-30",
+      "discarded_sessions": 14,
+      "rev_plus_excess": 0.005287380978449961,
+      "rev_strong_excess": 0.005934872102356797,
+      "universe_return": 0.019731624024712485
+    },
+    {
+      "next_equal_span_excess": -0.0033686707292004264,
+      "period": "2021-12",
+      "deadline_session": "2021-12-10",
+      "month_end_session": "2021-12-30",
+      "discarded_sessions": 14,
+      "rev_plus_excess": 0.0009206805183525867,
+      "rev_strong_excess": 0.0010615568371973375,
+      "universe_return": 0.030267278884608624
+    },
+    {
+      "next_equal_span_excess": 0.003694710365048183,
+      "period": "2022-01",
+      "deadline_session": "2022-01-10",
+      "month_end_session": "2022-01-26",
+      "discarded_sessions": 12,
+      "rev_plus_excess": 0.0037695661725156704,
+      "rev_strong_excess": 0.006146567767912642,
+      "universe_return": -0.06918397656660247
+    },
+    {
+      "next_equal_span_excess": 0.0008126511979628034,
+      "period": "2022-02",
+      "deadline_session": "2022-02-10",
+      "month_end_session": "2022-02-25",
+      "discarded_sessions": 11,
+      "rev_plus_excess": 0.008931608470152192,
+      "rev_strong_excess": 0.01455388094786288,
+      "universe_return": -0.031508780801705556
+    },
+    {
+      "next_equal_span_excess": -0.003051935797923913,
+      "period": "2022-03",
+      "deadline_session": "2022-03-10",
+      "month_end_session": "2022-03-31",
+      "discarded_sessions": 15,
+      "rev_plus_excess": 0.002184539115610451,
+      "rev_strong_excess": 0.006252155539494569,
+      "universe_return": 0.029927359281756882
+    },
+    {
+      "next_equal_span_excess": 0.004151088573998856,
+      "period": "2022-04",
+      "deadline_session": "2022-04-11",
+      "month_end_session": "2022-04-29",
+      "discarded_sessions": 14,
+      "rev_plus_excess": 0.005759868432034465,
+      "rev_strong_excess": 0.005622561823356326,
+      "universe_return": -0.042194306578569075
+    },
+    {
+      "next_equal_span_excess": -0.003756427234365353,
+      "period": "2022-05",
+      "deadline_session": "2022-05-10",
+      "month_end_session": "2022-05-31",
+      "discarded_sessions": 15,
+      "rev_plus_excess": 0.005897031989006818,
+      "rev_strong_excess": 0.016810943050956373,
+      "universe_return": 0.03982316810258536
+    },
+    {
+      "next_equal_span_excess": 0.0020634414951949728,
+      "period": "2022-06",
+      "deadline_session": "2022-06-10",
+      "month_end_session": "2022-06-30",
+      "discarded_sessions": 14,
+      "rev_plus_excess": 0.0027911783456473493,
+      "rev_strong_excess": -0.0032048485991859194,
+      "universe_return": -0.10332446560763146
+    },
+    {
+      "next_equal_span_excess": 0.0033627728800473544,
+      "period": "2022-07",
+      "deadline_session": "2022-07-11",
+      "month_end_session": "2022-07-29",
+      "discarded_sessions": 14,
+      "rev_plus_excess": 0.007773933921603596,
+      "rev_strong_excess": 0.014836237148677253,
+      "universe_return": 0.06433295898367658
+    },
+    {
+      "next_equal_span_excess": 0.012317738123882982,
+      "period": "2022-08",
+      "deadline_session": "2022-08-10",
+      "month_end_session": "2022-08-31",
+      "discarded_sessions": 15,
+      "rev_plus_excess": -0.00014793311086230831,
+      "rev_strong_excess": 0.0077745035959969205,
+      "universe_return": 0.07006320543410645
+    },
+    {
+      "next_equal_span_excess": -0.006443449953149952,
+      "period": "2022-09",
+      "deadline_session": "2022-09-12",
+      "month_end_session": "2022-09-30",
+      "discarded_sessions": 14,
+      "rev_plus_excess": 0.010529129075903698,
+      "rev_strong_excess": 0.014462933984928483,
+      "universe_return": -0.09527528709720384
+    },
+    {
+      "next_equal_span_excess": -0.008348115107585846,
+      "period": "2022-10",
+      "deadline_session": "2022-10-11",
+      "month_end_session": "2022-10-31",
+      "discarded_sessions": 14,
+      "rev_plus_excess": -0.0028934838544932215,
+      "rev_strong_excess": -0.007976628514662493,
+      "universe_return": -0.02924043528689893
+    },
+    {
+      "next_equal_span_excess": 0.003048235370414154,
+      "period": "2022-11",
+      "deadline_session": "2022-11-10",
+      "month_end_session": "2022-11-30",
+      "discarded_sessions": 14,
+      "rev_plus_excess": 0.0038847018487463553,
+      "rev_strong_excess": 0.007156299262200433,
+      "universe_return": 0.07264718756742829
+    },
+    {
+      "next_equal_span_excess": -0.011170767641125873,
+      "period": "2022-12",
+      "deadline_session": "2022-12-12",
+      "month_end_session": "2022-12-30",
+      "discarded_sessions": 14,
+      "rev_plus_excess": -0.0032762203610209595,
+      "rev_strong_excess": -0.006959753511605729,
+      "universe_return": -0.03306065924282227
+    },
+    {
+      "next_equal_span_excess": 0.0035224833766026448,
+      "period": "2023-01",
+      "deadline_session": "2023-01-10",
+      "month_end_session": "2023-01-31",
+      "discarded_sessions": 7,
+      "rev_plus_excess": 0.0019380341883008072,
+      "rev_strong_excess": 0.004013736994952877,
+      "universe_return": 0.03067795346647303
+    },
+    {
+      "next_equal_span_excess": -0.003151453074215836,
+      "period": "2023-02",
+      "deadline_session": "2023-02-10",
+      "month_end_session": "2023-02-24",
+      "discarded_sessions": 10,
+      "rev_plus_excess": 0.018450386896921078,
+      "rev_strong_excess": 0.03258588386197092,
+      "universe_return": 0.03592813053512868
+    },
+    {
+      "next_equal_span_excess": 0.017220443198997345,
+      "period": "2023-03",
+      "deadline_session": "2023-03-10",
+      "month_end_session": "2023-03-31",
+      "discarded_sessions": 15,
+      "rev_plus_excess": 0.010909021462871659,
+      "rev_strong_excess": 0.01879748319725141,
+      "universe_return": 0.026323779078843954
+    },
+    {
+      "next_equal_span_excess": 0.010473250865300786,
+      "period": "2023-04",
+      "deadline_session": "2023-04-10",
+      "month_end_session": "2023-04-28",
+      "discarded_sessions": 14,
+      "rev_plus_excess": 0.029558238432010202,
+      "rev_strong_excess": 0.06413175917703241,
+      "universe_return": 0.0019483638476131661
+    },
+    {
+      "next_equal_span_excess": 0.013467637905764392,
+      "period": "2023-05",
+      "deadline_session": "2023-05-10",
+      "month_end_session": "2023-05-31",
+      "discarded_sessions": 15,
+      "rev_plus_excess": 0.00750509244901694,
+      "rev_strong_excess": 0.017797345120678272,
+      "universe_return": 0.038595226892360335
+    },
+    {
+      "next_equal_span_excess": -0.013340682181865796,
+      "period": "2023-06",
+      "deadline_session": "2023-06-12",
+      "month_end_session": "2023-06-30",
+      "discarded_sessions": 12,
+      "rev_plus_excess": 0.011823348302238412,
+      "rev_strong_excess": 0.020111010310365128,
+      "universe_return": 0.028240266014204395
+    },
+    {
+      "next_equal_span_excess": -0.004923983325527279,
+      "period": "2023-07",
+      "deadline_session": "2023-07-10",
+      "month_end_session": "2023-07-31",
+      "discarded_sessions": 15,
+      "rev_plus_excess": 0.0005191492035733561,
+      "rev_strong_excess": -0.013619520833409018,
+      "universe_return": 0.025200098520583376
+    },
+    {
+      "next_equal_span_excess": -0.005596883710300621,
+      "period": "2023-08",
+      "deadline_session": "2023-08-10",
+      "month_end_session": "2023-08-31",
+      "discarded_sessions": 15,
+      "rev_plus_excess": -0.0017812117467311678,
+      "rev_strong_excess": 0.005021317423743378,
+      "universe_return": 0.020450565326317352
+    },
+    {
+      "next_equal_span_excess": -0.004245680886686504,
+      "period": "2023-09",
+      "deadline_session": "2023-09-11",
+      "month_end_session": "2023-09-28",
+      "discarded_sessions": 13,
+      "rev_plus_excess": -0.0003632244046526123,
+      "rev_strong_excess": -0.003139836025775401,
+      "universe_return": 0.008466362845520313
+    },
+    {
+      "next_equal_span_excess": 0.004048442005699773,
+      "period": "2023-10",
+      "deadline_session": "2023-10-11",
+      "month_end_session": "2023-10-31",
+      "discarded_sessions": 14,
+      "rev_plus_excess": 0.008195520479072047,
+      "rev_strong_excess": 0.01670172250089946,
+      "universe_return": -0.031251851055182606
+    },
+    {
+      "next_equal_span_excess": -0.011835783842363107,
+      "period": "2023-11",
+      "deadline_session": "2023-11-10",
+      "month_end_session": "2023-11-30",
+      "discarded_sessions": 14,
+      "rev_plus_excess": -0.0006184257397448545,
+      "rev_strong_excess": 0.006836183986010713,
+      "universe_return": 0.07803960543467268
+    },
+    {
+      "next_equal_span_excess": 0.0019814783148940293,
+      "period": "2023-12",
+      "deadline_session": "2023-12-11",
+      "month_end_session": "2023-12-29",
+      "discarded_sessions": 14,
+      "rev_plus_excess": -0.003670494513526714,
+      "rev_strong_excess": -0.008962013425980664,
+      "universe_return": 0.0050642338667069246
+    },
+    {
+      "next_equal_span_excess": -0.0020893574255922698,
+      "period": "2024-01",
+      "deadline_session": "2024-01-10",
+      "month_end_session": "2024-01-31",
+      "discarded_sessions": 15,
+      "rev_plus_excess": 0.006915741067861598,
+      "rev_strong_excess": 0.024326060359158373,
+      "universe_return": 0.022753589555552692
+    },
+    {
+      "next_equal_span_excess": -0.0022338359575451196,
+      "period": "2024-02",
+      "deadline_session": "2024-02-15",
+      "month_end_session": "2024-02-29",
+      "discarded_sessions": 9,
+      "rev_plus_excess": 0.004338147405567663,
+      "rev_strong_excess": 0.011189789432552333,
+      "universe_return": 0.053846770561580146
+    },
+    {
+      "next_equal_span_excess": 0.006701220186105625,
+      "period": "2024-03",
+      "deadline_session": "2024-03-11",
+      "month_end_session": "2024-03-29",
+      "discarded_sessions": 14,
+      "rev_plus_excess": 0.005535391514627189,
+      "rev_strong_excess": 0.007255607589506399,
+      "universe_return": 0.020360435567700265
+    },
+    {
+      "next_equal_span_excess": -0.0056376225981394825,
+      "period": "2024-04",
+      "deadline_session": "2024-04-10",
+      "month_end_session": "2024-04-30",
+      "discarded_sessions": 14,
+      "rev_plus_excess": 0.012975214262278548,
+      "rev_strong_excess": 0.025525956938726592,
+      "universe_return": -0.0030345639422009237
+    },
+    {
+      "next_equal_span_excess": 0.0029130920657223815,
+      "period": "2024-05",
+      "deadline_session": "2024-05-10",
+      "month_end_session": "2024-05-31",
+      "discarded_sessions": 15,
+      "rev_plus_excess": 0.0003198446814016015,
+      "rev_strong_excess": 0.01407301027791636,
+      "universe_return": 0.04472819417726058
+    },
+    {
+      "next_equal_span_excess": 0.001033182365550743,
+      "period": "2024-06",
+      "deadline_session": "2024-06-11",
+      "month_end_session": "2024-06-28",
+      "discarded_sessions": 13,
+      "rev_plus_excess": 0.003483143903959547,
+      "rev_strong_excess": 0.006382796639104779,
+      "universe_return": 0.039578303701158356
+    },
+    {
+      "next_equal_span_excess": 0.007447875943574633,
+      "period": "2024-07",
+      "deadline_session": "2024-07-10",
+      "month_end_session": "2024-07-31",
+      "discarded_sessions": 13,
+      "rev_plus_excess": 0.0071265872694821,
+      "rev_strong_excess": 0.014807072118179686,
+      "universe_return": -0.054838559462089674
+    },
+    {
+      "next_equal_span_excess": 2.4235416596435355e-05,
+      "period": "2024-08",
+      "deadline_session": "2024-08-12",
+      "month_end_session": "2024-08-30",
+      "discarded_sessions": 14,
+      "rev_plus_excess": -0.004322051813343844,
+      "rev_strong_excess": 0.0015690764193330015,
+      "universe_return": 0.07219675842016612
+    },
+    {
+      "next_equal_span_excess": 0.001058746141980118,
+      "period": "2024-09",
+      "deadline_session": "2024-09-10",
+      "month_end_session": "2024-09-30",
+      "discarded_sessions": 13,
+      "rev_plus_excess": -0.00152654149191684,
+      "rev_strong_excess": -0.0002350713430026019,
+      "universe_return": 0.058523017551761224
+    },
+    {
+      "next_equal_span_excess": -0.0035153482062277117,
+      "period": "2024-10",
+      "deadline_session": "2024-10-11",
+      "month_end_session": "2024-10-30",
+      "discarded_sessions": 13,
+      "rev_plus_excess": 0.0020264475196213635,
+      "rev_strong_excess": 0.002257229466024184,
+      "universe_return": -0.0028248801491478773
+    },
+    {
+      "next_equal_span_excess": 0.0019227336095364242,
+      "period": "2024-11",
+      "deadline_session": "2024-11-11",
+      "month_end_session": "2024-11-29",
+      "discarded_sessions": 14,
+      "rev_plus_excess": -0.0012534806255069947,
+      "rev_strong_excess": 0.003757801537069075,
+      "universe_return": -0.030669853490206872
+    },
+    {
+      "next_equal_span_excess": -0.0035661543895307863,
+      "period": "2024-12",
+      "deadline_session": "2024-12-10",
+      "month_end_session": "2024-12-31",
+      "discarded_sessions": 15,
+      "rev_plus_excess": 0.0017356307582243637,
+      "rev_strong_excess": 0.012354570043316051,
+      "universe_return": -0.012680744651525761
+    },
+    {
+      "next_equal_span_excess": -0.0012431657796844846,
+      "period": "2025-01",
+      "deadline_session": "2025-01-10",
+      "month_end_session": "2025-01-22",
+      "discarded_sessions": 8,
+      "rev_plus_excess": 0.0011995254904699111,
+      "rev_strong_excess": 0.0004768885198535612,
+      "universe_return": 0.015889732697425864
+    },
+    {
+      "next_equal_span_excess": -0.0025222689012319617,
+      "period": "2025-02",
+      "deadline_session": "2025-02-10",
+      "month_end_session": "2025-02-27",
+      "discarded_sessions": 13,
+      "rev_plus_excess": -0.0001961850751126988,
+      "rev_strong_excess": 0.01127364555362995,
+      "universe_return": 0.02916048034599118
+    },
+    {
+      "next_equal_span_excess": 0.001127477864800594,
+      "period": "2025-03",
+      "deadline_session": "2025-03-10",
+      "month_end_session": "2025-03-31",
+      "discarded_sessions": 15,
+      "rev_plus_excess": 0.004966914992768481,
+      "rev_strong_excess": 0.002871359736937168,
+      "universe_return": -0.09333008997578782
+    },
+    {
+      "next_equal_span_excess": 0.004829938037068451,
+      "period": "2025-04",
+      "deadline_session": "2025-04-10",
+      "month_end_session": "2025-04-30",
+      "discarded_sessions": 14,
+      "rev_plus_excess": 0.011087551458709002,
+      "rev_strong_excess": 0.02751951473554498,
+      "universe_return": 0.1046274059324327
+    },
+    {
+      "next_equal_span_excess": 0.0030412251106575576,
+      "period": "2025-05",
+      "deadline_session": "2025-05-12",
+      "month_end_session": "2025-05-29",
+      "discarded_sessions": 13,
+      "rev_plus_excess": 0.008604619108850067,
+      "rev_strong_excess": 0.01710654810384954,
+      "universe_return": 0.0003214605726231731
+    },
+    {
+      "next_equal_span_excess": 0.0004995737789447972,
+      "period": "2025-06",
+      "deadline_session": "2025-06-10",
+      "month_end_session": "2025-06-30",
+      "discarded_sessions": 14,
+      "rev_plus_excess": 0.006141808888721771,
+      "rev_strong_excess": 0.01431971420549768,
+      "universe_return": 9.357633321239381e-05
+    },
+    {
+      "next_equal_span_excess": 0.006894112418576147,
+      "period": "2025-07",
+      "deadline_session": "2025-07-10",
+      "month_end_session": "2025-07-31",
+      "discarded_sessions": 15,
+      "rev_plus_excess": 0.007976554057861265,
+      "rev_strong_excess": 0.009356005123620868,
+      "universe_return": 0.028845553941200443
+    },
+    {
+      "next_equal_span_excess": -0.0008951999658772282,
+      "period": "2025-08",
+      "deadline_session": "2025-08-11",
+      "month_end_session": "2025-08-29",
+      "discarded_sessions": 14,
+      "rev_plus_excess": 0.016576584749880094,
+      "rev_strong_excess": 0.02160788333439624,
+      "universe_return": 0.06307481813283523
+    },
+    {
+      "next_equal_span_excess": 0.0018310875858343484,
+      "period": "2025-09",
+      "deadline_session": "2025-09-10",
+      "month_end_session": "2025-09-30",
+      "discarded_sessions": 13,
+      "rev_plus_excess": -0.0012161454642538455,
+      "rev_strong_excess": -0.0032138345501008976,
+      "universe_return": -0.014612507418591613
+    },
+    {
+      "next_equal_span_excess": -0.0018196301732488207,
+      "period": "2025-10",
+      "deadline_session": "2025-10-13",
+      "month_end_session": "2025-10-31",
+      "discarded_sessions": 13,
+      "rev_plus_excess": 0.005199655862091406,
+      "rev_strong_excess": 0.0012507181925207906,
+      "universe_return": 0.008155050256143577
+    },
+    {
+      "next_equal_span_excess": 0.0009638093955232751,
+      "period": "2025-11",
+      "deadline_session": "2025-11-10",
+      "month_end_session": "2025-11-28",
+      "discarded_sessions": 14,
+      "rev_plus_excess": 0.005270481688512036,
+      "rev_strong_excess": 0.008885953859935446,
+      "universe_return": 0.009973072600149494
+    },
+    {
+      "next_equal_span_excess": 0.0071996388043550005,
+      "period": "2025-12",
+      "deadline_session": "2025-12-10",
+      "month_end_session": "2025-12-31",
+      "discarded_sessions": 14,
+      "rev_plus_excess": 0.007997673640290848,
+      "rev_strong_excess": 0.032843538493243535,
+      "universe_return": 0.021518360708605227
+    },
+    {
+      "next_equal_span_excess": -0.00036331527044528716,
+      "period": "2026-01",
+      "deadline_session": "2026-01-12",
+      "month_end_session": "2026-01-30",
+      "discarded_sessions": 14,
+      "rev_plus_excess": 0.007288717003542937,
+      "rev_strong_excess": 0.012333501431990433,
+      "universe_return": 0.016963262986245495
+    },
+    {
+      "next_equal_span_excess": -0.0014190620975744056,
+      "period": "2026-02",
+      "deadline_session": "2026-02-10",
+      "month_end_session": "2026-02-26",
+      "discarded_sessions": 5,
+      "rev_plus_excess": 0.008340778551250094,
+      "rev_strong_excess": 0.01658358013482006,
+      "universe_return": 0.07174844683963312
+    },
+    {
+      "next_equal_span_excess": 0.036517655993781484,
+      "period": "2026-03",
+      "deadline_session": "2026-03-10",
+      "month_end_session": "2026-03-31",
+      "discarded_sessions": 15,
+      "rev_plus_excess": 0.009886979841557187,
+      "rev_strong_excess": 0.020398377425237223,
+      "universe_return": 0.00984169171629116
+    },
+    {
+      "next_equal_span_excess": 0.011981007015831893,
+      "period": "2026-04",
+      "deadline_session": "2026-04-10",
+      "month_end_session": "2026-04-30",
+      "discarded_sessions": 14,
+      "rev_plus_excess": 0.00893506783740157,
+      "rev_strong_excess": 0.029886227847919153,
+      "universe_return": 0.06763355669781763
+    },
+    {
+      "next_equal_span_excess": 0.001768082851720438,
+      "period": "2026-05",
+      "deadline_session": "2026-05-11",
+      "month_end_session": "2026-05-29",
+      "discarded_sessions": 14,
+      "rev_plus_excess": 0.01428915273361299,
+      "rev_strong_excess": 0.01578276274783584,
+      "universe_return": 0.07190920009269648
+    },
+    {
+      "next_equal_span_excess": -0.00503059975389035,
+      "period": "2026-06",
+      "deadline_session": "2026-06-10",
+      "month_end_session": "2026-06-30",
+      "discarded_sessions": 13,
+      "rev_plus_excess": 0.005052702600049169,
+      "rev_strong_excess": 0.005340807048400002,
+      "universe_return": 0.05635395869501175
+    },
+    {
+      "next_equal_span_excess": NaN,
+      "period": "2026-07",
+      "deadline_session": "2026-07-13",
+      "month_end_session": "2026-07-31",
+      "discarded_sessions": 14,
+      "rev_plus_excess": -0.005211182268351822,
+      "rev_strong_excess": -0.014249745355586707,
+      "universe_return": -0.13596899840579935
+    }
+  ]
+}
