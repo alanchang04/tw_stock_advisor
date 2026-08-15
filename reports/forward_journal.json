@@ -33,6 +33,13 @@
     "power80_one_sided_months": 281,
     "note": "planning only, not evidence; effect comes from already-inspected history (winner's curse) and required periods scale with 1/effect^2"
   },
+  "snapshot_freshness": {
+    "last_trade_date": "2026-07-31",
+    "lag_days": 16,
+    "threshold_days": 45,
+    "is_stale": false,
+    "rebuild_command": "python scripts/build_research_snapshot_v2.py"
+  },
   "observations": [],
   "m18_reminder": "inspecting this journal and then changing the model turns all prior forward data into development data for the new model"
 }

@@ -86,6 +86,33 @@ def definition_fingerprint() -> str:
     return digest.hexdigest()
 
 
+# 快照落後幾天算「該更新了」。月排程每月跑一次，加上台股月營收要到
+# 次月 10 日才齊，因此 45 天以內都還算正常節奏；超過就代表沒有人在更新。
+SNAPSHOT_STALE_DAYS = 45
+
+
+def snapshot_staleness(snapshot: Path) -> dict:
+    """快照的最後交易日離今天多遠。
+
+    **這個函式存在是因為一個靜默失效模式。** 月排程讀的是 `data/research`
+    這份**靜態**快照，而沒有任何排程會去更新它。如果沒有人手動重建快照，
+    journal 每個月都會準時跑、exit code 0、印出「尚無 forward 觀測」——
+    而那句話在剛開始時是**正確的**，在管線其實已經死掉時**也長得一模一樣**。
+
+    一個看起來永遠健康的監看系統比沒有監看更糟，所以這裡把新鮮度攤開來講。
+    """
+    prices = pd.read_parquet(snapshot / "prices.parquet", columns=["trade_date"])
+    last = pd.to_datetime(prices["trade_date"]).max()
+    lag_days = int((pd.Timestamp.today().normalize() - last.normalize()).days)
+    return {
+        "last_trade_date": str(last.date()),
+        "lag_days": lag_days,
+        "threshold_days": SNAPSHOT_STALE_DAYS,
+        "is_stale": lag_days > SNAPSHOT_STALE_DAYS,
+        "rebuild_command": "python scripts/build_research_snapshot_v2.py",
+    }
+
+
 def monthly_records(snapshot: Path) -> list[dict]:
     """用 H16 的凍結面板算出每個決策月的兩個數字。
 
@@ -155,6 +182,7 @@ def main() -> None:
             "依 M18，改定義之後先前累積的 forward 資料即成為新模型的 development "
             "集，不能續寫同一本 journal。請開新 journal 並在登記簿說明。")
 
+    staleness = snapshot_staleness(args.snapshot)
     print("computing frozen panel ...", flush=True)
     computed = monthly_records(args.snapshot)
     forward = [r for r in computed if r["decision_date"] >= FORWARD_START]
@@ -193,6 +221,7 @@ def main() -> None:
         "h16_momentum_confirmation": sequential_block(h16_values, PLAN_H16),
         "h11_revenue_plus": sequential_block(h11_values, PLAN_H11),
         "planning_only_not_evidence": planning_horizon(HISTORICAL_H16_DELTA, SIGMA_H16),
+        "snapshot_freshness": staleness,
         "observations": observations,
         "m18_reminder": ("inspecting this journal and then changing the model turns all "
                          "prior forward data into development data for the new model"),
@@ -202,12 +231,24 @@ def main() -> None:
     args.journal.write_text(json.dumps(journal, ensure_ascii=False, indent=2) + "\n",
                             encoding="utf-8")
 
+    print(f"\n快照最後交易日 {staleness['last_trade_date']}"
+          f"（落後 {staleness['lag_days']} 天）")
+    if staleness["is_stale"]:
+        print("  *** 快照過期：沒有人在更新 data/research。***")
+        print("  沒有新資料，這本 journal 永遠不會累積觀測，而且會每個月")
+        print("  安靜地印出「尚無 forward 觀測」，看起來一切正常。")
+        print(f"  重建指令：{staleness['rebuild_command']}")
+
     print(f"\nforward months recorded: {len(observations)}  (new this run: {len(added)})")
     if not observations:
         latest = max((r["decision_date"] for r in computed), default="n/a")
         print(f"  尚無 forward 觀測。資料最後一個決策月 = {latest}，"
               f"forward 自 {FORWARD_START} 起算。")
-        print("  這是正確的——forward 需要時間累積，不是現在就該有數字。")
+        if staleness["is_stale"]:
+            print("  但上面的快照過期警告優先——先確認資料有在更新，"
+                  "再把「還沒到時候」當成解釋。")
+        else:
+            print("  這是正確的——forward 需要時間累積，不是現在就該有數字。")
     else:
         block = journal["h16_momentum_confirmation"]
         print(f"  H16 running mean = {block['running_mean_pct']:+.4f}%  "
