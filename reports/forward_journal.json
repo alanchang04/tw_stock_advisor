@@ -38,7 +38,7 @@
     "lag_days": 16,
     "threshold_days": 45,
     "is_stale": false,
-    "rebuild_command": "python scripts/build_research_snapshot_v2.py"
+    "rebuild_command": "python run_pipeline.py --mode daily  →  python scripts/db_to_parquet.py --out data/research"
   },
   "observations": [],
   "m18_reminder": "inspecting this journal and then changing the model turns all prior forward data into development data for the new model"

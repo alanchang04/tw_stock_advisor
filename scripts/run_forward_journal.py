@@ -109,7 +109,12 @@ def snapshot_staleness(snapshot: Path) -> dict:
         "lag_days": lag_days,
         "threshold_days": SNAPSHOT_STALE_DAYS,
         "is_stale": lag_days > SNAPSHOT_STALE_DAYS,
-        "rebuild_command": "python scripts/build_research_snapshot_v2.py",
+        # `data/research` 是從資料庫匯出的衍生物，所以「更新」是兩步：
+        # 先讓每日 pipeline 把新資料寫進 DB，再重新匯出 parquet。
+        # （`build_research_snapshot_v2.py` 做的是把現有 parquet **凍結**成
+        #  版本化快照，不會產生新資料——別把它當成重建指令。）
+        "rebuild_command": ("python run_pipeline.py --mode daily  →  "
+                            "python scripts/db_to_parquet.py --out data/research"),
     }
 
 
