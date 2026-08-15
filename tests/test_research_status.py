@@ -54,10 +54,25 @@ def test_readiness_table_covers_every_flag():
         assert row["狀態"].startswith(("✅", "🔒"))
 
 
-def test_holdout_gate_is_closed_in_current_release():
-    """holdout 尚未開封。這條測試若失敗，代表閘門狀態變了，必須由人確認而不是靜默通過。"""
+def test_holdout_was_opened_exactly_once_and_must_not_reopen():
+    """holdout 已於 r3 開封（2026-08-14，使用者明示同意），**只此一次**。
+
+    這條測試原本斷言閘門仍關閉。開封之後它就一直是紅的——那是設計如此：
+    閘門狀態改變必須由人確認，不得靜默通過。使用者已確認，因此不變量
+    改成新的那一個：**開封過了，而且不准再開第二次。**
+
+    「不准再開第二次」的意思是：`tw_stock_data_2005_2014_r3` 是最後一個
+    改動這個旗標的釋出。任何**新的**釋出若再次把它從 False 翻成 True，
+    代表有人重跑了 backward holdout——那會摧毀它作為一次性驗收的價值，
+    這條測試必須先變紅。
+    """
     rel = load_release()
-    assert rel.readiness.get("backward_holdout_performance_ready") is False
+    assert rel.readiness.get("backward_holdout_performance_ready") is True, (
+        "閘門狀態又變了。若這是**新的**一次開封，等於重跑 holdout——"
+        "那是不允許的；若是回退到未開封，請說明原因。")
+    assert rel.release_id == "tw_stock_data_2005_2014_r3", (
+        f"開封發生在 r3，但目前釋出是 {rel.release_id}。"
+        "換釋出時必須由人確認 holdout 沒有被重跑。")
 
 
 def test_repeat_build_consistency_matches():

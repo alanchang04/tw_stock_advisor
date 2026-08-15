@@ -5,11 +5,19 @@ import pandas as pd
 from sqlalchemy import text
 
 from database.connection import get_session
+from research.information_clock import known_at
 
 
 def _revenue_available_date(year_month: str) -> pd.Timestamp:
-    period = pd.Period(str(year_month), freq="M")
-    return (period + 1).start_time + pd.Timedelta(days=9)
+    """Canonical availability instant for a monthly-revenue period (M23).
+
+    Previously this offset the next month's first day by nine days, landing on
+    midnight of the 10th, so a ``backward`` as-of merge matched trades on
+    the 10th itself. The statute only fixes the date, not the hour: a company
+    may file after the close on the 10th, so trading on that day's prices is a
+    one-day look-ahead. The clock returns the *end* of the 10th instead.
+    """
+    return known_at("monthly_revenue", str(year_month))
 
 
 def attach_point_in_time_revenue(frame: pd.DataFrame, revenue: pd.DataFrame) -> pd.DataFrame:

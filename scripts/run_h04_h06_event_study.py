@@ -33,6 +33,7 @@ sys.path.insert(0, str(ROOT))
 
 from agent.strategy import total_return_adjust  # noqa: E402
 from research.event_study import run_event_study  # noqa: E402
+from research.information_clock import known_at  # noqa: E402
 
 # 觀察窗涵蓋現行策略的實際持有分布（平均 39.9、中位 25、p95 110 交易日）
 STUDY_WINDOWS = (5, 10, 20, 40, 60, 120)
@@ -76,19 +77,21 @@ def liquid_universe_mask(closes: pd.DataFrame, turnover: pd.DataFrame) -> pd.Dat
 
 def revenue_events(snapshot: Path, sessions: pd.DatetimeIndex,
                    mask: pd.DataFrame, minimum_yoy: float) -> pd.DataFrame:
-    """月營收事件。公布日採「次月 10 日後的第一個交易日」保守估計。
+    """月營收事件。公布日由 `research.information_clock` 統一決定（M23）。
 
-    官方規定次月 10 日前公布，但逐檔實際公布日不在快照內；取 10 日之後可確保
-    **不會用到尚未公布的資訊**，方向保守。
+    **2026-08-14 修正。** 原本這裡自己算「次月 1 日 + 9 天」再用
+    ``side="left"`` 取第一個交易日，等於把**期限日當天**納入。法規只說
+    「10 日以前申報」不規範時刻，公司可能在 10 日盤後才申報，因此用當天
+    收盤價進場是偷看一天。改用時鐘後一律取**嚴格晚於** 10 日的第一個交易日。
     """
     revenue = pd.read_parquet(snapshot / "monthly_revenue.parquet")
     revenue["stock_id"] = revenue["stock_id"].astype(str)
     month = pd.PeriodIndex(revenue["year_month"].astype(str), freq="M")
-    disclose = (month + 1).to_timestamp() + pd.Timedelta(days=9)
-    revenue = revenue.assign(disclose=disclose)
+    revenue = revenue.assign(
+        disclose=[known_at("monthly_revenue", period) for period in month])
     revenue = revenue[revenue["yoy_pct"].notna() & (revenue["yoy_pct"] > minimum_yoy)]
 
-    positions = sessions.searchsorted(revenue["disclose"].to_numpy(), side="left")
+    positions = sessions.searchsorted(revenue["disclose"].to_numpy(), side="right")
     keep = positions < len(sessions)
     frame = pd.DataFrame({
         "stock_id": revenue["stock_id"].to_numpy()[keep],
