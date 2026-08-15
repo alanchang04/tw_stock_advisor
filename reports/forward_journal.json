@@ -1,7 +1,7 @@
 {
   "study": "forward journal for H11 (revenue) and H16 (momentum confirmation)",
   "forward_start": "2026-08-14",
-  "definition_fingerprint": "d47fb779da382e09245ddc4bd3a7745d32c26cf1b4d5695d9d4ed5304141fdbd",
+  "definition_fingerprint": "7ac418bdda280bb4e4124b86a46955f9c8dbe36595122056ab9d51a83cb19799",
   "frozen_parameters": {
     "primary_horizon_sessions": 60,
     "revenue_min_yoy": 0.0,

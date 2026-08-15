@@ -74,11 +74,24 @@ DEFINITION_FILES = (
 
 
 def definition_fingerprint() -> str:
-    """凍結定義的指紋。變了就代表定義漂移，journal 必須拒絕續寫。"""
+    """凍結定義的指紋。變了就代表定義漂移，journal 必須拒絕續寫。
+
+    **換行符必須正規化，否則指紋不跨機。** 第一版直接雜湊原始位元組，
+    於是 `core.autocrlf` 設定不同的兩台機器必然算出不同指紋，
+    看起來就像「定義被改過」——而誤觸 M18 的代價是放棄整本 journal。
+
+    2026-08-16 兩台機器實測：原樣位元組的指紋不同，
+    **CRLF→LF 正規化後完全相同**（`7ac418bd…`），
+    證明四個定義檔的內容其實一字未改。差別只在磁碟上的換行符
+    （本機只有 `research/momentum.py` 是 CRLF，另一台四個都是）。
+
+    `.gitattributes` 已把這四個檔案釘成 LF，但正規化仍保留——
+    舊 checkout 與未來的設定變動都可能再把 CRLF 帶回來。
+    """
     digest = hashlib.sha256()
     for name in DEFINITION_FILES:
         digest.update(name.encode())
-        digest.update((ROOT / name).read_bytes())
+        digest.update((ROOT / name).read_bytes().replace(b"\r\n", b"\n"))
     for value in (H16.PRIMARY_HORIZON, H16.REVENUE_MIN_YOY, ENTRY_TOP_FRAC,
                   FORMATION_SKIP, FORMATION_LOOKBACK, H12.CONFIRMATION_WINDOW,
                   H12.CONFIRMATION_LOTS):
@@ -109,12 +122,17 @@ def snapshot_staleness(snapshot: Path) -> dict:
         "lag_days": lag_days,
         "threshold_days": SNAPSHOT_STALE_DAYS,
         "is_stale": lag_days > SNAPSHOT_STALE_DAYS,
-        # `data/research` 是從資料庫匯出的衍生物，所以「更新」是兩步：
-        # 先讓每日 pipeline 把新資料寫進 DB，再重新匯出 parquet。
-        # （`build_research_snapshot_v2.py` 做的是把現有 parquet **凍結**成
-        #  版本化快照，不會產生新資料——別把它當成重建指令。）
-        "rebuild_command": ("python run_pipeline.py --mode daily  →  "
-                            "python scripts/db_to_parquet.py --out data/research"),
+        # `data/research` 的來源是**本機 SQLite** `data/research/research.db`
+        # （11.5 年、484 萬列），由 historical_backfill_local.py 從 TWSE 回補。
+        #
+        # **絕對不要用 `scripts/db_to_parquet.py --out data/research`。**
+        # 那支讀的是 Neon，而 Neon 只保留約 14 個月的營運視窗
+        # （2025-07 起，2016~2024 完全沒有）。跑下去會把 11.5 年的研究母體
+        # 覆蓋成 14 個月，H11／H11b／H12／H13／H16／MOM-1 的資料基礎全毀。
+        "rebuild_command": "python scripts/historical_backfill_local.py --start-year 2015",
+        "do_not_use": ("scripts/db_to_parquet.py --out data/research — reads Neon, "
+                       "which keeps only a ~14-month operating window and would "
+                       "truncate the 11.5-year research corpus"),
     }
 
 

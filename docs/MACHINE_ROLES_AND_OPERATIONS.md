@@ -63,6 +63,29 @@ Test-Path data\research_versions      # 凍結快照
 唯讀副本，用來重現研究結果。就是舊文件裡講的那個 deployment machine。
 **它不參與營運，也不需要參與。**
 
+### 角色 D — 停用的舊研發機（Legacy R&D）
+
+**判定測試**：有 `data/raw/twse/`（因此不是角色 C），但**缺** `data_release_bundles`
+且 `data/research_versions` 只有零星幾個快照，也沒有 forward journal 排程。
+
+2026-08-16 由第一台研發機自己依測試判定出來
+（`reports/HANDOFF_2026-08-16_LEGACY_RD_MACHINE.md`）。
+它持有一份**舊的**研究資料，後續資料沒有拿到。
+
+**明文禁止在角色 D 執行：**
+
+- `scripts/historical_backfill_local.py`
+- `scripts/db_to_parquet.py`
+- `scripts/build_research_snapshot_v2.py`
+- `scripts/run_forward_journal.py`（寫入正式 journal；寫 scratch 供診斷可以）
+
+理由：任何一個都會**產生第二份分岔的研究狀態**，而沒有人知道該信哪一份。
+角色 D 可以做的是前端、程式碼修正、文件、以及唯讀診斷。
+
+> 這條規則是因為那台機器被要求「建立 forward 快照」，
+> 它自檢後拒絕執行並提出質疑——**而那次質疑直接救回了研究資料集**
+> （見 §3 的撤回）。這個判斷是對的，寫進文件讓下一個 agent 不必重來一次。
+
 ### 不是角色 — Streamlit Cloud
 
 託管服務。從 GitHub 部署，經 secret 連 Neon。
@@ -76,11 +99,19 @@ Test-Path data\research_versions      # 凍結快照
 | 工作 | 跑在 | 頻率 | 現況 |
 |---|---|---|---|
 | `run_pipeline.py` | **角色 A** | 每日 | ✅ 正常 |
-| `db_to_parquet.py --out data/research` | **角色 B** | 每月 | ❌ **沒有排程 ← 唯一缺口** |
+| `historical_backfill_local.py` | **角色 B** | 每月，人工 | ❌ **沒做 ← 唯一缺口** |
 | `run_forward_journal.py` | **角色 B** | 每月 | ✅ 已排程 |
 
-**角色 B 需要能連 Neon**（`db_to_parquet` 是從 DB 匯出），
-但**不需要**跑 `run_pipeline.py`——那是角色 A 的事，兩者不要重複跑。
+**角色 B 不需要 Neon 也不需要跑 `run_pipeline.py`。** 它有自己的
+本機 SQLite 歷史庫，資料直接從 TWSE 回補。兩條資料線是**刻意分開的**：
+
+```
+角色 A：TWSE → Neon（14 個月營運視窗）→ Streamlit 網站
+角色 B：TWSE → 本機 SQLite（11.5 年）→ parquet → forward journal
+```
+
+**不要把兩條線接起來。** 2026-07-17 有過事故記錄：10 年規模的回補寫 Neon
+把免費配額燒穿，連每日 pipeline 都連不上。
 
 ---
 
@@ -110,23 +141,54 @@ journal 每月準時跑、exit code 0
 2026-08-16 已在 `scripts/run_forward_journal.py` 加入新鮮度檢查，
 超過 45 天會明確警告。**但警告不等於修好。**
 
-### 補上這一條（在角色 B 上，不是角色 A）
+### ⚠️ 撤回：本文件 2026-08-16 稍早版本給了一個會摧毀研究資料的指令
+
+原本寫的是排程 `scripts/db_to_parquet.py --out data/research`。**那是錯的，
+而且後果不可逆。** 感謝另一台機器在交接文件 §5 問題 1 提出質疑後查出來。
+
+`db_to_parquet.py` 讀的是 **Neon**，而 Neon 只保留約 14 個月的營運視窗：
+
+| 年 | Neon `daily_prices` 交易日 |
+|---|---:|
+| 2015 | 13（殘留碎片） |
+| **2016–2024** | **0** |
+| 2025 | 142 |
+| 2026 | 148 |
+
+而 `data/research/prices.parquet` 是 **11.5 年、4,840,274 列、2,140 檔**。
+
+**跑下去會把 11.5 年的研究母體覆蓋成 14 個月**，
+H11／H11b／H12／H13／H16／MOM-1 的資料基礎全部消失。
+
+> 附帶澄清另一台機器的算法：它由 571,092 列 ÷ 約 2,830 個交易日推得
+> 「每日約 200 檔」，但 Neon 其實只有 **303 個交易日**，
+> 每日約 1,885 檔。**寬度沒問題，問題在歷史深度。**
+> 結論方向正確，嚴重性其實更高。
+
+### 正確的更新方式
+
+`data/research` 的來源是**本機 SQLite** `data/research/research.db`（724 MB），
+由 `historical_backfill_local.py` 直接從 TWSE 回補——該腳本開宗明義寫著
+**「寫本機 SQLite，不碰 Neon」**（2026-07-17 曾把 Neon 免費配額燒穿）。
 
 ```powershell
-schtasks /create /tn "TWStockResearchExport" /tr ^
-  "cmd /c cd /d C:\Users\User\Desktop\tw_stock_advisor && python scripts\db_to_parquet.py --out data\research" ^
-  /sc monthly /d 5 /st 08:30
+python scripts\historical_backfill_local.py --start-year 2015   # 回補 + 匯出
+python scripts\historical_backfill_local.py --start-year 2015 --export-only   # 只重匯出
 ```
 
-排 08:30、journal 09:00，中間留 30 分鐘。**順序顛倒等於沒跑。**
+可安全中斷、重跑自動接續（`backfill_progress` 表記錄進度）。
 
-### 三個很容易搞混的腳本，只有第一個產生新資料
+**這支會從 TWSE 下載資料，因此要由人執行**，不由 agent 代跑
+（`CLAUDE.md`：Do not download or modify raw data）。
 
-| 腳本 | 做什麼 |
-|---|---|
-| `scripts/db_to_parquet.py` | **從 DB 匯出 parquet** ← 要的是這個 |
-| `scripts/build_research_snapshot_v2.py` | 把現有 parquet **凍結**成版本化不可變快照 |
-| `scripts/package_data_release.ps1` | 把凍結快照**打包**成釋出 zip |
+### 四個很容易搞混的腳本
+
+| 腳本 | 做什麼 | 讀哪裡 |
+|---|---|---|
+| **`historical_backfill_local.py`** | **回補歷史 + 匯出 parquet** ← 要的是這個 | TWSE → 本機 SQLite |
+| `db_to_parquet.py` | 匯出 parquet | **Neon（只有 14 個月）** ☠️ |
+| `build_research_snapshot_v2.py` | 把現有 parquet **凍結**成不可變快照 | 本機 parquet |
+| `package_data_release.ps1` | 把凍結快照**打包**成釋出 zip | 凍結快照 |
 
 ---
 
