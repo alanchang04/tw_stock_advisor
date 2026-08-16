@@ -59,7 +59,7 @@ USER = st.session_state.auth_user   # {user_id, username, display_name, role}
 st.sidebar.title("📈 台股顧問")
 _pages = ["📊 首頁", "📋 每日排行", "📓 選股日誌", "📦 持倉追蹤", "🔖 追蹤清單", "🔎 個股分析",
           "🎯 練習軌", "🔥 族群輪動", "🏦 法人動向", "📉 個股走勢", "🔄 歷史績效", "📰 市場情報",
-          "🧠 聰明資金", "🔍 決策軌跡", "🔬 研究進度"]
+          "🧠 聰明資金", "🔍 決策軌跡", "⚖️ 策略比較", "🔬 研究進度"]
 if USER["role"] == "admin":
     _pages.append("👤 帳號管理")
 # 跨頁跳轉：清單頁的「📈 走勢」按鈕會設 nav_goto，這裡在 radio 建立「之前」套用，
@@ -2849,6 +2849,99 @@ elif page == "🔍 決策軌跡":
 
 
 # ══════════════════════════════════════════════════════════════════
+#  Page：策略比較
+# ══════════════════════════════════════════════════════════════════
+# 用途是「從曲線與數字找出策略為什麼失敗，藉此產生下一個假說」，
+# 不是「挑出表現最好的那個」。因此本頁刻意不排名、不給綜合評分——
+# 各策略的期間、régime 與樣本單位都不同，排名會製造不存在的可比性。
+# 數字一律由 agent/strategy_comparison.py 從已提交的研究報告取值，前端不重算。
+elif page == "⚖️ 策略比較":
+    st.title("⚖️ 策略比較")
+
+    try:
+        from agent.strategy_comparison import comparability_warnings, load_comparison
+
+        _rows, _provisional = load_comparison()
+        if not _rows:
+            st.info("找不到任何策略報告。")
+            st.stop()
+
+        if _provisional:
+            st.caption(
+                "⚙️ 目前的數字由前端從各自的原始報告取值拼出（每列附出處），"
+                "尚未經研究機以 `reports/strategy_comparison_metrics.json` 正規化。"
+                "見 `reports/REQUEST_2026-08-16_STRATEGY_COMPARISON_ARTIFACTS.md`。"
+            )
+
+        for _w in comparability_warnings(_rows):
+            st.warning(_w)
+
+        def _pct(v, digits=1):
+            return "—" if v is None else f"{v * 100:.{digits}f}%"
+
+        def _num(v, digits=2):
+            return "—" if v is None else f"{v:.{digits}f}"
+
+        st.subheader("績效與風險")
+        st.dataframe([{
+            "策略": r.display_name,
+            "判決": r.status_label,
+            "期間": f"{r.period[0]} ~ {r.period[1]}" if r.period else "—",
+            "總報酬": _pct(r.total_return),
+            "年化": _pct(r.cagr),
+            "波動": _pct(r.volatility),
+            "Sharpe": _num(r.sharpe),
+            "MDD": _pct(r.mdd),
+            "Calmar": _num(r.calmar),
+        } for r in _rows], use_container_width=True, hide_index=True)
+
+        # 勝率分兩欄：月勝率與逐筆交易勝率不是同一件事，合併就是製造假可比。
+        st.subheader("勝率與樣本")
+        st.dataframe([{
+            "策略": r.display_name,
+            "勝率": _pct(r.win_rate),
+            "勝率基準": r.win_rate_basis or "—",
+            "樣本數": "—" if r.sample_n is None else f"{r.sample_n} {r.sample_unit or ''}".strip(),
+            "樣本是否足夠": "✅" if (r.sample_n or 0) >= 30 else "⚠️ 不足",
+        } for r in _rows], use_container_width=True, hide_index=True)
+
+        st.subheader("對基準（0050 含息）")
+        st.dataframe([{
+            "策略": r.display_name,
+            "策略 Sharpe": _num(r.sharpe),
+            "基準 Sharpe": _num(r.benchmark_sharpe),
+            "策略 MDD": _pct(r.mdd),
+            "基準 MDD": _pct(r.benchmark_mdd),
+            "基準年化": _pct(r.benchmark_cagr),
+        } for r in _rows], use_container_width=True, hide_index=True)
+
+        st.subheader("因子與出處")
+        for _r in _rows:
+            with st.expander(f"{_r.display_name}　—　{_r.status_label}"):
+                st.markdown("**使用因子**：" + ("、".join(_r.factors) if _r.factors else "—"))
+                if _r.note:
+                    st.markdown(f"**註**：{_r.note}")
+                st.markdown(f"**數字出處**：`{_r.source_report}`")
+                if _r.has_curve:
+                    st.markdown(f"**權益曲線**：`{_r.curve_dir}`（見「🔄 歷史績效」頁）")
+                else:
+                    st.markdown(
+                        "**權益曲線**：尚未產出。逐日 NAV 序列需由研究機輸出，"
+                        "已於 `reports/REQUEST_2026-08-16_STRATEGY_COMPARISON_ARTIFACTS.md` 索求。"
+                    )
+
+        _no_curve = [r.display_name for r in _rows if not r.has_curve]
+        if _no_curve:
+            st.info(
+                f"目前只有「現行波段策略」有逐日 NAV 曲線；{'、'.join(_no_curve)} "
+                "只有摘要指標，因此本頁暫時是表格而非曲線圖。"
+            )
+
+    except Exception as _e:
+        st.warning(f"策略比較載入失敗：{_e}")
+
+
+# ══════════════════════════════════════════════════════════════════
 #  Page：研究進度（資料地基狀態）
 # ══════════════════════════════════════════════════════════════════
 # 只讀 reports/data_releases/*.json（8~9 KB 的釋出中繼資料，已進版控）。
@@ -2858,7 +2951,7 @@ elif page == "🔍 決策軌跡":
 # 績效查看，holdout 尚未開封。
 elif page == "🔬 研究進度":
     st.title("🔬 研究進度")
-    st.caption("資料地基的具名不可變釋出狀態。不含任何績效數字——holdout 尚未開封。")
+    st.caption("資料地基的具名不可變釋出狀態。本頁不含績效數字；績效見「⚖️ 策略比較」。")
 
     try:
         from agent.research_status import (
