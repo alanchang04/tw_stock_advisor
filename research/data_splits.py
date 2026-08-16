@@ -90,15 +90,39 @@ _TRACKED = ("validation", "holdout")
 # **約 213 年**。因此**任何**長度的封存區都不足以支撐組合層級的顯著性
 # 檢定——封存區只有搭配橫斷面估計式才有意義（每月約 1,800 檔而不是
 # 一條 NAV）。切分比例救不了功效，估計式才可以。
-MOMENTUM_EXPLORATION = (date(2008, 1, 1), date(2021, 12, 31))   # 14 年，9 個 régime
-MOMENTUM_SEALED = (date(2022, 1, 1), date(2026, 8, 13))         # 4.6 年，3 個 régime
+# ── 2026-08-16 稍晚撤回：動能族沒有乾淨的歷史 holdout ────────────
+#
+# 上面那組界線（2008-2021 探索 / 2022-2026.8 封存）**曾經被鎖死，隨即撤回**。
+# 撤回理由是一個可查證的事實，而且**就寫在本專案自己的規格書裡**：
+#
+#   docs/SPEC_DATA_FOUNDATION_AND_MOMENTUM.md §9.2.4
+#   「`mom_6_1` 的形成窗（跳過 20 日、回看 120 日）是**看著 2015~2026 的
+#     IC 表從四個候選中挑出來的**（§1.2）。在同一段資料上驗收，等於把
+#     當初的選擇再算一次，必然好看。」
+#
+# §1.2 的四個候選是 `mom60`／`mom60_skip5`／`mom120_skip20`（＝選中的
+# mom_6_1）／`mom252_skip20`（＝mom_12_1）。**四個都在 2015~2026 上被看過。**
+# 同一節還記錄了「2025~2026 是異常有利的動能 regime、2021~2022 約 -0.0076」
+# ——連 régime 條件化的動能分析都已經在那段資料上做過了。
+#
+# 加上 2008~2014 已由 MOM-1 F1 開封兩次，結論是：
+#
+#     動能族的乾淨歷史 holdout = 0
+#
+# 因此不存在「探索區／封存區」之分，整段歷史都是 development。
+# 唯一的真確認來源是 forward。
+#
+# **這是「族別污染」原則的必然結果，不是它的例外。** 若允許
+# 「2022 雖然出現在 2015~2026 的動能 IC 表裡，但這次換成 12-1 所以還算乾淨」，
+# 就等於把剛建立的族別原則當場推翻——換一個形成窗不會換一個假說族。
+MOMENTUM_DEVELOPMENT = (date(2008, 1, 1), date(2026, 8, 13))
 FORWARD_ONLY = (date(2026, 8, 14), date(2099, 12, 31))          # forward journal 的地盤
 
 #: 假說族 → 切分表。**邊界可以共用，污染狀態不可以。**
 FAMILY_SPLITS: dict[str, dict[str, tuple]] = {
     "momentum": {
-        "exploration": MOMENTUM_EXPLORATION,
-        "sealed": MOMENTUM_SEALED,
+        # 沒有 sealed。整段歷史都是 development，見上方撤回說明。
+        "development": MOMENTUM_DEVELOPMENT,
         "forward_only": FORWARD_ONLY,
     },
     "swing": {
@@ -109,15 +133,17 @@ FAMILY_SPLITS: dict[str, dict[str, tuple]] = {
     },
 }
 
-#: 每個族的 sealed 段被碰幾次就作廢；forward_only 一律不得回測。
-_FAMILY_TRACKED = {"momentum": ("sealed",), "swing": ("validation", "holdout")}
+#: 動能族沒有可耗盡的段落（整段歷史已是 development）；forward_only 一律不得回測。
+_FAMILY_TRACKED = {"momentum": (), "swing": ("validation", "holdout")}
 
-#: 動能族封存區缺什麼——任何引用其結論的地方都必須附上這句。
-MOMENTUM_SEALED_CAVEAT = (
-    "⚠️ 動能族封存區（2022-01~2026-08-13）含空頭、強多頭與溫和三種 régime，"
-    "但**不含 2008／2011 等級的崩盤**（等權 -47%／-30%）。"
-    "因此結論只能宣稱『在該期間的市況下未被否證』，"
-    "**對危機 régime 的行為未經檢驗**。"
+#: 動能族的歷史結論**一律**要附這句——沒有例外，因為沒有乾淨集合可用。
+MOMENTUM_DEVELOPMENT_CAVEAT = (
+    "⚠️ 動能族在 2008~2026 全段歷史上都已被看過："
+    "2008~2014 由 MOM-1 F1 開封兩次；2015~2026 是四個形成窗候選的 IC 選擇集合"
+    "（SPEC §1.2／§9.2.4），連 régime 條件化分析也已在該段做過。"
+    "**乾淨歷史 holdout = 0。** 因此任何歷史結果只能是 "
+    "development / 機制證據，不得稱為驗證；"
+    "唯一的真確認來源是 2026-08-14 起的 forward。"
 )
 
 #: 動能族在此期間與波段策略的調參窗重疊，引用時必須揭露。
