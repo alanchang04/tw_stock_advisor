@@ -2851,27 +2851,32 @@ elif page == "🔍 決策軌跡":
 # ══════════════════════════════════════════════════════════════════
 #  Page：策略比較
 # ══════════════════════════════════════════════════════════════════
-# 用途是「從曲線與數字找出策略為什麼失敗，藉此產生下一個假說」，
-# 不是「挑出表現最好的那個」。因此本頁刻意不排名、不給綜合評分——
-# 各策略的期間、régime 與樣本單位都不同，排名會製造不存在的可比性。
-# 數字一律由 agent/strategy_comparison.py 從已提交的研究報告取值，前端不重算。
+# 權威來源是 reports/strategy_comparison_metrics.json（研究機產出）。
+# 前端不重算任何指標——自己算一次 Sharpe 就會產生第二個真相。
+#
+# 三條由研究機裁定、本頁必須遵守的規則：
+#  1. 不排名、不給綜合評分。期間、régime、樣本單位都不同，排名是假可比。
+#  2. 被抑制的指標不顯示數值（margin reversal 只有 0.33 年，年化與 Sharpe
+#     不具統計意義），原始值留在 suppressed_because_sample_too_small 供稽核。
+#  3. MOM-1 不畫權益曲線。一次性 holdout 沒有持久化 NAV，要畫就得重跑
+#     2008–2014；且從 holdout 的失效形態找模式本身就是污染。只呈現已公布的
+#     7 個年度報酬。見 reports/REPLY_2026-08-16_STRATEGY_COMPARISON_ARTIFACTS.md
 elif page == "⚖️ 策略比較":
     st.title("⚖️ 策略比較")
 
     try:
         from agent.strategy_comparison import comparability_warnings, load_comparison
 
-        _rows, _provisional = load_comparison()
+        _rows, _meta, _provisional = load_comparison()
         if not _rows:
-            st.info("找不到任何策略報告。")
+            st.info("找不到策略比較資料。")
             st.stop()
 
+        if _purpose := _meta.get("purpose"):
+            st.caption(f"用途：{_purpose}")
         if _provisional:
-            st.caption(
-                "⚙️ 目前的數字由前端從各自的原始報告取值拼出（每列附出處），"
-                "尚未經研究機以 `reports/strategy_comparison_metrics.json` 正規化。"
-                "見 `reports/REQUEST_2026-08-16_STRATEGY_COMPARISON_ARTIFACTS.md`。"
-            )
+            st.warning(
+                "⚙️ 尚未取得研究機的正規化檔，目前數字由前端從原始報告取值，僅供暫看。")
 
         for _w in comparability_warnings(_rows):
             st.warning(_w)
@@ -2888,22 +2893,13 @@ elif page == "⚖️ 策略比較":
             "判決": r.status_label,
             "期間": f"{r.period[0]} ~ {r.period[1]}" if r.period else "—",
             "總報酬": _pct(r.total_return),
-            "年化": _pct(r.cagr),
-            "波動": _pct(r.volatility),
+            "年化": _pct(r.ann_ret),
             "Sharpe": _num(r.sharpe),
             "MDD": _pct(r.mdd),
-            "Calmar": _num(r.calmar),
-        } for r in _rows], use_container_width=True, hide_index=True)
-
-        # 勝率分兩欄：月勝率與逐筆交易勝率不是同一件事，合併就是製造假可比。
-        st.subheader("勝率與樣本")
-        st.dataframe([{
-            "策略": r.display_name,
             "勝率": _pct(r.win_rate),
-            "勝率基準": r.win_rate_basis or "—",
-            "樣本數": "—" if r.sample_n is None else f"{r.sample_n} {r.sample_unit or ''}".strip(),
-            "樣本是否足夠": "✅" if (r.sample_n or 0) >= 30 else "⚠️ 不足",
+            "樣本": r.sample_text,
         } for r in _rows], use_container_width=True, hide_index=True)
+        st.caption("「—」代表該策略沒有這個數字，或因樣本不足被刻意抑制，不是 0。")
 
         st.subheader("對基準（0050 含息）")
         st.dataframe([{
@@ -2912,30 +2908,53 @@ elif page == "⚖️ 策略比較":
             "基準 Sharpe": _num(r.benchmark_sharpe),
             "策略 MDD": _pct(r.mdd),
             "基準 MDD": _pct(r.benchmark_mdd),
-            "基準年化": _pct(r.benchmark_cagr),
-        } for r in _rows], use_container_width=True, hide_index=True)
+        } for r in _rows if r.benchmark_key],
+            use_container_width=True, hide_index=True)
+        st.caption(
+            "⚠️ 兩段基準來源不同：現行策略是 2015–2026、MOM-1 是 2008–2014，"
+            "**不可接續閱讀**。")
 
-        st.subheader("因子與出處")
+        st.subheader("逐項細節")
         for _r in _rows:
             with st.expander(f"{_r.display_name}　—　{_r.status_label}"):
-                st.markdown("**使用因子**：" + ("、".join(_r.factors) if _r.factors else "—"))
-                if _r.note:
-                    st.markdown(f"**註**：{_r.note}")
-                st.markdown(f"**數字出處**：`{_r.source_report}`")
-                if _r.has_curve:
-                    st.markdown(f"**權益曲線**：`{_r.curve_dir}`（見「🔄 歷史績效」頁）")
-                else:
-                    st.markdown(
-                        "**權益曲線**：尚未產出。逐日 NAV 序列需由研究機輸出，"
-                        "已於 `reports/REQUEST_2026-08-16_STRATEGY_COMPARISON_ARTIFACTS.md` 索求。"
-                    )
+                if _r.verdict_note:
+                    st.markdown(f"**判決**：{_r.verdict_note}")
+                st.markdown("**使用因子**：" +
+                            ("、".join(_r.factors) if _r.factors else "—"))
+                if _r.regime_caveat:
+                    st.info(f"régime 差異：{_r.regime_caveat}")
 
-        _no_curve = [r.display_name for r in _rows if not r.has_curve]
-        if _no_curve:
-            st.info(
-                f"目前只有「現行波段策略」有逐日 NAV 曲線；{'、'.join(_no_curve)} "
-                "只有摘要指標，因此本頁暫時是表格而非曲線圖。"
-            )
+                if _r.annual_returns:
+                    st.markdown("**年度報酬**（一次性 holdout，僅公布年度粒度）")
+                    _ay = sorted(_r.annual_returns.items())
+                    st.bar_chart(
+                        {"年度報酬 %": [v * 100 for _, v in _ay]},
+                        x_label="年", y_label="報酬 %")
+                    st.caption("年度：" + "　".join(
+                        f"{y} {v * 100:+.1f}%" for y, v in _ay))
+
+                if _r.suppressed:
+                    with st.expander("被抑制的原始數值（僅供稽核，不得引用）"):
+                        st.json(_r.suppressed, expanded=False)
+
+                if _r.has_curve:
+                    st.markdown(
+                        f"**權益曲線**：`{_r.curve_dir}`，見「🔄 歷史績效」頁")
+                elif _r.status == "rejected_at_F1":
+                    st.markdown(
+                        "**權益曲線**：不產出。一次性 holdout 未持久化 NAV，"
+                        "重建等於重跑；且從失效形態找模式即為污染。")
+                if _r.source_report:
+                    st.markdown(f"**出處**：`{_r.source_report}`")
+
+        if _avail := _meta.get("curve_availability"):
+            with st.expander("曲線可得性（研究機說明）"):
+                for _k, _v in _avail.items():
+                    st.markdown(f"- **{_k}**：{_v}")
+        if _defs := _meta.get("definitions"):
+            with st.expander("指標定義"):
+                for _k, _v in _defs.items():
+                    st.markdown(f"- **{_k}**：{_v}")
 
     except Exception as _e:
         st.warning(f"策略比較載入失敗：{_e}")
