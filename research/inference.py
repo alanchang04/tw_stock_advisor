@@ -253,3 +253,54 @@ def label_verdict(*, p_value: float, observed: float,
     if observed < threshold:
         return "rejected"
     return "not_falsified" if p_value < alpha else "suggestive"
+
+
+def stationary_bootstrap_series_ci(
+    series: pd.Series,
+    *,
+    mean_block: int = 6,
+    draws: int = 2000,
+    seed: int = 20260816,
+) -> dict:
+    """對「一條逐期係數序列的平均值」做 Politis-Romano stationary bootstrap。
+
+    與 `stationary_bootstrap_ci` 的差別只在輸入形狀：那一支吃事件研究的
+    (事件 × 窗) 表並在交易日曆上重抽；這一支吃 Fama-MacBeth 產生的
+    **月頻係數序列**，直接對序列本身重抽。
+
+    存在的理由（M1／M10）：Newey-West 要選一個 lag，而 lag 是任意選擇。
+    stationary bootstrap 的 block 長度服從幾何分布，結果不繫於單一長度。
+    **它是穩健性檢查，不是拿來換一個比較好看的 p 值**——
+    主要推論仍為事前登記的 NW(6)。
+
+    ``mean_block`` 以「期」為單位（月頻係數序列用 6 期 ≈ 半年）。
+    """
+    values = pd.Series(series).dropna().to_numpy(dtype=float)
+    n = values.size
+    if n < 3:
+        return {"n": int(n), "mean": float("nan"), "ci95_low": float("nan"),
+                "ci95_high": float("nan"), "share_below_zero": float("nan")}
+
+    rng = np.random.default_rng(seed)
+    p_stop = 1.0 / float(max(mean_block, 1))
+    means = np.empty(draws, dtype=float)
+    for i in range(draws):
+        starts = rng.integers(0, n, size=n)
+        lengths = rng.geometric(p_stop, size=n)
+        keep = int(np.searchsorted(np.cumsum(lengths), n)) + 1
+        starts, lengths = starts[:keep], lengths[:keep]
+        ends = np.cumsum(lengths)
+        offsets = np.arange(ends[-1]) - np.repeat(ends - lengths, lengths)
+        sequence = (np.repeat(starts, lengths) + offsets)[:n] % n
+        means[i] = values[sequence].mean()
+
+    return {
+        "n": int(n),
+        "mean": float(values.mean()),
+        "mean_block_periods": int(mean_block),
+        "draws": int(draws),
+        "ci95_low": float(np.percentile(means, 2.5)),
+        "ci95_high": float(np.percentile(means, 97.5)),
+        # 單尾 p：H0 為效果 <= 0 時，重抽平均落在 0 以下的比例
+        "share_below_zero": float((means <= 0).mean()),
+    }
