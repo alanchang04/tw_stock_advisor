@@ -152,6 +152,7 @@ activemq-data/
 .env
 .envrc
 .venv
+.uv-cache/
 env/
 venv/
 ENV/
@@ -226,3 +227,26 @@ db_export.sql
 data/history/
 *.parquet
 data/research/
+
+# 例外：已驗證回測的 NAV 曲線 artifact（約 120 KB）。
+# 這是衍生成品不是原始資料——2,812 天 NAV 加 475 筆交易明細，
+# 相對原始價量的 480 萬列少了四個數量級。Streamlit Cloud 從 GitHub 部署，
+# 不進版控前端就永遠拿不到，也就得改去 Neon 補齊全市場行情（成本高得多）。
+# 用 parquet 而非 CSV 是為了保留浮點精度，讓 provenance.json 內嵌的
+# nav_sha256 仍可逐位元驗證。範圍刻意收窄到這一個目錄。
+!reports/swing_backtest_curve/*.parquet
+
+# 跨本機開發用的重現快照（含上百MB parquet 與 zip，不進版控）
+# 上面的 *.parquet 只擋得住裡面的 parquet，txt/csv/json/zip 仍會是 untracked，
+# 一次 `git add .` 就可能把 126MB 的 zip 寫進 git 歷史，事後很難拔掉。
+repro_snapshot_*/
+repro_snapshot_*.zip
+data_release_bundles/
+
+# TWSE 原始檔落地區（2005-2014 行情、證券主檔與公司行動，不進版控）
+# 兩台機器靠檔案直接傳輸對齊，並用 reports/twse_raw_transfer_manifest_*.json 的
+# sha256 清單逐檔驗證；manifest 本身很小，進版控當作對齊憑證。
+data/raw/
+
+# 可由 raw cache 重建的 versioned research snapshots。
+data/research_versions/

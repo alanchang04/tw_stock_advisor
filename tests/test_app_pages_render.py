@@ -25,7 +25,7 @@ APP_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 
 PAGES = ["📊 首頁", "📋 每日排行", "📓 選股日誌", "📦 持倉追蹤", "🔖 追蹤清單", "🔎 個股分析",
          "🎯 練習軌", "🔥 族群輪動", "🏦 法人動向", "📉 個股走勢", "🔄 歷史績效", "📰 市場情報",
-         "🧠 聰明資金", "🔍 決策軌跡"]
+         "🧠 聰明資金", "🔍 決策軌跡", "🔬 研究進度"]
 
 
 @pytest.fixture(scope="module")
