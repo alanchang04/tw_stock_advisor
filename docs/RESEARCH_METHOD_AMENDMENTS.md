@@ -54,6 +54,7 @@
 | M22 | 研究分兩軌：confirmatory 凍結、discovery 允許歷史但標為 development | 已採納（規範） | — | — |
 | M23 | 同一資料型態的可得時點須全專案單一定義，不得各自實作 | 已採納 | `research.information_clock:earliest_executable_session`、`research.information_clock:assert_decision_is_legal` | `tests/test_information_clock.py::TestSingleDefinition`、`tests/test_information_clock.py::TestStrictlyAfterDeadline` |
 | M24 | 重新對齊時間窗的研究須事前寫下經濟恆等式約束並檢查 | 已採納 | `research.identities:containment`、`research.identities:additivity` | `tests/test_identities.py::TestContainment`、`tests/test_identities.py::TestAdditivity` |
+| M25 | 主要估計量須與「用來選規格的證據」同一種形式 | 已採納（規範） | — | — |
 
 ---
 
@@ -856,3 +857,35 @@ H11b 第一版在建構期間報酬時多做了一次前瞻位移。結果是：
 設成 0.15，這個正常現象就會被誤報。
 
 因此 `additivity` 只該當「有沒有整段掉了」的粗篩，不是對帳工具。
+
+
+---
+
+## M25 — 主要估計量須與選規格的證據同形式
+
+**主張成立，來自 H18 的一次具體失敗。**
+
+H18 挑主要 horizon（60 個交易日）的依據，是 `factor_report_2026-07-19`
+顯示 `stack_days` 的 **rank IC** 隨 horizon 單調上升（60 日 IC +0.0329）。
+但主要估計量卻設成**原始計數的線性 Fama-MacBeth 迴歸**。
+
+結果：
+
+| 估計式 | 2008–2014 backward |
+|---|---|
+| 登記的主要（線性 FM，原始計數） | +0.0111%，t=0.20，**未通過** |
+| 事前列為描述性的 rank IC（同 horizon） | **+0.0354，t=2.94**，與 development 的 +0.0329 幾乎相同 |
+
+`stack_days` 是計數：**64% 為 0、中位 0、最大 151**。線性迴歸的係數由
+極端值主導，rank IC 對此免疫。**兩者不一致時，比較可能是估計式的問題。**
+
+**若當初把主要估計量設成 rank IC，那會是一次乾淨的複製成功。**
+而現在不能改——改了就是看到結果之後換估計式，
+而且 2008–2014 對這個訊號已經用掉了。
+
+**規則**：事前登記時，主要估計量必須與**當初用來選擇規格（horizon、
+門檻、變數形式）的那個證據**同一種形式。用排序證據挑，就用排序估計量檢定；
+用線性迴歸證據挑，才用線性迴歸。
+
+**混用會讓事前登記自廢武功**：規格選擇踩在一個估計式上、驗收踩在另一個上，
+於是「登記的主要檢定」測的根本不是當初看到的那個現象。
