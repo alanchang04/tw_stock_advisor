@@ -136,6 +136,13 @@ FAMILY_SPLITS: dict[str, dict[str, tuple]] = {
 #: 動能族沒有可耗盡的段落（整段歷史已是 development）；forward_only 一律不得回測。
 _FAMILY_TRACKED = {"momentum": (), "swing": ("validation", "holdout")}
 
+#: 污染的單位是「資料 × 假說／決策／估計量」，不是單純的資料。
+#: 「拿 2008~2014 研究過 6-1 動能」不代表那段對月營收持續性也髒掉——
+#: 只要新假說的定義不是因為看到那段的結果才決定的。
+#: 逐因子的實際狀態見 `research/EVIDENCE_MATRIX.md`，**那張表才是事實來源**，
+#: 本模組只管時間界線。
+CONTAMINATION_UNIT = "data x hypothesis/decision/estimand"
+
 #: 動能族的歷史結論**一律**要附這句——沒有例外，因為沒有乾淨集合可用。
 MOMENTUM_DEVELOPMENT_CAVEAT = (
     "⚠️ 動能族在 2008~2026 全段歷史上都已被看過："
