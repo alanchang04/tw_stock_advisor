@@ -938,38 +938,46 @@ elif page == "📉 個股走勢":
                           margin=dict(l=0, r=0, t=30, b=0))
     st.plotly_chart(fig_vol, use_container_width=True)
 
-    st.caption("👇 以下 RSI / KD / MACD 是**參考用（因子研究裡無預測力）**——"
-               "看圖練手感、日後計分板會量測你的擇時到底有沒有加分，但別當進場的否決條件。")
+    # ⑥ 證據等級與視覺權重要一致：這三個指標在因子研究裡無預測力，
+    # 但先前和價格/量能一樣被畫成同尺寸的圖，視覺上仍暗示它們很重要。
+    # 收進預設收合的 expander，要看得自己點開。
+    with st.expander("📐 技術指標參考（RSI / KD / MACD）—— 因子研究裡無預測力",
+                     expanded=False):
+        st.caption(
+            "這三個指標**不是**進場或否決條件。因子研究已量測過它們在本專案的\n"
+            "候選池裡沒有預測力，放在這裡是為了看圖練手感，以及讓選股日誌的\n"
+            "計分板量測你的擇時有沒有在排名之上加分。"
+        )
 
-    # ── KD ──
-    fig_kd = go.Figure()
-    fig_kd.add_trace(go.Scatter(x=df["日期"], y=df["K"], name="K",
-                                line=dict(color="#e67e22", width=1.5)))
-    fig_kd.add_trace(go.Scatter(x=df["日期"], y=df["D"], name="D",
-                                line=dict(color="#9b59b6", width=1.5)))
-    fig_kd.add_hline(y=80, line_dash="dash", line_color="red",   annotation_text="超買 80")
-    fig_kd.add_hline(y=20, line_dash="dash", line_color="green", annotation_text="超賣 20")
-    fig_kd.update_layout(title="KD 隨機指標", height=180,
-                         margin=dict(l=0, r=0, t=30, b=0))
-    st.plotly_chart(fig_kd, use_container_width=True)
+        # ── KD ──
+        fig_kd = go.Figure()
+        fig_kd.add_trace(go.Scatter(x=df["日期"], y=df["K"], name="K",
+                                    line=dict(color="#e67e22", width=1.5)))
+        fig_kd.add_trace(go.Scatter(x=df["日期"], y=df["D"], name="D",
+                                    line=dict(color="#9b59b6", width=1.5)))
+        fig_kd.add_hline(y=80, line_dash="dash", line_color="red",   annotation_text="超買 80")
+        fig_kd.add_hline(y=20, line_dash="dash", line_color="green", annotation_text="超賣 20")
+        fig_kd.update_layout(title="KD 隨機指標", height=180,
+                             margin=dict(l=0, r=0, t=30, b=0))
+        st.plotly_chart(fig_kd, use_container_width=True)
 
-    # ── RSI（你的規則會用到）──
-    if "RSI" in df.columns and df["RSI"].notna().any():
-        fig_rsi = go.Figure(go.Scatter(x=df["日期"], y=df["RSI"], name="RSI",
-                                       line=dict(color="#16a085", width=1.5)))
-        fig_rsi.add_hline(y=80, line_dash="dash", line_color="red",   annotation_text="超買 80")
-        fig_rsi.add_hline(y=45, line_dash="dot",  line_color="gray",  annotation_text="45")
-        fig_rsi.update_layout(title="RSI(14)", height=160, yaxis_range=[0, 100],
-                              margin=dict(l=0, r=0, t=30, b=0))
-        st.plotly_chart(fig_rsi, use_container_width=True)
+        # ── RSI（你的規則會用到）──
+        if "RSI" in df.columns and df["RSI"].notna().any():
+            fig_rsi = go.Figure(go.Scatter(x=df["日期"], y=df["RSI"], name="RSI",
+                                           line=dict(color="#16a085", width=1.5)))
+            fig_rsi.add_hline(y=80, line_dash="dash", line_color="red",   annotation_text="超買 80")
+            fig_rsi.add_hline(y=45, line_dash="dot",  line_color="gray",  annotation_text="45")
+            fig_rsi.update_layout(title="RSI(14)", height=160, yaxis_range=[0, 100],
+                                  margin=dict(l=0, r=0, t=30, b=0))
+            st.plotly_chart(fig_rsi, use_container_width=True)
 
-    # ── MACD ──
-    colors = ["#e74c3c" if v >= 0 else "#2ecc71" for v in df["MACD_Hist"].fillna(0)]
-    fig_macd = go.Figure(go.Bar(x=df["日期"], y=df["MACD_Hist"],
-                                marker_color=colors, name="MACD Hist"))
-    fig_macd.update_layout(title="MACD 柱狀圖", height=160,
-                           margin=dict(l=0, r=0, t=30, b=0))
-    st.plotly_chart(fig_macd, use_container_width=True)
+        # ── MACD ──
+        colors = ["#e74c3c" if v >= 0 else "#2ecc71" for v in df["MACD_Hist"].fillna(0)]
+        fig_macd = go.Figure(go.Bar(x=df["日期"], y=df["MACD_Hist"],
+                                    marker_color=colors, name="MACD Hist"))
+        fig_macd.update_layout(title="MACD 柱狀圖", height=160,
+                               margin=dict(l=0, r=0, t=30, b=0))
+        st.plotly_chart(fig_macd, use_container_width=True)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -984,7 +992,13 @@ elif page == "🔄 歷史績效":
         "0050 含息資料補齊前，長期回測一律只視為診斷，不作投資判斷。最新 CLI 回測"
         "會顯示實際覆蓋率，低於 80% 直接標記 DATA QUALITY FAIL。"
     )
-    with st.expander("🗄️ 2026-07-24 舊判決封存（資料品質修正後不再有效）", expanded=False):
+    with st.expander("🗄️ 已作廢／已封存（歷史紀錄，不是目前績效）", expanded=False):
+        st.caption(
+            "**這一段是第三類東西：已作廢的數字。** 保留是為了可稽核，"
+            "不是為了引用。已作廢清單：舊 +328%／0050 +745.5%（資料覆蓋不足）、"
+            "MOM-1 F1 第一次執行（每日再平衡缺陷，`..._run1_INVALID.json`）、"
+            "`twse_security_master_2005_2007_staging_v2`（混入下載中的 2008 觀測）。"
+        )
         st.markdown(
             "⚠️ 以下內容是歷史研究紀錄，引用舊回測口徑與不完整資料，不是目前績效。\n\n"
             "依 `docs/SPEC_QUANT_UPGRADE.md` §4.6（成功與放棄準則，2026-07-17 即已寫定）"
@@ -1008,7 +1022,18 @@ elif page == "🔄 歷史績效":
     # （約 120 KB），不是原始價量。前端因此不必接觸任何研究資料，也不需要 Neon
     # 補齊 2015~2026 全市場行情。artifact 內嵌快照 SHA-256，圖表可自證來源。
     st.divider()
-    st.subheader("📈 已驗證回測曲線（凍結快照）")
+    # ② 語意分層：這頁同時放了三種完全不同性質的東西，先講清楚是什麼，
+    # 再用 ③ 的證據徽章標在各段標題上。之前它們混在一起，第一次看的人
+    # 分不出「Neon 覆蓋率 9.7%」和「凍結快照回測」是兩件事。
+    from agent.evidence import badge as _ev_badge, caption as _ev_caption
+
+    st.subheader(f"📈 已驗證回測曲線（凍結快照）　{_ev_badge('development')}")
+    st.caption(_ev_caption("development"))
+    st.caption(
+        "**這一段與上面的資料品質聲明無關。** 上面講的是 Neon 線上資料庫的覆蓋率；"
+        "這裡用的是獨立的凍結研究快照（`research_v20260811_current_bf58807`），"
+        "2,812 個交易日完整，內嵌 SHA-256 可自證來源。"
+    )
     try:
         from agent.backtest_curve import (
             concentration_summary, cumulative_pnl_excluding_top, drawdown,
@@ -1125,6 +1150,14 @@ elif page == "🔄 歷史績效":
     # 原本寫死的 STRATEGY_V2_DATE 就是因為策略改了好幾輪沒人回頭更新，長期把舊策略的
     # 交易標成「現行策略績效」。清單化之後，加新版本＝在 strategy.py 加一筆。
     from agent.strategy import STRATEGY_ERAS
+
+    st.divider()
+    st.subheader(f"📋 AI 實際推薦的已平倉交易　{_ev_badge('forward')}")
+    st.caption(_ev_caption("forward"))
+    st.caption(
+        "**這一段才是真正乾淨的證據來源**——系統上線後實際產生的推薦，"
+        "沒有被事後挑選過。但樣本仍在累積，期數不足前不得下結論。"
+    )
 
     _cur = STRATEGY_ERAS[0]
     _opts = [f"🆕 {_cur['label']}（{_cur['live_from']} 起進場）"] + \
