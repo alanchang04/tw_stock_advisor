@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 from agent.evidence import (TIERS, UNKNOWN, annotate, badge, caption,
-                            invalidated_artifacts, is_confirmation, load_registry,
-                            tier)
+                            dashboard_rows, invalidated_artifacts, is_confirmation,
+                            load_registry, tier, verdict_badge)
 
 
 def test_vocabulary_comes_from_the_registry_not_a_local_copy():
@@ -20,6 +20,47 @@ def test_registry_exposes_the_research_owned_invalidated_artifact_list():
     assert len(rows) == 5
     assert all({"artifact", "invalidated_at", "reason", "superseded_by"} <= row.keys()
                for row in rows)
+
+
+def test_dashboard_rows_obey_every_display_policy():
+    payload = {"hypotheses": [
+        {"id": "FULL", "title": "full", "evidence_tier": "backward",
+         "verdict": "passed", "display_policy": "full", "mandatory_caveat": "c1",
+         "primary_metric": {"name": "IC", "value": 1.2, "t_stat": 3.4}},
+        {"id": "STATUS", "title": "sealed", "evidence_tier": "sealed",
+         "verdict": "blocked", "display_policy": "status_only", "mandatory_caveat": "c2",
+         "primary_metric": {"name": "MUST_HIDE", "value": 99, "t_stat": 99}},
+        {"id": "HIDE", "title": "hidden", "evidence_tier": "development",
+         "verdict": "rejected", "display_policy": "do_not_display",
+         "mandatory_caveat": "c3", "primary_metric": {"value": 88}},
+        {"id": "UNKNOWN", "title": "unknown policy", "evidence_tier": "development",
+         "verdict": "rejected", "display_policy": "future_policy",
+         "mandatory_caveat": "c4", "primary_metric": {"value": 77}},
+    ]}
+    rows = {row["id"]: row for row in dashboard_rows(payload)}
+    assert set(rows) == {"FULL", "STATUS", "UNKNOWN"}
+    assert rows["FULL"]["metric_value"] == 1.2
+    assert rows["STATUS"]["metric_name"] is None
+    assert rows["STATUS"]["metric_value"] is None
+    assert rows["UNKNOWN"]["display_policy"] == "status_only"
+    assert rows["UNKNOWN"]["metric_value"] is None
+
+
+def test_primary_not_met_and_rejected_have_distinct_verdict_badges():
+    assert verdict_badge("primary_not_met") != verdict_badge("rejected")
+    assert "🟡" in verdict_badge("primary_not_met")
+    assert "❌" in verdict_badge("rejected")
+
+
+def test_delivered_registry_keeps_h17_status_only_and_h19_full():
+    rows = {row["id"]: row for row in dashboard_rows()}
+    assert len(rows) == 14
+    assert rows["H17"]["display_policy"] == "status_only"
+    assert rows["H17"]["metric_value"] is None
+    assert rows["H19"]["display_policy"] == "full"
+    assert rows["H19"]["metric_value"] == -0.0363
+    assert rows["H19"]["t_stat"] == -3.265
+    assert rows["MOM-1"]["display_policy"] == "summary_only"
 
 
 def test_known_tiers_cover_the_registry_vocabulary():

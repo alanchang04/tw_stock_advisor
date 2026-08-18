@@ -42,6 +42,16 @@ _STYLE: dict[str, tuple[str, str, bool]] = {
     "forward":       ("FORWARD", "⏩", True),
 }
 
+VERDICT_PRESENTATION: dict[str, tuple[str, str]] = {
+    "passed": ("✅", "主要判準通過"),
+    "rejected": ("❌", "否決"),
+    "primary_not_met": ("🟡", "主要判準未通過"),
+    "real_but_not_deployable": ("🟠", "現象成立、不可部署"),
+    "blocked": ("⚪", "阻塞"),
+    "registered_not_executed": ("📝", "已登記、尚未執行"),
+    "pending_dependency": ("⏸️", "等待前置假說"),
+}
+
 
 @dataclass(frozen=True)
 class Tier:
@@ -106,6 +116,52 @@ def invalidated_artifacts() -> list[dict]:
     """回傳 registry 的作廢清單；缺欄位時安全地回空清單。"""
     rows = _REGISTRY_PAYLOAD.get("invalidated_artifacts") or []
     return [dict(row) for row in rows if isinstance(row, dict)]
+
+
+def verdict_badge(key: str | None, label: str | None = None) -> str:
+    """固定 verdict enum 的顯示；未知值保守標成未定義。"""
+    icon, fallback = VERDICT_PRESENTATION.get(
+        str(key or ""), ("❓", "未定義判決"))
+    return f"{icon} {label or fallback}"
+
+
+def dashboard_rows(payload: dict | None = None) -> list[dict]:
+    """依 display_policy 產生 Evidence Dashboard 安全列。
+
+    - ``do_not_display`` 完全省略。
+    - ``status_only`` 不帶任何 metric。
+    - 未知 policy 視同 ``status_only``，不做樂觀揭露。
+    - 任何可揭露 metric 都與 tier、policy、mandatory_caveat 留在同一列。
+    """
+    payload = payload if payload is not None else load_registry()
+    result: list[dict] = []
+    for raw in payload.get("hypotheses") or []:
+        if not isinstance(raw, dict):
+            continue
+        policy = str(raw.get("display_policy") or "status_only")
+        if policy == "do_not_display":
+            continue
+        if policy not in {"full", "summary_only", "status_only"}:
+            policy = "status_only"
+
+        metric = raw.get("primary_metric") if policy in {"full", "summary_only"} else None
+        metric = metric if isinstance(metric, dict) else {}
+        evidence_tier = raw.get("evidence_tier")
+        result.append({
+            "id": raw.get("id"),
+            "title": raw.get("title"),
+            "evidence_tier": evidence_tier,
+            "tier_badge": badge(evidence_tier),
+            "verdict": raw.get("verdict"),
+            "verdict_badge": verdict_badge(raw.get("verdict"), raw.get("verdict_label")),
+            "display_policy": policy,
+            "metric_name": metric.get("name"),
+            "metric_value": metric.get("value"),
+            "t_stat": metric.get("t_stat"),
+            "mandatory_caveat": raw.get("mandatory_caveat") or "未提供必要警語，不顯示數值。",
+            "source_report": raw.get("source_report"),
+        })
+    return result
 
 
 def tier(key: str | None) -> Tier:
