@@ -144,6 +144,31 @@ def db_status() -> dict:
         return {"ok": False, "error": str(e)}
 
 
+@st.cache_data(ttl=300)
+def cockpit_market_regime() -> dict:
+    """首頁只讀市場狀態；查詢失敗交由 present_regime 顯式降級。"""
+    try:
+        from agent.stock_selector import market_regime_detail
+        return market_regime_detail()
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@st.cache_data(ttl=60)
+def pending_order_status() -> dict:
+    """首頁待成交摘要；錯誤不可偽裝成 0 筆。"""
+    try:
+        from agent.portfolio import ensure_pending_orders_table
+        ensure_pending_orders_table()
+        with get_session() as s:
+            count = s.execute(text(
+                "SELECT COUNT(*) FROM pending_orders WHERE status='pending'"
+            )).scalar()
+        return {"ok": True, "count": int(count or 0)}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 # 側欄資料時間指示：按「立即更新」後看這裡就知道新資料落地了沒
 # （pipeline 約 5-10 分鐘；此快取 5 分鐘，按「🔄」可強制刷新）
 _dbs = db_status()
@@ -532,10 +557,12 @@ def _dt_card(cls, icon, title, body_html, meta=""):
 
 
 # ══════════════════════════════════════════════════════════════════
-#  Page 1：首頁 Dashboard
+#  Page 1：首頁 Decision Cockpit
 # ══════════════════════════════════════════════════════════════════
 if page == "📊 首頁":
-    st.title("📈 台股顧問系統")
+    st.title("📈 Decision Cockpit")
+    st.caption("今天我需要知道什麼：市場能不能承擔風險、目前跑哪一版策略、"
+               "forward 累積到哪裡，以及帳戶有沒有待處理事項。")
 
     status = db_status()
     if not status["ok"]:
@@ -545,20 +572,66 @@ if page == "📊 首頁":
     positions = load_open_positions()
     exit_cnt  = sum(1 for p in positions if p["_exit"])
 
-    c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("資料截止日",   str(status["last_date"]))
-    c2.metric("追蹤股票數",   f"{status['stocks']:,} 檔")
-    c3.metric("AI持倉中",     f"{status['open_pos']} 檔")
-    c4.metric("手動持倉",     f"{status.get('manual_pos', 0)} 檔",
-              help="自己記的持倉（📦持倉追蹤頁「我的持倉」分頁），不算進下面的AI持倉統計")
-    c5.metric("出場訊號",     f"{exit_cnt} 檔",
-              delta="需注意" if exit_cnt else None, delta_color="inverse")
-
     try:
         ledger = paper_account_snapshot()
     except Exception as e:
         ledger = None
         st.warning(f"前向紙上帳本目前無法讀取：{e}")
+
+    from agent.cockpit import (current_strategy_status, load_forward_status,
+                               present_regime)
+
+    _regime = present_regime(cockpit_market_regime())
+    _strategy_status = current_strategy_status()
+    _forward_status = load_forward_status()
+    _pending_status = pending_order_status()
+
+    # 第一列：決策環境。market query 失敗時 present_regime 絕不把 bull fallback 畫成多頭。
+    d1, d2, d3, d4 = st.columns(4)
+    d1.metric("Market regime", f"{_regime['icon']} {_regime['label']}")
+    if _strategy_status.get("ok"):
+        d2.metric("策略版本", str(_strategy_status.get("key") or "—"),
+                  delta=f"凍結／生效 {_strategy_status.get('live_from')}",
+                  delta_color="off")
+    else:
+        d2.metric("策略版本", "不可用")
+    if _forward_status.get("ok"):
+        d3.metric("Forward 累積", f"{_forward_status['periods']} 期",
+                  delta=("資料過期" if _forward_status.get("is_stale") else
+                         f"自 {_forward_status.get('forward_start')}"),
+                  delta_color="inverse" if _forward_status.get("is_stale") else "off")
+    else:
+        d3.metric("Forward 累積", "不可用")
+    d4.metric("營運資料截止", str(status["last_date"]))
+
+    st.caption(_regime["caption"])
+    if _forward_status.get("ok"):
+        _freshness_text = (
+            f"Forward 快照資料最後更新 {_forward_status.get('last_trade_date') or '—'}"
+            f"，落後 {_forward_status.get('lag_days') if _forward_status.get('lag_days') is not None else '—'} 天"
+        )
+        (st.warning if _forward_status.get("is_stale") else st.caption)(_freshness_text)
+    else:
+        st.warning(f"Forward journal 讀取失敗：{_forward_status.get('error', '未知錯誤')}")
+
+    # 第二列：今天要不要處理部位／委託。
+    a1, a2, a3, a4, a5 = st.columns(5)
+    a1.metric("可核對 NAV", f"{ledger['tracked_nav']:,.0f}" if ledger else "—")
+    a2.metric("現金", f"{ledger['cash']:,.0f}" if ledger else "—")
+    a3.metric("AI 持倉", f"{len(positions)} 檔")
+    a4.metric("待成交", (f"{_pending_status['count']} 筆"
+                         if _pending_status.get("ok") else "不可用"))
+    a5.metric("出場訊號", f"{exit_cnt} 檔",
+              delta="需注意" if exit_cnt else None, delta_color="inverse")
+
+    with st.expander("系統涵蓋範圍與工程狀態", expanded=False):
+        st.write(f"追蹤股票數：{status['stocks']:,} 檔")
+        st.write(f"手動持倉：{status.get('manual_pos', 0)} 檔")
+        if not _regime.get("ok"):
+            st.warning(_regime["caption"])
+        if not _pending_status.get("ok"):
+            st.warning(f"待成交查詢失敗：{_pending_status.get('error', '未知錯誤')}")
+
     if ledger:
         st.caption(
             f"前向紙上帳本（{ledger['started_at']:%Y-%m-%d} 起）："
@@ -3013,104 +3086,186 @@ elif page == "⚖️ 策略比較":
 
 
 # ══════════════════════════════════════════════════════════════════
-#  Page：研究進度（資料地基狀態）
+#  Page：Evidence Dashboard（資料地基保留為第二分頁）
 # ══════════════════════════════════════════════════════════════════
-# 只讀 reports/data_releases/*.json（8~9 KB 的釋出中繼資料，已進版控）。
-# 不讀 data/research_versions、不讀 data/raw——那些不進版控，Streamlit Cloud 上
-# 不存在，且釋出的 usage_policy.blocked 明文禁止把原始研究資料上傳到 Streamlit Cloud。
-# 本頁也刻意不顯示任何報酬／Sharpe／回撤：同一份 usage_policy 禁止 backward holdout
-# 績效查看，holdout 尚未開封。
+# Evidence 分頁只讀研究機策展、已進版控的 evidence_registry.json；逐列遵守
+# display_policy，任何數值必須與 evidence_tier 及 mandatory_caveat 併陳。
+# 資料地基分頁仍只讀 reports/data_releases/*.json，不碰 raw/research_versions。
 elif page == "🔬 研究進度":
-    st.title("🔬 研究進度")
-    st.caption("資料地基的具名不可變釋出狀態。本頁不含績效數字；績效見「⚖️ 策略比較」。")
+    st.title("🔬 Evidence Dashboard")
+    st.caption("假說證據矩陣：判決、證據等級、揭露政策與必要警語來自同一份權威 registry，"
+               "前端不自行歸類、不自行重算研究數字。")
 
-    try:
-        from agent.research_status import (
-            available_releases, component_table, load_release,
-            readiness_table, repeat_build_consistency,
-        )
+    _evidence_tab, _foundation_tab = st.tabs(["🧭 假說證據矩陣", "🧱 資料地基與閘門"])
 
-        _releases = available_releases()
-        if not _releases:
-            st.info("尚未有任何釋出定義（reports/data_releases/）。")
-            st.stop()
+    with _evidence_tab:
+        from agent.evidence import (dashboard_rows as _dashboard_rows,
+                                    load_registry as _load_evidence_registry,
+                                    tier as _evidence_tier)
 
-        _names = [p.stem for p in _releases]
-        _pick = st.selectbox("資料釋出版本", _names, index=0)
-        _rel = load_release(_releases[_names.index(_pick)])
+        _registry = _load_evidence_registry()
+        _evidence_rows = _dashboard_rows(_registry)
+        if not _registry or not _evidence_rows:
+            st.error("Evidence registry 不存在或沒有可顯示列；本頁不自行補猜。")
+        else:
+            _summary = _registry.get("summary") or {}
+            _by_tier = _summary.get("by_tier") or {}
+            _by_verdict = _summary.get("by_verdict") or {}
+            _s1, _s2, _s3, _s4 = st.columns(4)
+            _s1.metric("已登記假說", _summary.get("hypotheses", len(_evidence_rows)))
+            _s2.metric("Backward 已開封", _by_tier.get("backward", 0))
+            _s3.metric("主要判準通過", _by_verdict.get("passed", 0))
+            _s4.metric("Forward 起點", _summary.get("forward_start") or "—")
 
-        if _rel.supersedes:
-            st.caption(f"本版取代 `{_rel.supersedes}`")
-
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("釋出 ID", _rel.release_id.replace("tw_stock_data_", ""))
-        m2.metric("元件可推進策略", f"{_rel.components_ready} / {len(_rel.components)}")
-        m3.metric("檔案數", f"{_rel.file_count:,}")
-        m4.metric("資料量", f"{_rel.total_bytes / 1024 / 1024:,.0f} MB")
-
-        st.caption(
-            f"發布日 {_rel.release_date}　權責 {_rel.authority}　"
-            f"collection SHA-256 `{_rel.collection_sha256[:16]}…`"
-        )
-
-        _t1, _t2, _t3 = st.tabs(["元件狀態", "閘門", "已知缺口與使用政策"])
-
-        with _t1:
-            _fails = _rel.structural_failures
-            if _fails:
-                st.error(f"結構閘門未通過：{'、'.join(_fails)}")
-            else:
-                st.success(f"全部 {len(_rel.components)} 個元件的結構閘門都通過")
-
-            st.dataframe(component_table(_rel), use_container_width=True,
-                         hide_index=True)
-
-            # 「同一份 raw 重建兩次是否得到同一份結果」——不一致代表建構器不確定，
-            # 下游任何研究結論都不可信，比元件少一項更嚴重。
-            _rep = repeat_build_consistency(_rel)
-            if not _rep["available"]:
-                st.caption("此版未附重複建構證據。")
-            elif _rep["mismatched"]:
-                st.error(
-                    f"重複建構雜湊不一致：{'、'.join(_rep['mismatched'])}。"
-                    "建構器不具決定性，下游結論不可信。"
+            # H19 是目前最值得展示的方法論成果，但必須同時顯示不可部署警語。
+            _h19 = next((r for r in _evidence_rows if r.get("id") == "H19"), None)
+            if _h19:
+                _h19_tier = _evidence_tier(_h19.get("evidence_tier"))
+                st.success(
+                    f"**H19 {_h19.get('title')}｜{_h19['verdict_badge']}**　"
+                    f"{_h19_tier.emoji} `{_h19_tier.label}`"
                 )
-            else:
-                st.caption(
-                    f"重複建構驗證：{_rep['matched']} / {_rep['checked']} 個元件的 "
-                    "content SHA-256 兩次建構完全相同。"
-                )
+                if _h19.get("metric_value") is not None:
+                    _h1, _h2 = st.columns(2)
+                    _h1.metric(_h19.get("metric_name") or "主要估計量",
+                               f"{float(_h19['metric_value']):+.4f}")
+                    _h2.metric("t 值", f"{float(_h19['t_stat']):+.3f}")
+                st.warning(_h19["mandatory_caveat"])
 
-        with _t2:
-            st.dataframe(readiness_table(_rel), use_container_width=True,
-                         hide_index=True)
-            st.caption(
-                "🔒 未通過不代表落後，而是刻意的閘門——"
-                "`backward_holdout_performance_ready` 為 false 時，任何人（含 AI）"
-                "都不得查看 2008~2014 績效。"
+            def _ev_num(value):
+                if value is None or pd.isna(value):
+                    return "—"
+                return f"{float(value):+.4f}"
+
+            _matrix = pd.DataFrame([{
+                "ID": row.get("id"),
+                "假說": row.get("title"),
+                "證據等級": (f"{_evidence_tier(row.get('evidence_tier')).emoji} "
+                             f"{_evidence_tier(row.get('evidence_tier')).label}"),
+                "判決": row.get("verdict_badge"),
+                "主要指標": row.get("metric_name") or "—",
+                "估計量": _ev_num(row.get("metric_value")),
+                "t 值": _ev_num(row.get("t_stat")),
+                "揭露政策": row.get("display_policy"),
+                "必要警語": row.get("mandatory_caveat"),
+            } for row in _evidence_rows])
+            st.dataframe(
+                _matrix,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "ID": st.column_config.TextColumn(width="small"),
+                    "假說": st.column_config.TextColumn(width="medium"),
+                    "證據等級": st.column_config.TextColumn(width="medium"),
+                    "判決": st.column_config.TextColumn(width="large"),
+                    "必要警語": st.column_config.TextColumn(width="large"),
+                },
             )
 
-        with _t3:
-            st.markdown("**已知缺口**（明列而非靜默忽略）")
-            for _g in _rel.known_gaps:
-                st.markdown(f"- {_g}")
+            _row_options = {f"{r['id']}｜{r['title']}": r for r in _evidence_rows}
+            _row_pick = st.selectbox("查看完整證據列", list(_row_options))
+            _row = _row_options[_row_pick]
+            _row_tier = _evidence_tier(_row.get("evidence_tier"))
+            st.markdown(f"### {_row['id']} {_row['title']}")
+            st.markdown(f"{_row_tier.emoji} `{_row_tier.label}`　{_row['verdict_badge']}")
+            if (_row.get("display_policy") != "status_only"
+                    and _row.get("metric_value") is not None):
+                _r1, _r2 = st.columns(2)
+                _r1.metric(_row.get("metric_name") or "主要估計量",
+                           _ev_num(_row.get("metric_value")))
+                _r2.metric("t 值", _ev_num(_row.get("t_stat")))
+            st.warning(_row["mandatory_caveat"])
+            if _row.get("source_report"):
+                st.caption(f"來源：`{_row['source_report']}`｜揭露政策：`{_row['display_policy']}`")
 
-            _allowed = _rel.usage_policy.get("allowed", [])
-            _blocked = _rel.usage_policy.get("blocked", [])
-            _c1, _c2 = st.columns(2)
-            with _c1:
-                st.markdown("**允許用途**")
-                for _a in _allowed:
-                    st.markdown(f"- ✅ {_a}")
-            with _c2:
-                st.markdown("**禁止用途**")
-                for _b in _blocked:
-                    st.markdown(f"- 🚫 {_b}")
+    with _foundation_tab:
+        try:
+            from agent.research_status import (
+                available_releases, component_table, load_release,
+                readiness_table, repeat_build_consistency,
+            )
 
-    except FileNotFoundError as _e:
-        st.info(f"找不到釋出定義：{_e}")
-    except Exception as _e:
-        st.warning(f"研究進度載入失敗：{_e}")
+            _releases = available_releases()
+            if not _releases:
+                st.info("尚未有任何釋出定義（reports/data_releases/）。")
+                st.stop()
+
+            _names = [p.stem for p in _releases]
+            _pick = st.selectbox("資料釋出版本", _names, index=0)
+            _rel = load_release(_releases[_names.index(_pick)])
+
+            if _rel.supersedes:
+                st.caption(f"本版取代 `{_rel.supersedes}`")
+
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("釋出 ID", _rel.release_id.replace("tw_stock_data_", ""))
+            m2.metric("元件可推進策略", f"{_rel.components_ready} / {len(_rel.components)}")
+            m3.metric("檔案數", f"{_rel.file_count:,}")
+            m4.metric("資料量", f"{_rel.total_bytes / 1024 / 1024:,.0f} MB")
+
+            st.caption(
+                f"發布日 {_rel.release_date}　權責 {_rel.authority}　"
+                f"collection SHA-256 `{_rel.collection_sha256[:16]}…`"
+            )
+
+            _t1, _t2, _t3 = st.tabs(["元件狀態", "閘門", "已知缺口與使用政策"])
+
+            with _t1:
+                _fails = _rel.structural_failures
+                if _fails:
+                    st.error(f"結構閘門未通過：{'、'.join(_fails)}")
+                else:
+                    st.success(f"全部 {len(_rel.components)} 個元件的結構閘門都通過")
+
+                st.dataframe(component_table(_rel), use_container_width=True,
+                             hide_index=True)
+
+                # 「同一份 raw 重建兩次是否得到同一份結果」——不一致代表建構器不確定，
+                # 下游任何研究結論都不可信，比元件少一項更嚴重。
+                _rep = repeat_build_consistency(_rel)
+                if not _rep["available"]:
+                    st.caption("此版未附重複建構證據。")
+                elif _rep["mismatched"]:
+                    st.error(
+                        f"重複建構雜湊不一致：{'、'.join(_rep['mismatched'])}。"
+                        "建構器不具決定性，下游結論不可信。"
+                    )
+                else:
+                    st.caption(
+                        f"重複建構驗證：{_rep['matched']} / {_rep['checked']} 個元件的 "
+                        "content SHA-256 兩次建構完全相同。"
+                    )
+
+            with _t2:
+                st.dataframe(readiness_table(_rel), use_container_width=True,
+                             hide_index=True)
+                st.caption(
+                    "🔒 未通過不代表落後，而是刻意的閘門——"
+                    "`backward_holdout_performance_ready` 為 false 時，任何人（含 AI）"
+                    "都不得查看 2008~2014 績效。"
+                )
+
+            with _t3:
+                st.markdown("**已知缺口**（明列而非靜默忽略）")
+                for _g in _rel.known_gaps:
+                    st.markdown(f"- {_g}")
+
+                _allowed = _rel.usage_policy.get("allowed", [])
+                _blocked = _rel.usage_policy.get("blocked", [])
+                _c1, _c2 = st.columns(2)
+                with _c1:
+                    st.markdown("**允許用途**")
+                    for _a in _allowed:
+                        st.markdown(f"- ✅ {_a}")
+                with _c2:
+                    st.markdown("**禁止用途**")
+                    for _b in _blocked:
+                        st.markdown(f"- 🚫 {_b}")
+
+        except FileNotFoundError as _e:
+            st.info(f"找不到釋出定義：{_e}")
+        except Exception as _e:
+            st.warning(f"研究進度載入失敗：{_e}")
 
 
 # ══════════════════════════════════════════════════════════════════
