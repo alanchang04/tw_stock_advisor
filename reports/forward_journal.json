@@ -1,0 +1,45 @@
+{
+  "study": "forward journal for H11 (revenue) and H16 (momentum confirmation)",
+  "forward_start": "2026-08-14",
+  "definition_fingerprint": "7ac418bdda280bb4e4124b86a46955f9c8dbe36595122056ab9d51a83cb19799",
+  "frozen_parameters": {
+    "primary_horizon_sessions": 60,
+    "revenue_min_yoy": 0.0,
+    "momentum_entry_fraction": 0.1,
+    "formation_skip": 20,
+    "formation_lookback": 120
+  },
+  "inference": {
+    "method": "always-valid normal-mixture confidence sequence",
+    "why": "a monthly journal is inspected many times; fixed-sample p-values are only valid for a pre-committed number of looks",
+    "alpha": 0.05,
+    "tightest_at_months": 60,
+    "sigma_h16": 12.55,
+    "sigma_h11": 2.22,
+    "sigma_source": "back-solved from the historical runs; frozen, never re-estimated"
+  },
+  "h16_momentum_confirmation": {
+    "months": 0,
+    "note": "no forward observations yet"
+  },
+  "h11_revenue_plus": {
+    "months": 0,
+    "note": "no forward observations yet"
+  },
+  "planning_only_not_evidence": {
+    "expected_t_1.96_months": 175,
+    "expected_t_1.645_months": 123,
+    "power80_two_sided_months": 356,
+    "power80_one_sided_months": 281,
+    "note": "planning only, not evidence; effect comes from already-inspected history (winner's curse) and required periods scale with 1/effect^2"
+  },
+  "snapshot_freshness": {
+    "last_trade_date": "2026-07-31",
+    "lag_days": 16,
+    "threshold_days": 45,
+    "is_stale": false,
+    "rebuild_command": "python run_pipeline.py --mode daily  →  python scripts/db_to_parquet.py --out data/research"
+  },
+  "observations": [],
+  "m18_reminder": "inspecting this journal and then changing the model turns all prior forward data into development data for the new model"
+}

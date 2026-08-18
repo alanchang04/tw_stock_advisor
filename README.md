@@ -48,7 +48,7 @@ Agent層   出場檢查(持倉) → 候選篩選 → Gemini 推薦 → 開新部
 情報層    市場情報（新聞/YouTube/ETF換股，Gemini 摘要 + 每日彙整）
          聰明資金（投信連買 × 統一ETF成分股 → 黃金交叉）
    ↓
-輸出層    Telegram 推播 / Streamlit 網頁（7 頁）/ DB（market_signals 等）
+輸出層    Telegram 推播 / Streamlit 網頁（16 頁）/ DB（market_signals 等）
    ↓
 排程      GitHub Actions（每日 21:00，weekdays）/ 手動觸發
    ↓
@@ -228,17 +228,25 @@ python run_pipeline.py --mode bot         # 處理一次 Bot 的 /help /status /
 
 **進場**：候選池過濾（RSI/股價/成交量）、評分權重（均線交叉、突破、MACD、法人買超、RSI 甜蜜帶）
 
-**出場（12 條規則，可個別開關）**：
-- 停損（預設 -7%）
-- 固定停利（+20%）
-- 移動停利（從高點回撤 -10%）
-- KD 高檔死叉 + MACD 轉負
-- 均線死亡交叉（MA5 < MA20）
-- 跌破 MA20 / MA5
-- 跌破前波低點（pivot）
-- 跌破前 N 根實體棒底部
-- 長上引線爆量
-- 持有到期（預設 30 日）
+**出場（12 條規則，可個別開關）**
+
+> ⚠️ 2026-08-18 同步實際設定。多數規則經回測消融後**已關閉**——留著開關是為了
+> 可重現地重跑那些實驗，不代表現在生效。以 `agent/strategy.py` 的 `STRATEGY` 為準。
+
+目前**生效**的：
+
+- 停損 `stop_loss` **-8%**
+- 移動停利 `trail_activate` +10% 啟動、`trail_stop` 回撤 -8%、`trail_tiers` 分批
+- 均線死亡交叉：`exit_on_death_cross` 為 False，但 `bear_reenable_death_cross`
+  為 True → **僅空頭期間**啟用
+- 長上引線 `hard_veto_upper_wick`（進場硬否決，非出場）
+
+目前**已關閉**的（`False` / `0`）：
+
+- 固定停利 `exit_fixed_take_profit`
+- 持有到期 `max_hold_days = 0`（無時間停損）
+- 跌破 MA20 / MA5、KD 高檔死叉＋MACD 轉負、跌破前波低點、
+  跌破前 N 根實體棒底部、長紅/長黑棒
 
 改完直接重跑回測比較優劣：
 
