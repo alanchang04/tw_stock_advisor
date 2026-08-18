@@ -986,330 +986,344 @@ elif page == "📉 個股走勢":
 elif page == "🔄 歷史績效":
     st.title("🔄 歷史績效")
 
-    st.error(
-        "🚨 **資料品質聲明**：目前 Neon 的 2015–2026 行情只有約 9.7% 交易日覆蓋。"
-        "舊頁面寫死的 +328%／0050 +745.5% 與舊年化數字已移除；在完整歷史行情與"
-        "0050 含息資料補齊前，長期回測一律只視為診斷，不作投資判斷。最新 CLI 回測"
-        "會顯示實際覆蓋率，低於 80% 直接標記 DATA QUALITY FAIL。"
-    )
-    with st.expander("🗄️ 已作廢／已封存（歷史紀錄，不是目前績效）", expanded=False):
-        st.caption(
-            "**這一段是第三類東西：已作廢的數字。** 保留是為了可稽核，"
-            "不是為了引用。已作廢清單：舊 +328%／0050 +745.5%（資料覆蓋不足）、"
-            "MOM-1 F1 第一次執行（每日再平衡缺陷，`..._run1_INVALID.json`）、"
-            "`twse_security_master_2005_2007_staging_v2`（混入下載中的 2008 觀測）。"
+    from agent.evidence import (badge as _ev_badge, caption as _ev_caption,
+                                invalidated_artifacts as _invalidated_artifacts)
+
+    _hist_forward, _hist_development, _hist_invalid = st.tabs([
+        "⏩ Forward（實際推薦）",
+        "🧪 Historical Development（歷史開發）",
+        "🗄️ Archived-Invalid（作廢封存）",
+    ])
+
+    with _hist_invalid:
+        st.error(
+            "🚨 **資料品質聲明**：目前 Neon 的 2015–2026 行情只有約 9.7% 交易日覆蓋。"
+            "舊頁面寫死的 +328%／0050 +745.5% 與舊年化數字已移除；在完整歷史行情與"
+            "0050 含息資料補齊前，長期回測一律只視為診斷，不作投資判斷。最新 CLI 回測"
+            "會顯示實際覆蓋率，低於 80% 直接標記 DATA QUALITY FAIL。"
         )
-        st.markdown(
-            "⚠️ 以下內容是歷史研究紀錄，引用舊回測口徑與不完整資料，不是目前績效。\n\n"
-            "依 `docs/SPEC_QUANT_UPGRADE.md` §4.6（成功與放棄準則，2026-07-17 即已寫定）"
-            "逐條對照後下的判決：\n\n"
-            "| 準則 | 門檻 | 實測 | |\n|---|---|---|---|\n"
-            "| 繼續投入 | validation 淨超額 > 0 | 2021 **-23.2pp**、2022 +9.8pp → 合計為負 | ❌ |\n"
-            "| 上線 | 年化超額 ≥ +5% 且 t > 2 | **-6.91%**、t = **-1.230** | ❌ |\n"
-            "| — | — | 樣本外年化 **6.0%** vs 0050 **14.1%** | ❌ |\n\n"
-            "**❌ 結案凍結**：現行「短持有期 × 手調權重」實作，證實無法覆蓋成本、"
-            "不優於 0050。**不得再對它調參或做 A/B。**\n\n"
-            "**✅ 沒有被否決**：核心 edge 假說（投信資金流資訊擴散緩慢）。"
-            "P1 的 92,084 個事件研究是**相對基準的 CAR**：+1日 0.42% → +20日 1.05% → "
-            "**+60日 2.02%**，單調遞增不回吐。假說仍成立，只是現行實作沒能把它變成錢。\n\n"
-            "**這頁的數字怎麼看**：AI 軌繼續紙上運行以累積前向資料（那是唯一真正乾淨的"
-            "驗收來源），但在 P3 重設計通過 holdout 之前，**核心資金應買 0050**。"
-            "本系統的定位是研究平台與練習場，不是可以照抄的操作訊號。"
-        )
+        _invalid_rows = _invalidated_artifacts()
+        if _invalid_rows:
+            st.dataframe(
+                pd.DataFrame([{
+                    "作廢項目": row.get("artifact"),
+                    "作廢日": row.get("invalidated_at") or "—",
+                    "原因": row.get("reason"),
+                    "替代來源": row.get("superseded_by"),
+                } for row in _invalid_rows]),
+                use_container_width=True,
+                hide_index=True,
+            )
+        else:
+            st.warning("registry 未提供作廢清單；為避免誤引，本頁不自行補猜。")
+
+        with st.expander("舊策略判決的稽核紀錄", expanded=False):
+            st.markdown(
+                "⚠️ 以下內容是歷史研究紀錄，引用舊回測口徑與不完整資料，不是目前績效。\n\n"
+                "依 `docs/SPEC_QUANT_UPGRADE.md` §4.6（成功與放棄準則，2026-07-17 即已寫定）"
+                "逐條對照後下的判決：\n\n"
+                "| 準則 | 門檻 | 實測 | |\n|---|---|---|---|\n"
+                "| 繼續投入 | validation 淨超額 > 0 | 2021 **-23.2pp**、2022 +9.8pp → 合計為負 | ❌ |\n"
+                "| 上線 | 年化超額 ≥ +5% 且 t > 2 | **-6.91%**、t = **-1.230** | ❌ |\n"
+                "| — | — | 樣本外年化 **6.0%** vs 0050 **14.1%** | ❌ |\n\n"
+                "**❌ 結案凍結**：現行「短持有期 × 手調權重」實作，證實無法覆蓋成本、"
+                "不優於 0050。**不得再對它調參或做 A/B。**\n\n"
+                "**✅ 沒有被否決**：核心 edge 假說（投信資金流資訊擴散緩慢）。"
+                "P1 的 92,084 個事件研究是**相對基準的 CAR**：+1日 0.42% → +20日 1.05% → "
+                "**+60日 2.02%**，單調遞增不回吐。假說仍成立，只是現行實作沒能把它變成錢。"
+            )
 
     # ── 已驗證回測曲線（凍結快照）──────────────────────────────
     # 資料來源是 scripts/run_verified_backtest.py --curve-output 產出的小型 artifact
     # （約 120 KB），不是原始價量。前端因此不必接觸任何研究資料，也不需要 Neon
     # 補齊 2015~2026 全市場行情。artifact 內嵌快照 SHA-256，圖表可自證來源。
-    st.divider()
     # ② 語意分層：這頁同時放了三種完全不同性質的東西，先講清楚是什麼，
     # 再用 ③ 的證據徽章標在各段標題上。之前它們混在一起，第一次看的人
     # 分不出「Neon 覆蓋率 9.7%」和「凍結快照回測」是兩件事。
-    from agent.evidence import badge as _ev_badge, caption as _ev_caption
-
-    st.subheader(f"📈 已驗證回測曲線（凍結快照）　{_ev_badge('development')}")
-    st.caption(_ev_caption("development"))
-    st.caption(
-        "**這一段與上面的資料品質聲明無關。** 上面講的是 Neon 線上資料庫的覆蓋率；"
-        "這裡用的是獨立的凍結研究快照（`research_v20260811_current_bf58807`），"
-        "2,812 個交易日完整，內嵌 SHA-256 可自證來源。"
-    )
-    try:
-        from agent.backtest_curve import (
-            concentration_summary, cumulative_pnl_excluding_top, drawdown,
-            load_curve, monthly_returns, rolling_return,
-        )
-
-        @st.cache_data(show_spinner=False)
-        def _load_bt_curve():
-            c = load_curve()
-            return c.nav, c.trades, c.provenance, c.has_benchmark
-
-        _nav, _trades, _prov, _has_bench = _load_bt_curve()
-
-        # 配色：經驗證的類別色票前三槽（藍/橘/水綠），與發散色票（藍↔紅，灰中點）。
-        # 台股慣例紅漲綠跌，但紅綠是色盲最難分辨的組合，因此跌用藍不用綠——
-        # 同時符合驗證過的發散配對，也避免紅綠對比失效。
-        C1, C2, C3 = "#2a78d6", "#eb6834", "#1baf7a"
-        DIVERGING = [[0.0, "#2a78d6"], [0.5, "#f0efec"], [1.0, "#d03b3b"]]
-
+    with _hist_development:
+        st.subheader(f"📈 已驗證回測曲線（凍結快照）　{_ev_badge('development')}")
+        st.caption(_ev_caption("development"))
         st.caption(
-            f"快照 `{(_prov.get('snapshot_content_sha256') or '')[:16]}…`　"
-            f"策略設定 `{(_prov.get('strategy_config_sha256') or '')[:16]}…`　"
-            f"{_prov.get('trading_days')} 個交易日　{_prov.get('trades')} 筆交易"
+            "**這一段與上面的資料品質聲明無關。** 上面講的是 Neon 線上資料庫的覆蓋率；"
+            "這裡用的是獨立的凍結研究快照（`research_v20260811_current_bf58807`），"
+            "2,812 個交易日完整，內嵌 SHA-256 可自證來源。"
+        )
+        try:
+            from agent.backtest_curve import (
+                concentration_summary, cumulative_pnl_excluding_top, drawdown,
+                load_curve, monthly_returns, rolling_return,
+            )
+
+            @st.cache_data(show_spinner=False)
+            def _load_bt_curve():
+                c = load_curve()
+                return c.nav, c.trades, c.provenance, c.has_benchmark
+
+            _nav, _trades, _prov, _has_bench = _load_bt_curve()
+
+            # 配色：經驗證的類別色票前三槽（藍/橘/水綠），與發散色票（藍↔紅，灰中點）。
+            # 台股慣例紅漲綠跌，但紅綠是色盲最難分辨的組合，因此跌用藍不用綠——
+            # 同時符合驗證過的發散配對，也避免紅綠對比失效。
+            C1, C2, C3 = "#2a78d6", "#eb6834", "#1baf7a"
+            DIVERGING = [[0.0, "#2a78d6"], [0.5, "#f0efec"], [1.0, "#d03b3b"]]
+
+            st.caption(
+                f"快照 `{(_prov.get('snapshot_content_sha256') or '')[:16]}…`　"
+                f"策略設定 `{(_prov.get('strategy_config_sha256') or '')[:16]}…`　"
+                f"{_prov.get('trading_days')} 個交易日　{_prov.get('trades')} 筆交易"
+            )
+
+            _summary = concentration_summary(_trades, top_n=4)
+            m1, m2, m3 = st.columns(3)
+            m1.metric("勝率", f"{_summary['win_rate']*100:.1f}%")
+            m2.metric("前 4 筆佔總淨利", f"{_summary['top_n_share_of_net']*100:.1f}%")
+            _dd = drawdown(_nav.set_index("trade_date")["strategy_nav"])
+            m3.metric("最大回撤", f"{_dd.min()*100:.2f}%")
+
+            bt1, bt2, bt3, bt4 = st.tabs(
+                ["權益曲線", "回撤", "月報酬", "移除最佳交易"])
+
+            with bt1:
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(
+                    x=_nav["trade_date"], y=_nav["strategy_nav"], name="現行策略",
+                    mode="lines", line=dict(color=C1, width=2)))
+                if _has_bench:
+                    fig.add_trace(go.Scatter(
+                        x=_nav["trade_date"], y=_nav["benchmark_nav"], name="0050 含息",
+                        mode="lines", line=dict(color=C2, width=2)))
+                # 對數軸：相同百分比漲跌 = 相同視覺距離，這正是「平不平滑」的定義。
+                fig.update_layout(
+                    height=420, margin=dict(l=0, r=0, t=10, b=0),
+                    yaxis=dict(title="NAV（元，對數軸）", type="log"),
+                    hovermode="x unified",
+                    legend=dict(orientation="h", y=1.12))
+                st.plotly_chart(fig, use_container_width=True)
+                st.caption("對數軸：等比例變動呈現等距，斜率穩定才代表報酬平滑。")
+
+            with bt2:
+                fig = go.Figure(go.Scatter(
+                    x=_nav["trade_date"], y=_dd.to_numpy() * 100, mode="lines",
+                    line=dict(color=C1, width=1.5), fill="tozeroy",
+                    fillcolor="rgba(42,120,214,0.18)", name="回撤"))
+                fig.update_layout(height=340, margin=dict(l=0, r=0, t=10, b=0),
+                                  yaxis_title="回撤 %", hovermode="x unified",
+                                  showlegend=False)
+                st.plotly_chart(fig, use_container_width=True)
+                _deep = int((_dd < -0.2).sum())
+                st.caption(f"回撤深於 -20% 的交易日共 {_deep} 天，佔 {_deep/len(_dd)*100:.0f}%。")
+
+            with bt3:
+                _mr = monthly_returns(_nav) * 100
+                fig = go.Figure(go.Heatmap(
+                    z=_mr.to_numpy(), x=[f"{m}月" for m in _mr.columns],
+                    y=_mr.index.astype(str), colorscale=DIVERGING, zmid=0,
+                    colorbar=dict(title="%"), hovertemplate="%{y} %{x}：%{z:.1f}%<extra></extra>"))
+                fig.update_layout(height=380, margin=dict(l=0, r=0, t=10, b=0))
+                st.plotly_chart(fig, use_container_width=True)
+                st.caption("紅為正報酬、藍為負報酬，灰為零。跌用藍不用綠：紅綠是色盲最難分辨的組合。")
+
+                _roll = rolling_return(_nav, "strategy_nav") * 100
+                fig2 = go.Figure()
+                fig2.add_trace(go.Scatter(x=_roll.index, y=_roll.to_numpy(), name="現行策略",
+                                          mode="lines", line=dict(color=C1, width=2)))
+                if _has_bench:
+                    _rb = rolling_return(_nav, "benchmark_nav") * 100
+                    fig2.add_trace(go.Scatter(x=_rb.index, y=_rb.to_numpy(), name="0050 含息",
+                                              mode="lines", line=dict(color=C2, width=2)))
+                fig2.add_hline(y=0, line_dash="dash", line_color="#8a8a85")
+                fig2.update_layout(height=320, margin=dict(l=0, r=0, t=30, b=0),
+                                   yaxis_title="滾動 12 個月報酬 %", hovermode="x unified",
+                                   legend=dict(orientation="h", y=1.15))
+                st.plotly_chart(fig2, use_container_width=True)
+
+            with bt4:
+                _pnl = cumulative_pnl_excluding_top(_trades, exclude_counts=(0, 5, 10))
+                fig = go.Figure()
+                for _col, _color in zip(_pnl.columns, (C1, C2, C3)):
+                    fig.add_trace(go.Scatter(x=_pnl.index, y=_pnl[_col], name=_col,
+                                             mode="lines", line=dict(color=_color, width=2)))
+                fig.add_hline(y=0, line_dash="dash", line_color="#8a8a85")
+                fig.update_layout(height=400, margin=dict(l=0, r=0, t=30, b=0),
+                                  yaxis_title="累計已實現淨損益（元）", hovermode="x unified",
+                                  legend=dict(orientation="h", y=1.12))
+                st.plotly_chart(fig, use_container_width=True)
+                st.caption(
+                    "使用**已實現淨損益**而非 NAV：損益可加，移除某幾筆的結果精確；"
+                    "改動 NAV 則必須重算複利路徑，只能近似。"
+                    "這正是 SPEC §9.2 F1 門檻「移除最佳 5 筆後淨損益仍為正」檢驗的東西。")
+                st.dataframe(
+                    pd.DataFrame({"期末累計淨損益": _pnl.iloc[-1].round(0)}),
+                    use_container_width=True)
+        except FileNotFoundError as _e:
+            st.info(f"尚未產生回測曲線 artifact。{_e}")
+        except Exception as _e:
+            st.warning(f"回測曲線繪製失敗：{_e}")
+
+    with _hist_forward:
+        # 2026-07-23：策略版本改讀 agent/strategy.py 的 STRATEGY_ERAS 清單，不再寫死日期。
+        # 原本寫死的 STRATEGY_V2_DATE 就是因為策略改了好幾輪沒人回頭更新，長期把舊策略的
+        # 交易標成「現行策略績效」。清單化之後，加新版本＝在 strategy.py 加一筆。
+        from agent.strategy import STRATEGY_ERAS
+
+        st.subheader(f"📋 AI 實際推薦的已平倉交易　{_ev_badge('forward')}")
+        st.caption(_ev_caption("forward"))
+        st.caption(
+            "**這一段才是真正乾淨的證據來源**——系統上線後實際產生的推薦，"
+            "沒有被事後挑選過。但樣本仍在累積，期數不足前不得下結論。"
         )
 
-        _summary = concentration_summary(_trades, top_n=4)
-        m1, m2, m3 = st.columns(3)
-        m1.metric("勝率", f"{_summary['win_rate']*100:.1f}%")
-        m2.metric("前 4 筆佔總淨利", f"{_summary['top_n_share_of_net']*100:.1f}%")
-        _dd = drawdown(_nav.set_index("trade_date")["strategy_nav"])
-        m3.metric("最大回撤", f"{_dd.min()*100:.2f}%")
+        _cur = STRATEGY_ERAS[0]
+        _opts = [f"🆕 {_cur['label']}（{_cur['live_from']} 起進場）"] + \
+                [f"📁 {e['label']}（{e['live_from']} 起）" for e in STRATEGY_ERAS[1:]] + \
+                ["📜 全部歷史（含所有舊版，僅供對照）"]
+        era = st.radio("評估範圍", _opts, horizontal=True)
 
-        bt1, bt2, bt3, bt4 = st.tabs(
-            ["權益曲線", "回撤", "月報酬", "移除最佳交易"])
+        # 選到的版本 → 取進場日區間 [live_from, 下一版的 live_from)
+        _sel_idx = _opts.index(era)
+        _lo = _hi = None
+        if _sel_idx < len(STRATEGY_ERAS):
+            _lo = STRATEGY_ERAS[_sel_idx]["live_from"]
+            _hi = STRATEGY_ERAS[_sel_idx - 1]["live_from"] if _sel_idx > 0 else None
+            st.caption(f"📌 {STRATEGY_ERAS[_sel_idx]['desc']}")
 
-        with bt1:
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(
-                x=_nav["trade_date"], y=_nav["strategy_nav"], name="現行策略",
-                mode="lines", line=dict(color=C1, width=2)))
-            if _has_bench:
-                fig.add_trace(go.Scatter(
-                    x=_nav["trade_date"], y=_nav["benchmark_nav"], name="0050 含息",
-                    mode="lines", line=dict(color=C2, width=2)))
-            # 對數軸：相同百分比漲跌 = 相同視覺距離，這正是「平不平滑」的定義。
-            fig.update_layout(
-                height=420, margin=dict(l=0, r=0, t=10, b=0),
-                yaxis=dict(title="NAV（元，對數軸）", type="log"),
-                hovermode="x unified",
-                legend=dict(orientation="h", y=1.12))
+        df = load_closed_positions()
+        if not df.empty and _lo is not None:
+            _entry = pd.to_datetime(df["進場日"]).dt.date
+            df = df[_entry >= _lo] if _hi is None else df[(_entry >= _lo) & (_entry < _hi)]
+
+        # 新版剛上線時「已平倉」必然是空的（波段平均持有 3~4 週），但未實現損益有東西可看，
+        # 直接顯示「尚無資料」等於什麼都不給。這裡先把目前持倉的浮動損益攤出來。
+        _open = []
+        if _sel_idx == 0:
+            _open = [p for p in load_open_positions()
+                     if pd.to_datetime(p["進場日"]).date() >= _lo]
+            if _open:
+                _odf = pd.DataFrame(_open)
+                o1, o2, o3 = st.columns(3)
+                o1.metric("現行策略持倉", f"{len(_odf)} 檔")
+                o2.metric("未實現平均損益", f"{_odf['損益%'].mean():+.1f}%")
+                _known_open_pnl = _odf["損益$"].sum(min_count=1)
+                o3.metric("已知未實現損益$",
+                          f"{_known_open_pnl:+,.0f}" if pd.notna(_known_open_pnl) else "—")
+                with st.expander("查看未實現明細", expanded=False):
+                    st.dataframe(_odf[["股號", "名稱", "進場日", "成本", "現價", "損益%",
+                                       "股數", "損益$", "帳本範圍", "持有(日)", "出場訊號"]],
+                                 use_container_width=True, hide_index=True)
+            st.caption(f"⚠️ 樣本數警告：波段平均持有約 3~4 週，新版上線後要 1~2 個月才會有"
+                       f"第一批已平倉交易，累積到統計上能說話（30 筆以上）通常要數個月。"
+                       f"在那之前下面的數字只能當觀察，不足以判斷策略好壞。")
+
+        if df.empty:
+            if _lo is not None:
+                st.info(f"「{STRATEGY_ERAS[_sel_idx]['label']}」（{_lo} 起進場）尚無**已平倉**交易。"
+                        + ("上方為目前持倉的未實現損益。" if _open else
+                           ("此版目前也還沒有任何持倉（第一批訊號成交後才會出現）。"
+                            if _sel_idx == 0 else ""))
+                        + "可切「📜 全部歷史」看舊版對照。")
+            else:
+                st.info("尚無已平倉記錄")
+            st.stop()
+
+        df["報酬%"] = pd.to_numeric(df["報酬%"], errors="coerce")
+        wins   = df["報酬%"] > 0
+        avg_r  = df["報酬%"].mean()
+        win_r  = wins.mean() * 100
+        avg_h  = pd.to_numeric(df["持有天數"], errors="coerce").mean()
+        total  = (df["報酬%"] + 100).prod() ** (1 / len(df)) - 100  # 幾何平均
+
+        # 進階指標：逐筆權益曲線（依出場日）→ MDD / 獲利因子
+        df_seq = df.sort_values("出場日").copy()
+        df_seq["累計%"] = ((1 + df_seq["報酬%"] / 100).cumprod() - 1) * 100
+        _trade_equity = 1 + df_seq["累計%"] / 100
+        mdd = ((_trade_equity / _trade_equity.cummax()) - 1).min() * 100
+        g_win  = df.loc[wins, "報酬%"].sum()
+        g_loss = abs(df.loc[~wins, "報酬%"].sum())
+        pf = g_win / g_loss if g_loss > 0 else float("inf")
+
+        total_pnl_dollar = df["損益$"].sum(min_count=1) if "損益$" in df.columns else None
+
+        c1, c2, c3, c4, c5, c6, c7 = st.columns(7)
+        c1.metric("總交易筆數", len(df))
+        c2.metric("勝率",       f"{win_r:.0f}%")
+        c3.metric("平均報酬",   f"{avg_r:+.2f}%")
+        c4.metric("平均持有",   f"{avg_h:.1f} 天")
+        c5.metric("獲利因子",   f"{pf:.2f}", help="總獲利÷總虧損，>1.5 較穩健")
+        c6.metric("最大回撤",   f"{mdd:.1f}pp", help="逐筆累計報酬曲線的最大回落（百分點）")
+        if total_pnl_dollar is not None and pd.notna(total_pnl_dollar):
+            c7.metric("已知總損益$", f"{total_pnl_dollar:+,.0f}",
+                      help="只加總有實際股數與現金流水的前向帳本交易")
+
+        t1, t2, t3 = st.tabs(["📈 累計績效 vs 大盤", "📊 報酬分布", "📋 交易紀錄"])
+
+        # ── Tab 1：累計績效曲線（AI 實際推薦紀錄 vs 0050）─────────────
+        with t1:
+            st.caption("AI 已平倉交易依出場順序做逐筆複利，僅是交易品質指標；持倉可能重疊，"
+                       "因此不是可投資組合 NAV，也不能直接與 0050 比較。")
+            try:
+                start_d, end_d = df_seq["出場日"].min(), df_seq["出場日"].max()
+                with get_session() as s:
+                    bench_rows = s.execute(text("""
+                        SELECT trade_date, close FROM daily_prices
+                        WHERE stock_id = '0050' AND close > 0
+                          AND trade_date BETWEEN :a AND :b
+                        ORDER BY trade_date
+                    """), {"a": start_d, "b": end_d}).fetchall()
+                fig_eq = go.Figure()
+                fig_eq.add_trace(go.Scatter(
+                    x=df_seq["出場日"], y=df_seq["累計%"],
+                    mode="lines+markers", name="AI 交易（逐筆複利、非NAV）",
+                    line=dict(color="#e74c3c", width=2)))
+                if bench_rows:
+                    bd = [r[0] for r in bench_rows]
+                    bc = [float(r[1]) for r in bench_rows]
+                    bench_pct = [(c / bc[0] - 1) * 100 for c in bc]
+                    fig_eq.add_trace(go.Scatter(
+                        x=bd, y=bench_pct, mode="lines", name="0050 買進持有",
+                        line=dict(color="#7f8c8d", width=1.5, dash="dot")))
+                fig_eq.add_hline(y=0, line_dash="dash", line_color="#95a5a6")
+                fig_eq.update_layout(height=380, margin=dict(l=0, r=0, t=30, b=0),
+                                     yaxis_title="累計報酬 %",
+                                     legend=dict(orientation="h", y=1.1))
+                st.plotly_chart(fig_eq, use_container_width=True)
+                st.caption("注意：兩條線口徑不同，圖中 0050 也是價格報酬而非完整含息 NAV。"
+                           "公平比較請以 backtest 的 cash/NAV 報表為準，且資料覆蓋率需達 80%。")
+            except Exception as e:
+                st.warning(f"績效曲線繪製失敗：{e}")
+
+        with t2:
+            fig = px.histogram(df, x="報酬%", nbins=30,
+                               color_discrete_sequence=["#3498db"],
+                               title="報酬率分布")
+            fig.add_vline(x=0, line_dash="dash", line_color="red")
+            fig.add_vline(x=avg_r, line_dash="dot", line_color="orange",
+                          annotation_text=f"平均 {avg_r:+.1f}%")
+            fig.update_layout(height=320, margin=dict(l=0, r=0, t=40, b=0))
             st.plotly_chart(fig, use_container_width=True)
-            st.caption("對數軸：等比例變動呈現等距，斜率穩定才代表報酬平滑。")
 
-        with bt2:
-            fig = go.Figure(go.Scatter(
-                x=_nav["trade_date"], y=_dd.to_numpy() * 100, mode="lines",
-                line=dict(color=C1, width=1.5), fill="tozeroy",
-                fillcolor="rgba(42,120,214,0.18)", name="回撤"))
-            fig.update_layout(height=340, margin=dict(l=0, r=0, t=10, b=0),
-                              yaxis_title="回撤 %", hovermode="x unified",
-                              showlegend=False)
-            st.plotly_chart(fig, use_container_width=True)
-            _deep = int((_dd < -0.2).sum())
-            st.caption(f"回撤深於 -20% 的交易日共 {_deep} 天，佔 {_deep/len(_dd)*100:.0f}%。")
-
-        with bt3:
-            _mr = monthly_returns(_nav) * 100
-            fig = go.Figure(go.Heatmap(
-                z=_mr.to_numpy(), x=[f"{m}月" for m in _mr.columns],
-                y=_mr.index.astype(str), colorscale=DIVERGING, zmid=0,
-                colorbar=dict(title="%"), hovertemplate="%{y} %{x}：%{z:.1f}%<extra></extra>"))
-            fig.update_layout(height=380, margin=dict(l=0, r=0, t=10, b=0))
-            st.plotly_chart(fig, use_container_width=True)
-            st.caption("紅為正報酬、藍為負報酬，灰為零。跌用藍不用綠：紅綠是色盲最難分辨的組合。")
-
-            _roll = rolling_return(_nav, "strategy_nav") * 100
-            fig2 = go.Figure()
-            fig2.add_trace(go.Scatter(x=_roll.index, y=_roll.to_numpy(), name="現行策略",
-                                      mode="lines", line=dict(color=C1, width=2)))
-            if _has_bench:
-                _rb = rolling_return(_nav, "benchmark_nav") * 100
-                fig2.add_trace(go.Scatter(x=_rb.index, y=_rb.to_numpy(), name="0050 含息",
-                                          mode="lines", line=dict(color=C2, width=2)))
-            fig2.add_hline(y=0, line_dash="dash", line_color="#8a8a85")
-            fig2.update_layout(height=320, margin=dict(l=0, r=0, t=30, b=0),
-                               yaxis_title="滾動 12 個月報酬 %", hovermode="x unified",
-                               legend=dict(orientation="h", y=1.15))
+            # 出場原因統計
+            reason_cnt = df["出場原因"].value_counts().reset_index()
+            reason_cnt.columns = ["出場原因", "次數"]
+            fig2 = px.pie(reason_cnt, names="出場原因", values="次數",
+                          title="出場原因分布", hole=0.4)
+            fig2.update_layout(height=320, margin=dict(l=0, r=0, t=40, b=0))
             st.plotly_chart(fig2, use_container_width=True)
 
-        with bt4:
-            _pnl = cumulative_pnl_excluding_top(_trades, exclude_counts=(0, 5, 10))
-            fig = go.Figure()
-            for _col, _color in zip(_pnl.columns, (C1, C2, C3)):
-                fig.add_trace(go.Scatter(x=_pnl.index, y=_pnl[_col], name=_col,
-                                         mode="lines", line=dict(color=_color, width=2)))
-            fig.add_hline(y=0, line_dash="dash", line_color="#8a8a85")
-            fig.update_layout(height=400, margin=dict(l=0, r=0, t=30, b=0),
-                              yaxis_title="累計已實現淨損益（元）", hovermode="x unified",
-                              legend=dict(orientation="h", y=1.12))
-            st.plotly_chart(fig, use_container_width=True)
-            st.caption(
-                "使用**已實現淨損益**而非 NAV：損益可加，移除某幾筆的結果精確；"
-                "改動 NAV 則必須重算複利路徑，只能近似。"
-                "這正是 SPEC §9.2 F1 門檻「移除最佳 5 筆後淨損益仍為正」檢驗的東西。")
+        with t3:
+            def color_ret(val):
+                if isinstance(val, (int, float)):
+                    return "color: #e74c3c" if val < 0 else "color: #27ae60"
+                return ""
+            # pandas 2.1+ 將 Styler.applymap 改名為 Styler.map（3.0 移除 applymap）
+            styler = df.style
+            _elementwise = getattr(styler, "map", None) or styler.applymap
             st.dataframe(
-                pd.DataFrame({"期末累計淨損益": _pnl.iloc[-1].round(0)}),
-                use_container_width=True)
-    except FileNotFoundError as _e:
-        st.info(f"尚未產生回測曲線 artifact。{_e}")
-    except Exception as _e:
-        st.warning(f"回測曲線繪製失敗：{_e}")
-
-    # 2026-07-23：策略版本改讀 agent/strategy.py 的 STRATEGY_ERAS 清單，不再寫死日期。
-    # 原本寫死的 STRATEGY_V2_DATE 就是因為策略改了好幾輪沒人回頭更新，長期把舊策略的
-    # 交易標成「現行策略績效」。清單化之後，加新版本＝在 strategy.py 加一筆。
-    from agent.strategy import STRATEGY_ERAS
-
-    st.divider()
-    st.subheader(f"📋 AI 實際推薦的已平倉交易　{_ev_badge('forward')}")
-    st.caption(_ev_caption("forward"))
-    st.caption(
-        "**這一段才是真正乾淨的證據來源**——系統上線後實際產生的推薦，"
-        "沒有被事後挑選過。但樣本仍在累積，期數不足前不得下結論。"
-    )
-
-    _cur = STRATEGY_ERAS[0]
-    _opts = [f"🆕 {_cur['label']}（{_cur['live_from']} 起進場）"] + \
-            [f"📁 {e['label']}（{e['live_from']} 起）" for e in STRATEGY_ERAS[1:]] + \
-            ["📜 全部歷史（含所有舊版，僅供對照）"]
-    era = st.radio("評估範圍", _opts, horizontal=True)
-
-    # 選到的版本 → 取進場日區間 [live_from, 下一版的 live_from)
-    _sel_idx = _opts.index(era)
-    _lo = _hi = None
-    if _sel_idx < len(STRATEGY_ERAS):
-        _lo = STRATEGY_ERAS[_sel_idx]["live_from"]
-        _hi = STRATEGY_ERAS[_sel_idx - 1]["live_from"] if _sel_idx > 0 else None
-        st.caption(f"📌 {STRATEGY_ERAS[_sel_idx]['desc']}")
-
-    df = load_closed_positions()
-    if not df.empty and _lo is not None:
-        _entry = pd.to_datetime(df["進場日"]).dt.date
-        df = df[_entry >= _lo] if _hi is None else df[(_entry >= _lo) & (_entry < _hi)]
-
-    # 新版剛上線時「已平倉」必然是空的（波段平均持有 3~4 週），但未實現損益有東西可看，
-    # 直接顯示「尚無資料」等於什麼都不給。這裡先把目前持倉的浮動損益攤出來。
-    _open = []
-    if _sel_idx == 0:
-        _open = [p for p in load_open_positions()
-                 if pd.to_datetime(p["進場日"]).date() >= _lo]
-        if _open:
-            _odf = pd.DataFrame(_open)
-            o1, o2, o3 = st.columns(3)
-            o1.metric("現行策略持倉", f"{len(_odf)} 檔")
-            o2.metric("未實現平均損益", f"{_odf['損益%'].mean():+.1f}%")
-            _known_open_pnl = _odf["損益$"].sum(min_count=1)
-            o3.metric("已知未實現損益$",
-                      f"{_known_open_pnl:+,.0f}" if pd.notna(_known_open_pnl) else "—")
-            with st.expander("查看未實現明細", expanded=False):
-                st.dataframe(_odf[["股號", "名稱", "進場日", "成本", "現價", "損益%",
-                                   "股數", "損益$", "帳本範圍", "持有(日)", "出場訊號"]],
-                             use_container_width=True, hide_index=True)
-        st.caption(f"⚠️ 樣本數警告：波段平均持有約 3~4 週，新版上線後要 1~2 個月才會有"
-                   f"第一批已平倉交易，累積到統計上能說話（30 筆以上）通常要數個月。"
-                   f"在那之前下面的數字只能當觀察，不足以判斷策略好壞。")
-
-    if df.empty:
-        if _lo is not None:
-            st.info(f"「{STRATEGY_ERAS[_sel_idx]['label']}」（{_lo} 起進場）尚無**已平倉**交易。"
-                    + ("上方為目前持倉的未實現損益。" if _open else
-                       ("此版目前也還沒有任何持倉（第一批訊號成交後才會出現）。"
-                        if _sel_idx == 0 else ""))
-                    + "可切「📜 全部歷史」看舊版對照。")
-        else:
-            st.info("尚無已平倉記錄")
-        st.stop()
-
-    df["報酬%"] = pd.to_numeric(df["報酬%"], errors="coerce")
-    wins   = df["報酬%"] > 0
-    avg_r  = df["報酬%"].mean()
-    win_r  = wins.mean() * 100
-    avg_h  = pd.to_numeric(df["持有天數"], errors="coerce").mean()
-    total  = (df["報酬%"] + 100).prod() ** (1 / len(df)) - 100  # 幾何平均
-
-    # 進階指標：逐筆權益曲線（依出場日）→ MDD / 獲利因子
-    df_seq = df.sort_values("出場日").copy()
-    df_seq["累計%"] = ((1 + df_seq["報酬%"] / 100).cumprod() - 1) * 100
-    _trade_equity = 1 + df_seq["累計%"] / 100
-    mdd = ((_trade_equity / _trade_equity.cummax()) - 1).min() * 100
-    g_win  = df.loc[wins, "報酬%"].sum()
-    g_loss = abs(df.loc[~wins, "報酬%"].sum())
-    pf = g_win / g_loss if g_loss > 0 else float("inf")
-
-    total_pnl_dollar = df["損益$"].sum(min_count=1) if "損益$" in df.columns else None
-
-    c1, c2, c3, c4, c5, c6, c7 = st.columns(7)
-    c1.metric("總交易筆數", len(df))
-    c2.metric("勝率",       f"{win_r:.0f}%")
-    c3.metric("平均報酬",   f"{avg_r:+.2f}%")
-    c4.metric("平均持有",   f"{avg_h:.1f} 天")
-    c5.metric("獲利因子",   f"{pf:.2f}", help="總獲利÷總虧損，>1.5 較穩健")
-    c6.metric("最大回撤",   f"{mdd:.1f}pp", help="逐筆累計報酬曲線的最大回落（百分點）")
-    if total_pnl_dollar is not None and pd.notna(total_pnl_dollar):
-        c7.metric("已知總損益$", f"{total_pnl_dollar:+,.0f}",
-                  help="只加總有實際股數與現金流水的前向帳本交易")
-
-    t1, t2, t3 = st.tabs(["📈 累計績效 vs 大盤", "📊 報酬分布", "📋 交易紀錄"])
-
-    # ── Tab 1：累計績效曲線（AI 實際推薦紀錄 vs 0050）─────────────
-    with t1:
-        st.caption("AI 已平倉交易依出場順序做逐筆複利，僅是交易品質指標；持倉可能重疊，"
-                   "因此不是可投資組合 NAV，也不能直接與 0050 比較。")
-        try:
-            start_d, end_d = df_seq["出場日"].min(), df_seq["出場日"].max()
-            with get_session() as s:
-                bench_rows = s.execute(text("""
-                    SELECT trade_date, close FROM daily_prices
-                    WHERE stock_id = '0050' AND close > 0
-                      AND trade_date BETWEEN :a AND :b
-                    ORDER BY trade_date
-                """), {"a": start_d, "b": end_d}).fetchall()
-            fig_eq = go.Figure()
-            fig_eq.add_trace(go.Scatter(
-                x=df_seq["出場日"], y=df_seq["累計%"],
-                mode="lines+markers", name="AI 交易（逐筆複利、非NAV）",
-                line=dict(color="#e74c3c", width=2)))
-            if bench_rows:
-                bd = [r[0] for r in bench_rows]
-                bc = [float(r[1]) for r in bench_rows]
-                bench_pct = [(c / bc[0] - 1) * 100 for c in bc]
-                fig_eq.add_trace(go.Scatter(
-                    x=bd, y=bench_pct, mode="lines", name="0050 買進持有",
-                    line=dict(color="#7f8c8d", width=1.5, dash="dot")))
-            fig_eq.add_hline(y=0, line_dash="dash", line_color="#95a5a6")
-            fig_eq.update_layout(height=380, margin=dict(l=0, r=0, t=30, b=0),
-                                 yaxis_title="累計報酬 %",
-                                 legend=dict(orientation="h", y=1.1))
-            st.plotly_chart(fig_eq, use_container_width=True)
-            st.caption("注意：兩條線口徑不同，圖中 0050 也是價格報酬而非完整含息 NAV。"
-                       "公平比較請以 backtest 的 cash/NAV 報表為準，且資料覆蓋率需達 80%。")
-        except Exception as e:
-            st.warning(f"績效曲線繪製失敗：{e}")
-
-    with t2:
-        fig = px.histogram(df, x="報酬%", nbins=30,
-                           color_discrete_sequence=["#3498db"],
-                           title="報酬率分布")
-        fig.add_vline(x=0, line_dash="dash", line_color="red")
-        fig.add_vline(x=avg_r, line_dash="dot", line_color="orange",
-                      annotation_text=f"平均 {avg_r:+.1f}%")
-        fig.update_layout(height=320, margin=dict(l=0, r=0, t=40, b=0))
-        st.plotly_chart(fig, use_container_width=True)
-
-        # 出場原因統計
-        reason_cnt = df["出場原因"].value_counts().reset_index()
-        reason_cnt.columns = ["出場原因", "次數"]
-        fig2 = px.pie(reason_cnt, names="出場原因", values="次數",
-                      title="出場原因分布", hole=0.4)
-        fig2.update_layout(height=320, margin=dict(l=0, r=0, t=40, b=0))
-        st.plotly_chart(fig2, use_container_width=True)
-
-    with t3:
-        def color_ret(val):
-            if isinstance(val, (int, float)):
-                return "color: #e74c3c" if val < 0 else "color: #27ae60"
-            return ""
-        # pandas 2.1+ 將 Styler.applymap 改名為 Styler.map（3.0 移除 applymap）
-        styler = df.style
-        _elementwise = getattr(styler, "map", None) or styler.applymap
-        st.dataframe(
-            _elementwise(color_ret, subset=[c for c in ["報酬%", "損益$"] if c in df.columns])
-              .format({"進場價": "{:.2f}", "出場價": "{:.2f}", "報酬%": "{:+.2f}%",
-                       "損益$": "{:+,.0f}"},
-                      na_rep="—"),
-            use_container_width=True, hide_index=True,
-        )
+                _elementwise(color_ret, subset=[c for c in ["報酬%", "損益$"] if c in df.columns])
+                  .format({"進場價": "{:.2f}", "出場價": "{:.2f}", "報酬%": "{:+.2f}%",
+                           "損益$": "{:+,.0f}"},
+                          na_rep="—"),
+                use_container_width=True, hide_index=True,
+            )
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -1874,9 +1888,8 @@ elif page == "🔖 追蹤清單":
 # ══════════════════════════════════════════════════════════════════
 elif page == "🔎 個股分析":
     st.title("🔎 個股分析")
-    st.caption("輸入一檔股票，逐段收集大盤位階、投信外資買賣超、相關新聞，"
-               "最後由 AI 綜合判讀——過程透明，比照決策軌跡的分段概念，"
-               "看得到每個結論引用了哪些具體數據。")
+    st.caption("先看 AI 結論、關鍵價位與推翻條件，再由左至右核對股票背景、大盤籌碼、"
+               "相關新聞。每個結論都保留引用欄位，方便反查，不必先穿過整排原始資料。")
 
     with get_session() as _s:
         _wl_options = pd.read_sql(text("""
@@ -1923,11 +1936,13 @@ elif page == "🔎 個股分析":
             return ""
         return (f"<span class='dt-num'>詞元 {s.get('tokens_in', 0):,}+{s.get('tokens_out', 0):,}</span>")
 
-    colA, colB, colC, colD = st.columns([1.05, 1.15, 1.1, 1.3], gap="medium")
+    # ⑤ decision-first：AI 判讀放在視線起點；其餘三欄是用來核對判讀的證據。
+    # 保留既有容器變數可避免搬動大段穩定的渲染程式（這頁曾因變數覆蓋在線上炸掉）。
+    colD, colA, colB, colC = st.columns([1.3, 1.05, 1.15, 1.1], gap="medium")
 
-    # ── 01 股票背景 ──────────────────────────────────────────────
+    # ── 02 股票背景 ──────────────────────────────────────────────
     with colA:
-        st.markdown("<div class='dt-col-title'>📊 股票背景 <span class='dt-badge'>01</span></div>",
+        st.markdown("<div class='dt-col-title'>📊 股票背景 <span class='dt-badge'>02</span></div>",
                     unsafe_allow_html=True)
         _pl, _sum = _sa_stage("stock_context")
         basic, trend, rev_yoy = _pl.get("basic", {}), _pl.get("trend", {}), _pl.get("rev_yoy")
@@ -1971,15 +1986,19 @@ elif page == "🔎 個股分析":
             _dev_cls = "o" if _dev <= -10 else ("g" if _dev >= 0 else "")
             _dev_html = f"<span class='dt-chip {_dev_cls}'>乖離月線 {_dev:+.0f}%</span>"
         _body = (f"收盤 {basic.get('close')}　{basic.get('change_pct') or 0:+.2f}%<br>"
-                 f"RSI {basic.get('rsi14') or 0:.1f}｜MACD柱"
-                 f"{'正' if (basic.get('macd_hist') or 0) > 0 else '負'}<br>"
                  + "".join(_chips) + _dev_html)
         st.markdown(_dt_card("dt-ok", "📦", f"{basic.get('stock_name','')}（{basic.get('industry','')}）",
                              _body), unsafe_allow_html=True)
+        # ⑥ 技術指標降權：保留資訊，但不再和價格／研究因子並列於第一層。
+        with st.expander("📐 RSI / MACD 參考（非主要證據）", expanded=False):
+            st.caption("本專案因子研究未證明 RSI／MACD 有預測力；只供看圖與止跌情境參考，"
+                       "不得單獨推翻主要排名與籌碼證據。")
+            st.write(f"RSI(14)：{basic.get('rsi14') or 0:.1f}｜"
+                     f"MACD 柱：{'正' if (basic.get('macd_hist') or 0) > 0 else '負'}")
 
-    # ── 02 大盤與籌碼 ────────────────────────────────────────────
+    # ── 03 大盤與籌碼 ────────────────────────────────────────────
     with colB:
-        st.markdown("<div class='dt-col-title'>🌐 大盤與籌碼 <span class='dt-badge'>02</span></div>",
+        st.markdown("<div class='dt-col-title'>🌐 大盤與籌碼 <span class='dt-badge'>03</span></div>",
                     unsafe_allow_html=True)
         _pl_r, _ = _sa_stage("market_regime")
         _regime_ok = _pl_r.get("ok")
@@ -2002,9 +2021,9 @@ elif page == "🔎 個股分析":
             st.markdown(_dt_card("dt-warn", "🏦", "投信/外資買賣超", "<i>查無法人買賣超資料</i>"),
                         unsafe_allow_html=True)
 
-    # ── 03 相關新聞 ──────────────────────────────────────────────
+    # ── 04 相關新聞 ──────────────────────────────────────────────
     with colC:
-        st.markdown("<div class='dt-col-title'>📰 相關新聞 <span class='dt-badge'>03</span></div>",
+        st.markdown("<div class='dt-col-title'>📰 相關新聞 <span class='dt-badge'>04</span></div>",
                     unsafe_allow_html=True)
         _pl_n, _ = _sa_stage("news_context")
         _news = _pl_n.get("news") or []
@@ -2019,9 +2038,9 @@ elif page == "🔎 個股分析":
             st.markdown(_dt_card("dt-warn", "📰", "相關新聞", "<i>近30日查無相關報導</i>"),
                         unsafe_allow_html=True)
 
-    # ── 04 AI 綜合判讀 ───────────────────────────────────────────
+    # ── 01 AI 綜合判讀 ───────────────────────────────────────────
     with colD:
-        st.markdown("<div class='dt-col-title'>🤖 AI 綜合判讀 <span class='dt-badge'>04</span></div>",
+        st.markdown("<div class='dt-col-title'>🤖 AI 綜合判讀 <span class='dt-badge'>01</span></div>",
                     unsafe_allow_html=True)
         _pl_s, _sum_s = _sa_stage("synthesis")
         _parsed = _pl_s.get("parsed")
