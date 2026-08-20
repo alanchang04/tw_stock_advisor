@@ -10,7 +10,10 @@ import pytest
 from agent.strategy import (decide_exit, suggest_shares, format_size, STRATEGY,
                             PRACTICE_CFG, compute_hard_vetoes,
                             compute_new_entry_flag, apply_liquidity_gate,
-                            total_return_adjust, apply_total_return_adjustment)
+                            total_return_adjust, apply_total_return_adjustment,
+                            initial_stop_price, average_true_range,
+                            stop_exit_recovered_at_open, market_position_scale,
+                            reentry_candidate_ok, entry_share_count)
 
 
 def cfg(**overrides):
@@ -25,6 +28,50 @@ def test_stop_loss_triggers():
 def test_stop_loss_not_triggered_above_threshold():
     ex, _ = decide_exit(100, 100, 92.1, None, None, 1, cfg=cfg())
     assert not ex
+
+
+def test_atr_stop_is_bounded_by_predeclared_limits():
+    c = cfg(stop_mode="atr", atr_stop_multiple=2.5,
+            atr_stop_min_pct=.05, atr_stop_max_pct=.12)
+    assert initial_stop_price(100, c, atr=1) == pytest.approx(95)   # min 5%
+    assert initial_stop_price(100, c, atr=10) == pytest.approx(88)  # max 12%
+    assert initial_stop_price(100, c, atr=3) == pytest.approx(92.5)
+
+
+def test_average_true_range_uses_gaps_and_needs_full_period():
+    rows = [
+        {"high": 101, "low": 99, "close": 100},
+        {"high": 105, "low": 103, "close": 104},  # TR=5 vs previous close
+        {"high": 106, "low": 102, "close": 105},
+    ]
+    assert average_true_range(rows, 4) is None
+    assert average_true_range(rows, 3) == pytest.approx((2 + 5 + 4) / 3)
+
+
+def test_stop_open_revalidation_is_strictly_opt_in_and_stop_only():
+    off = cfg(revalidate_stop_at_open=False)
+    on = cfg(revalidate_stop_at_open=True)
+    assert not stop_exit_recovered_at_open("停損(-8%)", 93, 92, off)
+    assert stop_exit_recovered_at_open("停損(-8%)", 93, 92, on)
+    assert not stop_exit_recovered_at_open("均線死亡交叉", 93, 92, on)
+    assert not stop_exit_recovered_at_open("停損(-8%)", 91, 92, on)
+
+
+def test_tiered_market_scale_and_reentry_confirmation():
+    tiered = cfg(market_exposure_mode="tiered", neutral_exposure_scale=.6,
+                 risk_off_exposure_scale=.3)
+    assert market_position_scale("risk_on", tiered) == 1
+    assert market_position_scale("neutral", tiered) == pytest.approx(.6)
+    assert market_position_scale("risk_off", tiered) == pytest.approx(.3)
+    assert reentry_candidate_ok(105, 100, 102, tiered)
+    assert not reentry_candidate_ok(101, 100, 102, tiered)
+
+
+def test_shared_sizing_caps_wide_atr_stop_by_nav_risk():
+    c = cfg(risk_per_trade=.01)
+    shares = entry_share_count(100, cash=1_000_000, nav=1_000_000,
+                               max_open=2, cfg=c, stop_price=80)
+    assert shares == 500  # 10,000 risk budget / 20 per share
 
 
 # ── 結構性停損（stop_mode，2026-07-24 出場配對實驗）────────────────
