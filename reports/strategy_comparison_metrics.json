@@ -1,0 +1,136 @@
+{
+  "schema_version": 1,
+  "generated_by": "scripts/build_strategy_comparison_metrics.py",
+  "purpose": "side-by-side comparison to GENERATE hypotheses, not to pick a winner. Every row carries its verdict; none of these is a menu item.",
+  "definitions": {
+    "sharpe": "annualised return / annualised volatility, risk-free taken as 0. NOTE: the three sources computed this themselves and are NOT guaranteed identical in construction — see per-row caveats.",
+    "mdd": "largest NAV drawdown from a running peak; negative",
+    "ann_ret": "geometric annualised return",
+    "win_rate": "share of closed trades with positive net P&L",
+    "sample_unit": "trades unless stated; reversal-type strategies need episodes"
+  },
+  "curve_availability": {
+    "current_swing": "reports/swing_backtest_curve/ (daily NAV, development data)",
+    "mom1_f1": "NONE AND NOT TO BE PRODUCED — no NAV series was persisted by the one-shot holdout run, so producing one requires re-executing the strategy against 2008-2014. Only the 7 published annual returns may be charted.",
+    "margin_reversal": "NONE — 82 observations over 0.33 calendar years"
+  },
+  "strategies": [
+    {
+      "key": "current_swing",
+      "display_name": "現行波段策略",
+      "status": "frozen_satellite",
+      "verdict_note": "凍結衛星部位；歷史績效為 development 資料，非乾淨驗證",
+      "period": [
+        "2015-01-05",
+        "2026-07-31"
+      ],
+      "factors": [
+        "月營收年增 (w_rev_yoy 3.0)",
+        "投信連買 (w_invest_streak 2.5)",
+        "投信新進場 (w_invest_new_entry 2.5)",
+        "外資買超 (w_foreign_buy 1.0)",
+        "營收加速 (w_rev_accel 1.0)",
+        "ETF 加碼 (w_etf_accum 1.0)",
+        "多頭排列 (w_trend_stack 0.8)"
+      ],
+      "sharpe": 0.9193522052602037,
+      "mdd": -0.42716886574257706,
+      "ann_ret": 0.19320320210367825,
+      "total_return": 6.716244703211547,
+      "win_rate": 0.35368421052631577,
+      "trades": 475,
+      "independent_episodes": null,
+      "benchmark_key": "0050_total_return",
+      "benchmark_sharpe": 1.0411801146034387,
+      "benchmark_mdd": -0.339569851542791,
+      "curve_dir": "reports/swing_backtest_curve",
+      "source_report": "reports/swing_backtest_verified_20260811_bf58807.json"
+    },
+    {
+      "key": "mom1_b",
+      "display_name": "MOM-1B（動能＋MA200 濾網）",
+      "status": "rejected_at_F1",
+      "verdict_note": "F1 backward holdout 否決（6 項判準過 5 項，「排除最佳 5 筆交易後仍為正」未過）。**不得畫曲線**，見 curve_availability。",
+      "period": [
+        "2008-01-01",
+        "2014-12-31"
+      ],
+      "factors": [
+        "mom_6_1（6 個月動能、跳過最近 1 個月）",
+        "MA200 市場濾網"
+      ],
+      "sharpe": 0.42980692786749625,
+      "mdd": -0.3427307966963241,
+      "ann_ret": 0.08661403879948293,
+      "total_return": 0.7698896519088485,
+      "win_rate": null,
+      "trades": null,
+      "independent_episodes": null,
+      "benchmark_key": "0050_total_return",
+      "benchmark_sharpe": 0.22557928624372942,
+      "benchmark_mdd": -0.5238283555647074,
+      "curve_dir": null,
+      "annual_returns": {
+        "2008": 0.0024752700700716446,
+        "2009": 0.8762865769223069,
+        "2010": 0.08722129253738209,
+        "2011": -0.08014021402423288,
+        "2012": -0.130480557396772,
+        "2013": 0.31136316490154314,
+        "2014": -0.17485268556339384
+      },
+      "regime_caveat": "holdout ran under +/-7% price limits, call auction, no day trading and no odd-lot session; the current market differs on all four (SPEC 9.2.2)",
+      "source_report": "reports/mom1_f1_backward_holdout.json"
+    },
+    {
+      "key": "margin_reversal",
+      "display_name": "融資反轉",
+      "status": "sample_insufficient",
+      "verdict_note": "6 筆交易、82 個觀測、0.33 個日曆年、勝率 0。**Sharpe／MDD／年化不具統計意義，前端不得顯示數值。**",
+      "period": [
+        "2026-04-01",
+        "2026-07-30"
+      ],
+      "factors": [
+        "融資餘額變化",
+        "RSI14"
+      ],
+      "sharpe": null,
+      "mdd": null,
+      "ann_ret": null,
+      "total_return": -0.13181903895557234,
+      "win_rate": 0.0,
+      "trades": 6,
+      "independent_episodes": null,
+      "observations": 82,
+      "calendar_years": 0.3285488408386209,
+      "suppressed_because_sample_too_small": {
+        "sharpe": -3.1870550682181005,
+        "mdd": -0.13181903895557237,
+        "ann_ret": -0.3496475081515735,
+        "why": "kept here for auditability only. Annualising 0.33 years of data produces numbers that look precise and mean nothing."
+      },
+      "benchmark_key": "0050_total_return",
+      "curve_dir": null,
+      "source_report": "reports/margin_reversal_study.json"
+    },
+    {
+      "key": "rev1",
+      "display_name": "REV-1",
+      "status": "not_executed",
+      "verdict_note": "規格 v1.1 已凍結，尚未執行。列出是為了顯示流程進度，不是候選清單。",
+      "period": null,
+      "factors": [],
+      "sharpe": null,
+      "mdd": null,
+      "ann_ret": null,
+      "total_return": null,
+      "win_rate": null,
+      "trades": null,
+      "independent_episodes": null,
+      "benchmark_key": null,
+      "curve_dir": null,
+      "source_report": null
+    }
+  ]
+}

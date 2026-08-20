@@ -1,0 +1,273 @@
+{
+  "start": "2026-04-01",
+  "end": "2026-07-30",
+  "data_rows": 85453,
+  "signal_count": 12,
+  "trade_count": 6,
+  "gate_counts": {
+    "rows": 85453,
+    "market_stress": 9421,
+    "price_oversold": 4139,
+    "margin_wash": 3859,
+    "fundamental_ok": 50996,
+    "institutional_ok": 23623,
+    "wash_events": 1480,
+    "reversal_confirmed": 36533,
+    "entry_confirmed": 96,
+    "confirmed_after_wash": 14,
+    "stress_oversold": 1831,
+    "base_quality": 360,
+    "all_signal_gates": 14
+  },
+  "trade_summary": {
+    "wins": 0,
+    "losses": 6,
+    "win_rate": 0.0,
+    "average_return": -0.11229630847408296,
+    "median_return": -0.10602983269953081,
+    "best_return": -0.09054321536714505,
+    "worst_return": -0.1478815482397592,
+    "reasons": {
+      "stop_loss": {
+        "count": 6,
+        "mean": -0.11229630847408296
+      }
+    }
+  },
+  "trade_details": [
+    {
+      "stock_id": "2368",
+      "signal_date": "2026-07-21T00:00:00",
+      "entry_date": "2026-07-22T00:00:00",
+      "exit_date": "2026-07-27T00:00:00",
+      "entry_price": 1006.0049999999999,
+      "exit_price": 904.095,
+      "shares": 59,
+      "net_pnl": -6265.857976349987,
+      "net_return": -0.10547987338438669,
+      "reason": "stop_loss"
+    },
+    {
+      "stock_id": "3715",
+      "signal_date": "2026-07-22T00:00:00",
+      "entry_date": "2026-07-23T00:00:00",
+      "exit_date": "2026-07-27T00:00:00",
+      "entry_price": 129.129,
+      "exit_price": 116.3835,
+      "shares": 458,
+      "net_pnl": -6090.285494212498,
+      "net_return": -0.10289389074930377,
+      "reason": "stop_loss"
+    },
+    {
+      "stock_id": "2485",
+      "signal_date": "2026-07-22T00:00:00",
+      "entry_date": "2026-07-23T00:00:00",
+      "exit_date": "2026-07-29T00:00:00",
+      "entry_price": 42.39234999999999,
+      "exit_price": 37.4625,
+      "shares": 1395,
+      "net_pnl": -7125.991359267369,
+      "net_return": -0.12039953108922818,
+      "reason": "stop_loss"
+    },
+    {
+      "stock_id": "3048",
+      "signal_date": "2026-07-22T00:00:00",
+      "entry_date": "2026-07-23T00:00:00",
+      "exit_date": "2026-07-29T00:00:00",
+      "entry_price": 51.5515,
+      "exit_price": 47.10285,
+      "shares": 1147,
+      "net_pnl": -5358.206336705429,
+      "net_return": -0.09054321536714505,
+      "reason": "stop_loss"
+    },
+    {
+      "stock_id": "2489",
+      "signal_date": "2026-07-22T00:00:00",
+      "entry_date": "2026-07-23T00:00:00",
+      "exit_date": "2026-07-29T00:00:00",
+      "entry_price": 32.032,
+      "exit_price": 27.422549999999998,
+      "shares": 1846,
+      "net_pnl": -8751.621718471448,
+      "net_return": -0.1478815482397592,
+      "reason": "stop_loss"
+    },
+    {
+      "stock_id": "6426",
+      "signal_date": "2026-07-24T00:00:00",
+      "entry_date": "2026-07-27T00:00:00",
+      "exit_date": "2026-07-30T00:00:00",
+      "entry_price": 164.164,
+      "exit_price": 147.3525,
+      "shares": 340,
+      "net_pnl": -5953.748801665002,
+      "net_return": -0.10657979201467493,
+      "reason": "stop_loss"
+    }
+  ],
+  "selected_signals": [
+    {
+      "stock_id": "2368",
+      "trade_date": "2026-07-21T00:00:00",
+      "score": 20.449005408335488,
+      "days_since_wash": 2.0,
+      "revenue_yoy": 78.22
+    },
+    {
+      "stock_id": "2485",
+      "trade_date": "2026-07-22T00:00:00",
+      "score": 35.393690737833595,
+      "days_since_wash": 2.0,
+      "revenue_yoy": 80.92
+    },
+    {
+      "stock_id": "3715",
+      "trade_date": "2026-07-22T00:00:00",
+      "score": 18.124995755954703,
+      "days_since_wash": 2.0,
+      "revenue_yoy": 45.48
+    },
+    {
+      "stock_id": "3048",
+      "trade_date": "2026-07-22T00:00:00",
+      "score": 17.858176534599593,
+      "days_since_wash": 3.0,
+      "revenue_yoy": 60.1
+    },
+    {
+      "stock_id": "2489",
+      "trade_date": "2026-07-22T00:00:00",
+      "score": 16.981514426176787,
+      "days_since_wash": 3.0,
+      "revenue_yoy": 23.43
+    },
+    {
+      "stock_id": "1809",
+      "trade_date": "2026-07-22T00:00:00",
+      "score": 14.273729820777525,
+      "days_since_wash": 3.0,
+      "revenue_yoy": 4.53
+    },
+    {
+      "stock_id": "6426",
+      "trade_date": "2026-07-23T00:00:00",
+      "score": 22.735413250083973,
+      "days_since_wash": 4.0,
+      "revenue_yoy": 103.04
+    },
+    {
+      "stock_id": "3048",
+      "trade_date": "2026-07-23T00:00:00",
+      "score": 20.759189609139057,
+      "days_since_wash": 4.0,
+      "revenue_yoy": 60.1
+    },
+    {
+      "stock_id": "6449",
+      "trade_date": "2026-07-23T00:00:00",
+      "score": 18.963657328473,
+      "days_since_wash": 4.0,
+      "revenue_yoy": 23.28
+    },
+    {
+      "stock_id": "2489",
+      "trade_date": "2026-07-23T00:00:00",
+      "score": 15.898739736239596,
+      "days_since_wash": 4.0,
+      "revenue_yoy": 23.43
+    },
+    {
+      "stock_id": "6224",
+      "trade_date": "2026-07-23T00:00:00",
+      "score": 13.083869635709583,
+      "days_since_wash": 4.0,
+      "revenue_yoy": 14.7
+    },
+    {
+      "stock_id": "6426",
+      "trade_date": "2026-07-24T00:00:00",
+      "score": 19.601990049751244,
+      "days_since_wash": 5.0,
+      "revenue_yoy": 103.04
+    }
+  ],
+  "strategy_metrics": {
+    "total": -0.13181903895557234,
+    "ann_ret": -0.3496475081515735,
+    "ann_vol": 0.12726394652148457,
+    "sharpe": -3.1870550682181005,
+    "mdd": -0.13181903895557237,
+    "calmar": -2.652481090151302,
+    "coverage": 0.9425287356321839,
+    "observations": 82,
+    "calendar_years": 0.3285488408386209
+  },
+  "benchmark_metrics": {
+    "total": 0.2307287706013179,
+    "ann_ret": 0.8811612636931849,
+    "ann_vol": 0.33194689425607815,
+    "sharpe": 1.9985137922527216,
+    "mdd": -0.16449961031665788,
+    "calmar": 5.356616115971158,
+    "coverage": 0.9425287356321839,
+    "observations": 82,
+    "calendar_years": 0.3285488408386209
+  },
+  "event_study": {
+    "1": {
+      "horizon": 1,
+      "treated_n": 3,
+      "control_n": 3,
+      "treated_mean": -0.012542406560974606,
+      "control_mean": 0.0005468967958026649,
+      "lift": -0.013089303356777271,
+      "ci_low": -0.03692107750472595,
+      "ci_high": 0.012132233551990557,
+      "p_value": 0.4533455534497801,
+      "significant": false,
+      "significant_difference": false,
+      "direction": "inconclusive"
+    },
+    "3": {
+      "horizon": 3,
+      "treated_n": 3,
+      "control_n": 3,
+      "treated_mean": -0.05729441596684478,
+      "control_mean": -0.025685542674069677,
+      "lift": -0.0316088732927751,
+      "ci_low": -0.05481568998109643,
+      "ci_high": 0.008521140481911993,
+      "p_value": 0.257219455554058,
+      "significant": false,
+      "significant_difference": false,
+      "direction": "inconclusive"
+    },
+    "5": {
+      "horizon": 5,
+      "treated_n": 3,
+      "control_n": 3,
+      "treated_mean": -0.1701055309888061,
+      "control_mean": -0.12270545446304133,
+      "lift": -0.04740007652576476,
+      "ci_low": -0.0856025519848771,
+      "ci_high": -0.008079496005715336,
+      "p_value": 0.16842351117769191,
+      "significant": false,
+      "significant_difference": false,
+      "direction": "worse"
+    },
+    "10": {
+      "horizon": 10,
+      "treated_n": 0,
+      "control_n": 0,
+      "treated_mean": NaN,
+      "control_mean": NaN,
+      "lift": NaN,
+      "p_value": NaN,
+      "significant": false
+    }
+  }
+}
