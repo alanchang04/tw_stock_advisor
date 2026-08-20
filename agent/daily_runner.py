@@ -61,8 +61,10 @@ def run_daily_recommendation(with_entries: bool = True):
     with exec_log.stage("fills") as rec:
         filled = broker.sync(eval_date)
         rec.summary = (f"broker={broker.name}：開盤成交 買{len(filled.get('entries', []))} "
-                       f"賣{len(filled.get('exits', []))}")
-        rec.payload = filled if (filled.get("entries") or filled.get("exits")) else None
+                       f"賣{len(filled.get('exits', []))}；"
+                       f"停損收復取消{len(filled.get('cancelled_exits', []))}")
+        rec.payload = filled if any(filled.get(k) for k in
+                                    ("entries", "exits", "cancelled_exits")) else None
 
     # Step 2: 出場檢查（先做，且不依賴 LLM —— 確保賣出提醒一定會發）
     #         只掛「明日開盤賣出」委託，不當場平倉
@@ -76,24 +78,52 @@ def run_daily_recommendation(with_entries: bool = True):
 
     result, opened = {}, []
 
-    # 市場濾網：僅在 market_filter_block_entries=True 時空頭不開新倉
-    # （預設 False：空頭只加回死亡交叉出場保護，見 portfolio.exit_cfg）
+    # 市場濾網：正式 binary 模式在空頭且 block_entries=True 時不開新倉；
+    # opt-in tiered 模式不一刀切，改由下單層依 risk_on/neutral/risk_off 縮小部位。
     from agent.strategy import STRATEGY as _S
     with exec_log.stage("risk_gate") as rec:
         blocked = False
-        if with_entries and _S.get("market_filter_block_entries"):
-            from agent.stock_selector import market_is_bull
-            if not market_is_bull():
+        regime = None
+        if with_entries and _S.get("market_exposure_mode", "binary") == "tiered":
+            from agent.stock_selector import market_regime_detail
+            regime = market_regime_detail()
+            if float(regime.get("exposure_scale", 1.0)) <= 0:
+                with_entries = False
+                blocked = True
+        elif with_entries and _S.get("market_filter_block_entries"):
+            from agent.stock_selector import market_regime_detail
+            regime = market_regime_detail()
+            if not regime["bull"]:
                 logger.warning("市場濾網觸發（空頭）：今日不開新倉")
                 with_entries = False
                 blocked = True
-        rec.summary = ("空頭濾網擋下新倉" if blocked else
+        scale_text = (f"；曝險級距 {regime.get('state')} ×"
+                      f"{float(regime.get('exposure_scale', 1.0)):.0%}"
+                      if regime and _S.get("market_exposure_mode") == "tiered" else "")
+        rec.summary = ("市場風控擋下新倉" if blocked else
                        f"進場{'開' if with_entries else '關(週末模式)'}；"
-                       f"部位上限 {_S.get('max_open_positions', 10)} 檔")
+                       f"部位上限 {_S.get('max_open_positions', 10)} 檔{scale_text}")
         rec.payload = {"with_entries": with_entries, "blocked_by_market_filter": blocked,
-                       "market_filter_block_entries": _S.get("market_filter_block_entries", False)}
+                       "market_filter_block_entries": _S.get("market_filter_block_entries", False),
+                       "market_exposure_mode": _S.get("market_exposure_mode", "binary"),
+                       "regime": regime}
 
-    if with_entries:
+    # ── 影子模式（2026-08-08）────────────────────────────────────────
+    # 被市場濾網擋下的日子，照常選股＋辯論並記錄前向 A/B，但**不掛任何單**。
+    #
+    # 為什麼要這樣做：2026-08-07 盤點顯示 15 個 pipeline 日裡有 7 天被濾網擋掉，
+    # 前向 A/B（目前唯一乾淨的證據來源）因此只累積到 3 個訊號日。更糟的是那個
+    # 缺口不是隨機的——濾網專擋空頭，所以樣本結構性偏向多頭，等於永遠學不到
+    # 「LLM 在空頭有沒有加值」，而那正是最需要知道的。
+    #
+    # 影子模式把「測量」與「下單」拆開：交易行為完全不變（空頭仍然不進場、
+    # 風控紋絲不動），只是把「如果能買會選誰」記下來。代價是被擋的日子多打
+    # 3 次 LLM 呼叫。
+    run_selection = with_entries or blocked   # 週末模式仍然完全不跑
+    allow_orders = with_entries               # 只有這個決定會不會真的掛單
+    shadow = run_selection and not allow_orders
+
+    if run_selection:
         # Step 3: 篩選候選股票（趨勢版選股不用族群硬閘門；熱門族群仍供 LLM 參考）
         logger.info("Step 3 — 篩選候選股票")
         from agent.strategy import STRATEGY as _ST
@@ -104,7 +134,8 @@ def run_daily_recommendation(with_entries: bool = True):
             else:
                 candidates = get_candidate_stocks(hot_sectors, top_n=20)
             n = 0 if candidates is None else len(candidates)
-            rec.summary = f"熱門族群 {len(hot_sectors or [])} 個；評分後取前 {n} 檔進辯論"
+            rec.summary = (("🌑 影子模式（不掛單）：" if shadow else "")
+                           + f"熱門族群 {len(hot_sectors or [])} 個；評分後取前 {n} 檔進辯論")
             if candidates is not None and not candidates.empty:
                 # payload 紀律：只存前 20 檔的因子明細（不存全市場），控制在 ~5KB
                 keep = [c for c in ["stock_id", "stock_name", "industry", "close", "score",
@@ -115,17 +146,48 @@ def run_daily_recommendation(with_entries: bool = True):
                                "top_candidates": candidates[keep].head(20).to_dict("records")}
 
         if candidates is not None and not candidates.empty:
+            if _ST.get("reentry_enabled") and allow_orders:
+                with exec_log.stage("orders_reentries") as rec:
+                    # 重進場規格用「純因子前20」，不套目前持倉的族群上限；與回測的
+                    # _candidates_asof(top_n=20) 口徑一致。正式預設關閉，不增加日常查詢。
+                    from agent.stock_selector import get_ranked_watchlist
+                    reentry_pool = get_ranked_watchlist(
+                        top_n=int(_ST.get("reentry_rank_pool", 20))
+                    )
+                    reentries = broker.submit_reentries(reentry_pool, eval_date)
+                    rec.summary = (f"重進場狀態機掛單 {len(reentries)} 檔"
+                                   + ("：" + ", ".join(r["stock_id"] for r in reentries)
+                                      if reentries else "（無符合者）"))
+                    rec.payload = {"queued": reentries} if reentries else None
             logger.info("Step 4 — 呼叫 LLM 產生推薦")
             candidates_text = format_candidates_for_llm(candidates)
             hot_sector_names = candidates["industry"].unique().tolist()
             # debate_bull / debate_bear / judge 三段在 llm_advisor 內部各自記錄
             result = generate_recommendations(candidates_text, hot_sector_names, candidates)
-            try:
-                from agent.llm_ab_tracking import record_daily_picks
-                record_daily_picks(eval_date, candidates, result, pick_top_n=_ST.get("pick_top_n", 5))
-            except Exception as e:
-                logger.warning(f"LLM A/B量測記錄失敗（不影響正式推薦流程）: {e}")
-            if result:
+            # 前向 A/B 是目前唯一乾淨的證據來源，而它累積得極慢（每 5 個 pipeline 日
+            # 才 1 個訊號日）。原本失敗只寫 logger.warning，線上看不出來——2026-08-07
+            # 盤點發現 factor_screen 跑了 4 天、A/B 卻只有 3 天，差的那天無從追查。
+            # 故改為進 execution_log：仍不打斷正式流程，但失敗必定留下可稽核紀錄。
+            with exec_log.stage("llm_ab_tracking") as rec:
+                try:
+                    from agent.llm_ab_tracking import record_daily_picks
+                    ab = record_daily_picks(eval_date, candidates, result,
+                                            pick_top_n=_ST.get("pick_top_n", 5),
+                                            shadow=shadow)
+                except Exception as e:
+                    ab = {"quant_only": 0, "llm": 0, "written": False,
+                          "error": f"{type(e).__name__}: {str(e)[:200]}"}
+                    logger.warning(f"LLM A/B量測記錄失敗（不影響正式推薦流程）: {e}")
+                if ab.get("written"):
+                    rec.summary = (("🌑 影子" if shadow else "") +
+                                   f"前向A/B已記錄：量化 {ab['quant_only']} 檔、"
+                                   f"LLM {ab['llm']} 檔")
+                else:
+                    rec.summary = f"⚠️ 前向A/B未寫入：{ab.get('error') or '原因不明'}"
+                    # 借用 llm_errors 通道把原因寫進 error_msg，決策軌跡頁才看得到
+                    rec.add_llm_error(rec.summary, calls=0)
+                rec.payload = ab
+            if result and allow_orders:
                 save_recommendations(result)
                 picks = [{"stock_id": r["stock_id"], "reason": r.get("reason", "")}
                          for r in result.get("recommendations", [])]
@@ -135,7 +197,17 @@ def run_daily_recommendation(with_entries: bool = True):
                                    + ("：" + ", ".join(o["stock_id"] for o in opened)
                                       if opened else "（名額已滿或均已持有）"))
                     rec.payload = {"picks": picks, "queued": opened} if picks else None
-            else:
+            elif result and shadow:
+                # 影子日：**不存推薦、不掛單、不進報告**。存了會出現在 UI 與 Telegram
+                # 上，看起來就像今天真的要買——那等於邀請使用者手動繞過自己的風控，
+                # 而風控擋下的那些日子正是它最該發揮作用的時候。
+                shadow_picks = [r.get("stock_id") for r in result.get("recommendations", [])]
+                with exec_log.stage("orders_entries") as rec:
+                    rec.summary = ("🌑 影子模式：空頭濾網擋下新倉，未掛任何買單"
+                                   f"（僅記錄前向A/B：{', '.join(p for p in shadow_picks if p)}）")
+                    rec.payload = {"shadow": True, "would_have_picked": shadow_picks}
+                result = None          # 讓下游報告與通知完全看不到影子結果
+            elif not result:
                 logger.error("LLM 未回傳有效結果，僅輸出出場提醒")
         else:
             logger.warning("無候選股票，僅輸出出場提醒")

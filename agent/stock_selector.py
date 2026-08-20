@@ -19,7 +19,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from database.connection import get_session
 from agent.strategy import (STRATEGY, score_candidates, split_adjust,
                             compute_factor_matrices, compute_new_entry_flag,
-                            apply_liquidity_gate)
+                            apply_liquidity_gate, apply_pre_score_filters,
+                            market_position_scale)
 
 
 # 排除非個股的產業類別（ETF、指數等）
@@ -57,18 +58,48 @@ def market_regime_detail() -> dict:
                 ORDER BY trade_date DESC LIMIT 90
             """), {"sid": sid}).fetchall()
         if len(rows) < 30:
-            return {"bull": True, "stock_id": sid, "close": None, "ma60": None, "ok": False}
+            return {"bull": True, "state": "risk_on", "exposure_scale": 1.0,
+                    "stock_id": sid, "close": None, "ma20": None, "ma60": None,
+                    "breadth": None, "ok": False}
         closes = pd.Series({r[0]: float(r[1]) for r in rows}).sort_index()
         adj = split_adjust(closes)
+        ma20_series = adj.rolling(20, min_periods=15).mean()
         ma60 = float(adj.rolling(60, min_periods=30).mean().iloc[-1])
+        ma20 = float(ma20_series.iloc[-1])
         last_close = float(adj.iloc[-1])
         bull = last_close >= ma60
+        with get_session() as s:
+            breadth = s.execute(text("""
+                SELECT AVG(CASE WHEN p.close >= t.ma20 THEN 1.0 ELSE 0.0 END)
+                FROM daily_prices p
+                JOIN technical_indicators t
+                  ON t.stock_id=p.stock_id AND t.trade_date=p.trade_date
+                JOIN stocks st ON st.stock_id=p.stock_id
+                WHERE p.trade_date=(SELECT MAX(trade_date) FROM daily_prices)
+                  AND p.close > 0 AND t.ma20 IS NOT NULL
+                  AND COALESCE(st.is_active, TRUE)=TRUE
+                  AND COALESCE(st.industry_code, '') NOT ILIKE '%ETF%'
+            """)).scalar()
+        breadth = float(breadth) if breadth is not None else None
+        ma20_rising = len(ma20_series.dropna()) >= 6 and ma20 > float(ma20_series.dropna().iloc[-6])
+        if bull and ma20_rising:
+            state = "risk_on"
+        elif (not bull and breadth is not None
+              and breadth < float(STRATEGY.get("risk_off_breadth_threshold", 0.40))):
+            state = "risk_off"
+        else:
+            state = "neutral"
+        scale = market_position_scale(state, STRATEGY)
         if not bull:
             logger.warning(f"市場濾網：{sid} 還原後收盤 {last_close:.2f} < MA60 {ma60:.2f} → 空頭模式")
-        return {"bull": bull, "stock_id": sid, "close": last_close, "ma60": ma60, "ok": True}
+        return {"bull": bull, "state": state, "exposure_scale": scale,
+                "stock_id": sid, "close": last_close, "ma20": ma20, "ma60": ma60,
+                "breadth": breadth, "ok": True}
     except Exception as e:
         logger.warning(f"市場濾網查詢失敗（視為多頭）: {e}")
-        return {"bull": True, "stock_id": sid, "close": None, "ma60": None, "ok": False}
+        return {"bull": True, "state": "risk_on", "exposure_scale": 1.0,
+                "stock_id": sid, "close": None, "ma20": None, "ma60": None,
+                "breadth": None, "ok": False}
 
 
 def market_is_bull() -> bool:
@@ -333,8 +364,8 @@ def get_candidate_stocks(
             {above_ma20_clause}
             {gate_clause}
         """), {
-            "min_close":  MIN_CLOSE,
-            "min_volume": MIN_VOLUME,
+            "min_close":  cfg.get("min_close", MIN_CLOSE),
+            "min_volume": cfg.get("min_volume", MIN_VOLUME),
             "sql_turnover_floor": sql_turnover_floor,
             "turnover_days": turnover_days,
             "vol_avg_days": vol_avg_days,
@@ -350,6 +381,9 @@ def get_candidate_stocks(
         return pd.DataFrame()
 
     df = pd.DataFrame(rows, columns=cols)
+    df = df[~df["industry"].isin(EXCLUDE_INDUSTRIES)].copy()
+    if df.empty:
+        return df
 
     # 百分位流動性門檻（2026-07-19）：對「全市場」（不是已被RSI/價格篩過的候選子集）
     # 算成交金額百分位排名，避免市場規模隨時間變化時，用絕對金額當代理的排名失真。
@@ -374,10 +408,10 @@ def get_candidate_stocks(
     # 空方硬否決規則（2026-07-15，程式層級強制）：乖離月線太遠/帶量長上引線，
     # 直接排除、不進辯論也不進練習軌清單（見 strategy.compute_hard_vetoes 註解）。
     try:
-        from agent.strategy import compute_hard_vetoes
-        hard_excluded = compute_hard_vetoes(df, cfg)
+        df, hard_excluded, _ = apply_pre_score_filters(df, cfg=cfg)
+        if df.empty:
+            return df
         if not hard_excluded.empty:
-            df = df[~df["stock_id"].isin(hard_excluded["stock_id"])].copy()
             logger.warning(f"⚠️ 硬否決規則排除 {len(hard_excluded)} 檔：" +
                            ", ".join(f"{r.stock_id}({r.hard_veto_reason.strip('；')})"
                                      for r in hard_excluded.itertuples()))
@@ -412,6 +446,12 @@ def get_candidate_stocks(
         logger.warning(f"趨勢/題材因子計算失敗（略過此因子）: {e}")
 
     # 60 日動能：取 60 個交易日前的收盤，算區間報酬（候選池內相對排名進評分）
+    if cfg.get("require_swing_setup"):
+        setup = (fmaps if "fmaps" in locals() else {}).get("swing_setup") or {}
+        df = df[df["stock_id"].map(lambda sid: bool(setup.get(sid)))].copy()
+        if df.empty:
+            return df
+
     try:
         with get_session() as session:
             base_rows = session.execute(text("""

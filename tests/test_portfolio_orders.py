@@ -18,7 +18,7 @@ from sqlalchemy import text
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import agent.portfolio as pf
-from agent.strategy import SLIPPAGE, net_return, buy_fill, sell_fill
+from agent.strategy import FEE_RATE, TAX_RATE, SLIPPAGE, net_return, buy_fill, sell_fill
 
 
 @pytest.fixture
@@ -70,6 +70,24 @@ def test_net_return_is_below_gross_return():
 
 
 # ── 整合（真實 schema，交易內回滾）────────────────────────────────
+def test_position_ledger_uses_actual_shares_and_all_costs():
+    shares = 2000
+    cost = pf.entry_cost(shares, 100.0)
+    ledger = pf.exit_ledger(shares, 100.0, 110.0, cost)
+
+    assert cost == pytest.approx(shares * 100.0 * (1 + FEE_RATE))
+    assert ledger["exit_proceeds"] == pytest.approx(
+        shares * 110.0 * (1 - FEE_RATE - TAX_RATE)
+    )
+    assert ledger["net_pnl"] == pytest.approx(ledger["exit_proceeds"] - cost)
+
+
+def test_legacy_position_without_shares_keeps_cash_pnl_unknown():
+    ledger = pf.exit_ledger(None, 100.0, 110.0)
+    assert ledger == {"shares": 0, "entry_cost": None,
+                      "exit_proceeds": None, "net_pnl": None}
+
+
 def test_buy_order_fills_at_next_day_open_plus_slippage(tx):
     sid, d, op = _a_stock_with_open(tx)
     tx.execute(text("""
@@ -84,10 +102,12 @@ def test_buy_order_fills_at_next_day_open_plus_slippage(tx):
     assert filled["entries"][0]["entry_price"] == pytest.approx(buy_fill(op), rel=1e-6)
 
     pos = tx.execute(text("""
-        SELECT entry_price, signal_price FROM positions
+        SELECT entry_price, signal_price, shares, entry_cost FROM positions
         WHERE stock_id=:sid AND entry_date=:d AND status='open'
     """), {"sid": sid, "d": d}).fetchone()
     assert pos is not None
+    assert int(pos[2]) == filled["entries"][0]["shares"]
+    assert float(pos[3]) == pytest.approx(round(filled["entries"][0]["entry_cost"], 2))
     assert float(pos[0]) == pytest.approx(round(buy_fill(op), 2))
     assert float(pos[1]) == pytest.approx(99.0)   # 訊號價保留，供日後校準滑價
 

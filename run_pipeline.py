@@ -258,6 +258,17 @@ def mode_pipeline(source: str = "openapi", with_entries: bool = True, review: bo
                 logger.warning(f"處置股更新失敗（沿用既有資料，不擋流程）: {e}")
             # 4. TDCC 大戶集中度（SPEC §2.6，週更）：向前累積乾淨歷史 + 當前值當未驗證訊號。
             #    每日呼叫但 update_tdcc 內建「本週已入庫則略過」，實際一週只寫一次。
+            _universe_n = 0
+            try:
+                from data_pipeline.fetchers.universe_fetcher import (
+                    backfill_listing_dates, snapshot_stock_universe,
+                )
+                if date.today().weekday() == 0:
+                    backfill_listing_dates()
+                _universe_n = snapshot_stock_universe()
+            except Exception as e:
+                logger.warning(f"Universe snapshot failed; continuing pipeline: {e}")
+
             _tdcc_n = 0
             try:
                 from data_pipeline.fetchers.tdcc_fetcher import update_tdcc
@@ -284,6 +295,32 @@ def mode_pipeline(source: str = "openapi", with_entries: bool = True, review: bo
                            "digest")) else "市場情報：本次無新內容")
         result = run_daily_recommendation(with_entries=with_entries)  # 4. 出場檢查(+進場推薦)
         msg = result.get("report_text") if result else None
+
+        # Independent short-term margin-wash strategy. It owns separate signals,
+        # orders, positions and cash; failures never contaminate the swing run.
+        if with_entries:
+            try:
+                from config.settings import tw_today
+                from data_pipeline.fetchers.margin_fetcher import (
+                    fetch_margin_twse_by_date, upsert_margin,
+                )
+                from margin_reversal.live import (
+                    fill_pending_orders as fill_margin_orders,
+                    queue_exits as queue_margin_exits,
+                    persist_daily_signals,
+                )
+                _mr_day = tw_today()
+                _mr_margin = fetch_margin_twse_by_date(_mr_day)
+                upsert_margin(_mr_margin)
+                _mr_fills = fill_margin_orders(_mr_day)
+                _mr_exits = queue_margin_exits(_mr_day)
+                _mr_signals = persist_daily_signals(_mr_day)
+                logger.info(
+                    f"margin_reversal: signals={_mr_signals}, exits={_mr_exits}, "
+                    f"fills={_mr_fills}"
+                )
+            except Exception as e:
+                logger.warning(f"margin_reversal skipped safely: {e}")
 
         # 4.5 每日 AI 因子排名 Top 20（2026-07-25 取代練習軌推播）——半自動決策支援：
         # 系統負責「排名」（P3-2 證實有真實鑑別力），使用者負責「進出場判斷」。
