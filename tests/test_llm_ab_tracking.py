@@ -70,11 +70,7 @@ def test_record_daily_picks_empty_inputs_is_noop(monkeypatch):
     monkeypatch.setattr("agent.llm_ab_tracking.ensure_llm_ab_tracking_table",
                         lambda: called.__setitem__("ensure", True))
     result = record_daily_picks(date(2026, 7, 20), pd.DataFrame(), None, pick_top_n=5)
-    assert result["quant_only"] == 0 and result["llm"] == 0
-    # 2026-08-07 起另回 written/error：「沒東西可寫」與「寫失敗」必須分得出來，
-    # 否則呼叫端無法判斷該不該在決策軌跡示警（見 test_llm_ab_tracking_status.py）。
-    assert result["written"] is False
-    assert result["error"]
+    assert result == {"quant_only": 0, "llm": 0}
     assert called["ensure"] is False   # 兩組都空，連建表都不用做
 
 

@@ -43,11 +43,6 @@ def ensure_llm_ab_tracking_table():
         """))
         s.execute(text("CREATE INDEX IF NOT EXISTS idx_llm_ab_tracking_date "
                        "ON llm_ab_tracking (signal_date)"))
-        # shadow：這筆是「影子日」的紀錄——市場濾網當天擋下新倉，所以這些選股
-        # 並未實際成交。訊號品質比較兩者都算數，但分析時必須分得出來，否則會
-        # 把「假設會買」誤讀成「真的買了」。既有列預設 FALSE，語意正確。
-        s.execute(text("ALTER TABLE llm_ab_tracking "
-                       "ADD COLUMN IF NOT EXISTS shadow BOOLEAN NOT NULL DEFAULT FALSE"))
 
 
 def build_quant_only_rows(candidates: pd.DataFrame, pick_top_n: int) -> list[dict]:
@@ -74,50 +69,36 @@ def build_llm_rows(result: dict | None) -> list[dict]:
 
 
 def record_daily_picks(signal_date: date, candidates: pd.DataFrame, result: dict | None,
-                       pick_top_n: int = 5, shadow: bool = False) -> dict:
+                       pick_top_n: int = 5) -> dict:
     """
     寫入當天的「量化自己選」+「LLM最終選」兩組紀錄。失敗不拋例外（不能因為記錄
-    這個輔助功能失敗就打斷正式推薦流程）。
-
-    回傳 {"quant_only": n, "llm": n, "written": bool, "error": str|None}。
-
-    ⚠️ `written` / `error` 是 2026-08-07 補的，因為原本失敗只寫一行 logger.warning，
-    線上完全看不出來。實測 2026-07-20 起 factor_screen 跑了 4 天、A/B 卻只有 3 天，
-    差的那天無從查起。而這條前向樣本累積得極慢（每 5 個 pipeline 日才 1 個訊號日），
-    **掉一天等於掉 1/30 的最終樣本**，所以呼叫端必須把失敗寫進 execution_log。
+    這個輔助功能失敗就打斷正式推薦流程），回傳 {"quant_only": n, "llm": n} 筆數。
     """
     quant_rows = build_quant_only_rows(candidates, pick_top_n)
     llm_rows = build_llm_rows(result)
     if not quant_rows and not llm_rows:
-        return {"quant_only": 0, "llm": 0, "written": False,
-                "error": "候選與 LLM 結果皆為空，無可記錄"}
+        return {"quant_only": 0, "llm": 0}
 
     try:
         ensure_llm_ab_tracking_table()
         with get_session() as s:
             for row in quant_rows:
                 s.execute(text("""
-                    INSERT INTO llm_ab_tracking (signal_date, source, stock_id, rank, score, shadow)
-                    VALUES (:d, 'quant_only', :sid, :rank, :score, :shadow)
+                    INSERT INTO llm_ab_tracking (signal_date, source, stock_id, rank, score)
+                    VALUES (:d, 'quant_only', :sid, :rank, :score)
                     ON CONFLICT (signal_date, source, stock_id) DO UPDATE SET
-                        rank = EXCLUDED.rank, score = EXCLUDED.score,
-                        shadow = EXCLUDED.shadow
+                        rank = EXCLUDED.rank, score = EXCLUDED.score
                 """), {"d": signal_date, "sid": row["stock_id"],
-                       "rank": row["rank"], "score": row["score"], "shadow": shadow})
+                       "rank": row["rank"], "score": row["score"]})
             for row in llm_rows:
                 s.execute(text("""
-                    INSERT INTO llm_ab_tracking (signal_date, source, stock_id, rank, reason, shadow)
-                    VALUES (:d, 'llm', :sid, :rank, :reason, :shadow)
+                    INSERT INTO llm_ab_tracking (signal_date, source, stock_id, rank, reason)
+                    VALUES (:d, 'llm', :sid, :rank, :reason)
                     ON CONFLICT (signal_date, source, stock_id) DO UPDATE SET
-                        rank = EXCLUDED.rank, reason = EXCLUDED.reason,
-                        shadow = EXCLUDED.shadow
+                        rank = EXCLUDED.rank, reason = EXCLUDED.reason
                 """), {"d": signal_date, "sid": row["stock_id"],
-                       "rank": row["rank"], "reason": row["reason"], "shadow": shadow})
-        logger.info(f"LLM A/B量測記錄{'（影子日）' if shadow else ''}：{signal_date} "
-                    f"quant_only={len(quant_rows)}筆、llm={len(llm_rows)}筆")
+                       "rank": row["rank"], "reason": row["reason"]})
+        logger.info(f"LLM A/B量測記錄：{signal_date} quant_only={len(quant_rows)}筆、llm={len(llm_rows)}筆")
     except Exception as e:
         logger.warning(f"LLM A/B量測記錄失敗（不影響正式推薦流程）: {e}")
-        return {"quant_only": len(quant_rows), "llm": len(llm_rows),
-                "written": False, "error": f"{type(e).__name__}: {str(e)[:200]}"}
-    return {"quant_only": len(quant_rows), "llm": len(llm_rows),
-            "written": True, "error": None}
+    return {"quant_only": len(quant_rows), "llm": len(llm_rows)}

@@ -147,13 +147,5 @@ def export_to_parquet(conn: sqlite3.Connection, out_dir: str):
         "SELECT stock_id, year_month, revenue, mom_pct, yoy_pct FROM monthly_revenue", conn)
     rev.to_parquet(_os.path.join(out_dir, "monthly_revenue.parquet"), index=False)
 
-    # 2026-08-06：這一份以前漏了匯出。`agent/backtest.py::_load_parquet` 找不到
-    # delisted_stocks.parquet 時會**靜默降級成空表**，於是「下市日之後排除該股」這道
-    # 濾網無聲失效，回測落入倖存者偏誤——而且不會有任何錯誤訊息。實測兩台機器就是
-    # 因為這個檔案的有無，同一份程式跑出 13.55%/236 vs 14.07%/242。
-    delisted = pd.read_sql_query(
-        "SELECT stock_id, stock_name, delisting_date, market FROM delisted_stocks", conn)
-    delisted.to_parquet(_os.path.join(out_dir, "delisted_stocks.parquet"), index=False)
-
     return {"prices": len(prices), "institutional": len(inst), "dividend_events": len(div),
-            "monthly_revenue": len(rev), "delisted_stocks": len(delisted)}
+            "monthly_revenue": len(rev)}

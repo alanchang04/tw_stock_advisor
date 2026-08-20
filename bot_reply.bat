@@ -1,9 +1,5 @@
 @echo off
 chcp 65001 >nul
-cd /d "%~dp0"
+cd /d "C:\Users\alanchang\Desktop\taiwan_stock_advisor"
 set PYTHONIOENCODING=utf-8
-if not exist ".venv\Scripts\python.exe" (
-    echo ERROR: .venv not found. Install dependencies first.
-    exit /b 1
-)
-".venv\Scripts\python.exe" run_pipeline.py --mode bot >> logs\bot_reply.log 2>&1
+"C:\Users\alanchang\AppData\Local\Programs\Python\Python312\python.exe" run_pipeline.py --mode bot >> logs\bot_reply.log 2>&1

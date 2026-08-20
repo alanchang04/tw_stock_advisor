@@ -310,8 +310,10 @@ def _twse_signed_change(sign_html: str, spread) -> Optional[float]:
     return sp                        # 紅色 = 上漲；平盤時 sp=0，正負不影響
 
 
-def parse_prices_twse_by_date_payload(payload: dict, d: date) -> pd.DataFrame:
-    """Parse one archived MI_INDEX response without making a network request."""
+def fetch_prices_twse_by_date(d: date) -> pd.DataFrame:
+    payload = _get_json(URL_TWSE_PRICE_BYDATE, params={
+        "date": d.strftime("%Y%m%d"), "type": "ALLBUT0999", "response": "json",
+    })
     if payload.get("stat") != "OK":
         return pd.DataFrame()         # 非交易日 / 無資料
     tbl = next((t for t in payload.get("tables", [])
@@ -327,19 +329,11 @@ def parse_prices_twse_by_date_payload(payload: dict, d: date) -> pd.DataFrame:
         change = _twse_signed_change(r[9], r[10])
         rows.append({
             "stock_id": str(r[0]).strip(), "trade_date": d,
-            "stock_name": str(r[1]).strip(),
             "open": _clean_num(r[5]), "high": _clean_num(r[6]), "low": _clean_num(r[7]),
             "close": close, "volume": _clean_int(r[2]), "turnover": _clean_int(r[4]),
             "change_pct": _change_pct(close, change),
         })
     return pd.DataFrame(rows)
-
-
-def fetch_prices_twse_by_date(d: date) -> pd.DataFrame:
-    payload = _get_json(URL_TWSE_PRICE_BYDATE, params={
-        "date": d.strftime("%Y%m%d"), "type": "ALLBUT0999", "response": "json",
-    })
-    return parse_prices_twse_by_date_payload(payload, d)
 
 
 def fetch_prices_tpex_by_date(d: date) -> pd.DataFrame:

@@ -191,52 +191,26 @@ def fetch_institutional(
     if df.empty:
         return df
 
-    # FinMind 的 name 欄位值會隨版本改變——2026-08 起回傳英文代號，而舊版是中文。
-    # 舊實作只認中文，對不上時會落進「補 0」分支，**整批法人資料靜默變成 0**，
-    # 不會報錯（2026-08-06 實測 3105/8086/2409 的 invest_net 全為 0 即此原因）。
-    # 故先把 name 正規化成群組，兩種寫法都認；遇到未知類別記 warning 而非默默丟掉。
-    #
-    # 分組對齊證交所 T86 口徑：foreign = 外陸資（**不含**外資自營商），
-    # dealer = 自營商自行買賣 + 避險。經 2019-03 與官方資料逐日比對驗證一致。
-    group_of = {
-        "Foreign_Investor": "foreign",
-        "外陸資(不含外資自營商)": "foreign",
-        "外資及陸資(不含外資自營商)": "foreign",
-        "外資及陸資": "foreign",
-        "Investment_Trust": "invest",
-        "投信": "invest",
-        "Dealer_self": "dealer",
-        "Dealer_Hedging": "dealer",
-        "自營商": "dealer",
-        "自營商(自行買賣)": "dealer",
-        "自營商(避險)": "dealer",
-        # 外資自營商單獨成類，T86 的「外陸資」不含它，故不併入 foreign。
-        "Foreign_Dealer_Self": "foreign_dealer",
-        "外資自營商": "foreign_dealer",
-    }
-    work = df.copy()
-    work["_group"] = work["name"].map(group_of)
-    unknown = sorted(set(work.loc[work["_group"].isna(), "name"]))
-    if unknown:
-        logger.warning(f"FinMind 未知法人類別（已忽略）：{unknown}")
-    work = work[work["_group"].notna()]
-    if work.empty:
-        logger.error("FinMind 法人資料無任何可辨識類別，請檢查 group_of 對應表")
-        return pd.DataFrame()
-
-    pivot = work.pivot_table(
+    # FinMind 回傳格式是 long（每列一個法人），需要 pivot
+    pivot = df.pivot_table(
         index=["stock_id", "date"],
-        columns="_group",
+        columns="name",
         values=["buy", "sell"],
         aggfunc="sum",
     ).reset_index()
     pivot.columns = ["_".join(c).strip("_") for c in pivot.columns]
     pivot = pivot.rename(columns={"date": "trade_date"})
-    pivot = pivot.rename(columns={
-        "buy_foreign": "foreign_buy", "sell_foreign": "foreign_sell",
-        "buy_invest": "invest_buy", "sell_invest": "invest_sell",
-        "buy_dealer": "dealer_buy", "sell_dealer": "dealer_sell",
-    })
+
+    # 統一欄位名稱（FinMind 的 name 欄位值可能因版本不同）
+    col_map = {
+        "buy_外陸資(不含外資自營商)":  "foreign_buy",
+        "sell_外陸資(不含外資自營商)": "foreign_sell",
+        "buy_投信":   "invest_buy",
+        "sell_投信":  "invest_sell",
+        "buy_自營商": "dealer_buy",
+        "sell_自營商":"dealer_sell",
+    }
+    pivot = pivot.rename(columns=col_map)
 
     for col in ["foreign_buy","foreign_sell","invest_buy",
                 "invest_sell","dealer_buy","dealer_sell"]:

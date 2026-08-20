@@ -53,16 +53,6 @@ QUERIES = {
     "dividend_events.parquet": "SELECT stock_id, ex_date, pre_close, ref_price FROM dividend_events",
 }
 
-METADATA_QUERIES = {
-    "stock_industry_map.parquet": "SELECT stock_id, industry_code FROM stock_industry_map",
-    "industries.parquet": "SELECT code AS industry_code, name_zh FROM industries",
-    "stocks.parquet": "SELECT stock_id, market, listing_date, is_active FROM stocks",
-    "delisted_stocks.parquet": "SELECT stock_id, delisting_date, market FROM delisted_stocks",
-    "stock_universe_history.parquet": """
-        SELECT snapshot_date, stock_id, market, industry_code, asset_type,
-               listing_date, delisting_date, is_active FROM stock_universe_history""",
-}
-
 
 def export(out_dir: str):
     os.makedirs(out_dir, exist_ok=True)
@@ -77,16 +67,6 @@ def export(out_dir: str):
             df.to_parquet(path, index=False)
             logger.info(f"✅ {fname}: {len(df):>8} 列 → {path}")
     logger.info(f"匯出完成 → {out_dir}")
-
-
-def export_metadata(out_dir: str):
-    """Export small reference tables without overwriting local historical facts."""
-    os.makedirs(out_dir, exist_ok=True)
-    with get_session() as s:
-        for fname, sql in METADATA_QUERIES.items():
-            df = pd.read_sql(text(sql), s.bind)
-            df.to_parquet(os.path.join(out_dir, fname), index=False)
-            logger.info(f"metadata {fname}: {len(df)} rows")
 
 
 if __name__ == "__main__":
