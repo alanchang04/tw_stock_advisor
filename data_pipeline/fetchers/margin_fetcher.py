@@ -32,6 +32,9 @@ from datetime import date
 import pandas as pd
 import requests
 from loguru import logger
+from sqlalchemy import text
+
+from database.connection import get_session
 
 URL_TWSE_MARGIN = "https://www.twse.com.tw/rwd/zh/marginTrading/MI_MARGN"
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
@@ -101,3 +104,31 @@ def fetch_margin_twse_by_date(d: date, timeout: int = 30, retries: int = 3) -> p
             time.sleep(3 * attempt)
     logger.error(f"融資融券 {d} 最終失敗: {str(last_err)[:150]}")
     return pd.DataFrame()
+
+
+def upsert_margin(df: pd.DataFrame) -> int:
+    """Persist normalized margin rows in one batch."""
+    if df is None or df.empty:
+        return 0
+    cols = ["stock_id", "trade_date", "margin_balance", "margin_change",
+            "short_balance", "short_change"]
+    with get_session() as s:
+        requested = df["stock_id"].astype(str).unique().tolist()
+        known = set(s.execute(text("SELECT stock_id FROM stocks WHERE stock_id = ANY(:ids)"),
+                              {"ids": requested}).scalars())
+        clean = df[df["stock_id"].astype(str).isin(known)]
+        rows = clean[cols].astype(object).where(pd.notnull(clean[cols]), None).to_dict("records")
+        if not rows:
+            return 0
+        s.execute(text("""
+            INSERT INTO margin_trading
+                (stock_id, trade_date, margin_balance, margin_change, short_balance, short_change)
+            VALUES (:stock_id, :trade_date, :margin_balance, :margin_change,
+                    :short_balance, :short_change)
+            ON CONFLICT (stock_id, trade_date) DO UPDATE SET
+                margin_balance=EXCLUDED.margin_balance,
+                margin_change=EXCLUDED.margin_change,
+                short_balance=EXCLUDED.short_balance,
+                short_change=EXCLUDED.short_change
+        """), rows)
+    return len(rows)

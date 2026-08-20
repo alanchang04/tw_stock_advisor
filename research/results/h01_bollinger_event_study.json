@@ -1,0 +1,216 @@
+{
+  "study": "H01 Bollinger re-breakout, Phase 2 event study",
+  "spec": "docs/SPEC_H01_BOLLINGER_REBREAKOUT.md v1.0 (frozen 2026-08-13)",
+  "primary_benchmark": "equal_weight_universe",
+  "entry_rule": "next session open after the event date",
+  "windows": [
+    5,
+    10,
+    20,
+    40,
+    60
+  ],
+  "trials_registered": 2,
+  "known_limitation": "PIT security master covers 2005-2014 only; the 2015-2026 universe uses a 4-digit ticker rule as an approximation, which is explicitly not PIT",
+  "short_side_caveat": "the lower-band result is a mechanism-symmetry check only and must never be read as a tradable short strategy; Taiwan borrowing costs are not modelled",
+  "results": [
+    {
+      "side": "long_rebreakout",
+      "events": 14610,
+      "median_periods_between_breaks": 16.0,
+      "benchmarks": {
+        "equal_weight_universe": {
+          "monotonic_car_path": true,
+          "windows": {
+            "5": {
+              "car_mean_pct": -0.1464,
+              "car_median_pct": -1.216,
+              "ci95_low_pct": -0.3213,
+              "ci95_high_pct": 0.0282,
+              "p_value": 0.092,
+              "significant": false
+            },
+            "10": {
+              "car_mean_pct": 0.0371,
+              "car_median_pct": -1.6944,
+              "ci95_low_pct": -0.2401,
+              "ci95_high_pct": 0.2894,
+              "p_value": 0.812,
+              "significant": false
+            },
+            "20": {
+              "car_mean_pct": 0.3127,
+              "car_median_pct": -2.5086,
+              "ci95_low_pct": -0.1156,
+              "ci95_high_pct": 0.7693,
+              "p_value": 0.158,
+              "significant": false
+            },
+            "40": {
+              "car_mean_pct": 0.6453,
+              "car_median_pct": -3.6001,
+              "ci95_low_pct": -0.0782,
+              "ci95_high_pct": 1.4087,
+              "p_value": 0.086,
+              "significant": false
+            },
+            "60": {
+              "car_mean_pct": 0.827,
+              "car_median_pct": -4.8152,
+              "ci95_low_pct": -0.2346,
+              "ci95_high_pct": 1.8514,
+              "p_value": 0.12,
+              "significant": false
+            }
+          }
+        },
+        "0050_total_return": {
+          "monotonic_car_path": false,
+          "windows": {
+            "5": {
+              "car_mean_pct": -0.5324,
+              "car_median_pct": -1.403,
+              "ci95_low_pct": -0.8865,
+              "ci95_high_pct": -0.2101,
+              "p_value": 0.002,
+              "significant": true
+            },
+            "10": {
+              "car_mean_pct": -0.7174,
+              "car_median_pct": -2.1096,
+              "ci95_low_pct": -1.2558,
+              "ci95_high_pct": -0.1917,
+              "p_value": 0.008,
+              "significant": true
+            },
+            "20": {
+              "car_mean_pct": -1.1351,
+              "car_median_pct": -3.4956,
+              "ci95_low_pct": -2.1043,
+              "ci95_high_pct": -0.1382,
+              "p_value": 0.034,
+              "significant": true
+            },
+            "40": {
+              "car_mean_pct": -1.7951,
+              "car_median_pct": -5.4095,
+              "ci95_low_pct": -3.1682,
+              "ci95_high_pct": -0.3714,
+              "p_value": 0.018,
+              "significant": true
+            },
+            "60": {
+              "car_mean_pct": -2.4952,
+              "car_median_pct": -7.2959,
+              "ci95_low_pct": -4.1234,
+              "ci95_high_pct": -0.9929,
+              "p_value": 0.002,
+              "significant": true
+            }
+          }
+        }
+      },
+      "distinct_event_dates": 1813,
+      "stocks": 1641
+    },
+    {
+      "side": "short_rebreakout",
+      "events": 8770,
+      "median_periods_between_breaks": 21.0,
+      "benchmarks": {
+        "equal_weight_universe": {
+          "monotonic_car_path": false,
+          "windows": {
+            "5": {
+              "car_mean_pct": -0.2015,
+              "car_median_pct": -0.3197,
+              "ci95_low_pct": -0.4727,
+              "ci95_high_pct": 0.0778,
+              "p_value": 0.144,
+              "significant": false
+            },
+            "10": {
+              "car_mean_pct": -0.4338,
+              "car_median_pct": -0.7271,
+              "ci95_low_pct": -0.8158,
+              "ci95_high_pct": -0.0857,
+              "p_value": 0.02,
+              "significant": true
+            },
+            "20": {
+              "car_mean_pct": -0.7534,
+              "car_median_pct": -1.304,
+              "ci95_low_pct": -1.3253,
+              "ci95_high_pct": -0.275,
+              "p_value": 0.002,
+              "significant": true
+            },
+            "40": {
+              "car_mean_pct": -1.4304,
+              "car_median_pct": -2.8283,
+              "ci95_low_pct": -2.3522,
+              "ci95_high_pct": -0.6151,
+              "p_value": 0.0,
+              "significant": true
+            },
+            "60": {
+              "car_mean_pct": -2.4173,
+              "car_median_pct": -4.2338,
+              "ci95_low_pct": -3.4649,
+              "ci95_high_pct": -1.504,
+              "p_value": 0.0,
+              "significant": true
+            }
+          }
+        },
+        "0050_total_return": {
+          "monotonic_car_path": false,
+          "windows": {
+            "5": {
+              "car_mean_pct": -0.2089,
+              "car_median_pct": -0.1833,
+              "ci95_low_pct": -0.7448,
+              "ci95_high_pct": 0.3509,
+              "p_value": 0.458,
+              "significant": false
+            },
+            "10": {
+              "car_mean_pct": -0.3145,
+              "car_median_pct": -0.5535,
+              "ci95_low_pct": -0.9515,
+              "ci95_high_pct": 0.3186,
+              "p_value": 0.344,
+              "significant": false
+            },
+            "20": {
+              "car_mean_pct": -0.6406,
+              "car_median_pct": -1.1204,
+              "ci95_low_pct": -1.607,
+              "ci95_high_pct": 0.2929,
+              "p_value": 0.194,
+              "significant": false
+            },
+            "40": {
+              "car_mean_pct": -0.9488,
+              "car_median_pct": -2.121,
+              "ci95_low_pct": -3.0157,
+              "ci95_high_pct": 0.847,
+              "p_value": 0.304,
+              "significant": false
+            },
+            "60": {
+              "car_mean_pct": -2.4281,
+              "car_median_pct": -3.5633,
+              "ci95_low_pct": -4.9175,
+              "ci95_high_pct": -0.2142,
+              "p_value": 0.036,
+              "significant": true
+            }
+          }
+        }
+      },
+      "distinct_event_dates": 1594,
+      "stocks": 1295
+    }
+  ]
+}

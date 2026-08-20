@@ -1,0 +1,8 @@
+# forward journal 的定義指紋會雜湊這幾個檔案的內容。
+# 換行符若隨機器變動，指紋就會跟著變，看起來像「定義被改過」——
+# 而誤觸 M18 的代價是放棄整本 journal。指紋端已做 CRLF→LF 正規化，
+# 這裡再把來源釘成 LF，兩層都做。
+research/momentum.py                          text eol=lf
+research/sequential.py                        text eol=lf
+scripts/run_h12_institutional_confirmation.py text eol=lf
+scripts/run_h16_momentum_confirmation.py      text eol=lf

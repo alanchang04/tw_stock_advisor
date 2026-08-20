@@ -239,10 +239,11 @@ P5  實盤協定:凍結版本→紙上3-6個月→追蹤誤差監控→kill swit
     `_filter_known()` 也只認 stocks 表裡已存在的代號,不先登記,等下歷史回補時
     這些下市股的價量資料會被整批靜默濾掉,倖存者偏誤依舊修不掉(這是實作時
     抓到的真實 bug,不是預先設計好的)。
-  - **誠實限制**(實測,非猜測):TPEX 三大法人官方端點只回溯到約 2019 年
-    (2018/2016 測試回傳 0 筆);TPEX 下市清單目前沒找到對應端點(已測試
-    `tpex_delisted_stock`/`tpex_suspend_listing` 皆 404),只有 TWSE 下市股被登記,
-    上櫃股的倖存者偏誤修正不完整。
+  - **D5 更新**(實測,非猜測):TPEX 三大法人 2008～2014 年官方逐年交易日 probe
+    回傳 0 筆，語意固定為 missing/unknown、不得補 0。TPEX 下櫃公司已找到官方
+    `www/zh-tw/company/deListed` 年度端點；D5 snapshot 已封存歷史下櫃與逐日
+    quote-presence universe，但舊 production DB 匯入流程尚未接線，在 promotion 前
+    仍不得用舊 DB 路徑宣稱上櫃倖存者偏誤已修正。
 - `agent/strategy.py total_return_adjust()` / `apply_total_return_adjustment()`:
   用 `dividend_events` 的官方事件(pre_close/ref_price 算出的真實調整比例)做
   個股後復權,取代 `split_adjust()` 那種「單日跌幅>20%用猜的」——正常除權息常

@@ -1,0 +1,96 @@
+{
+  "study": "H12 institutional confirmation conditional on revenue improvement",
+  "registration": "research/HYPOTHESES.md H12",
+  "primary_estimand": "E[R | Rev+, Confirm+] - E[R | Rev+, Confirm-]",
+  "primary_horizon_sessions": 60,
+  "confirmation": "cumulative trust-fund net buy >= 100 lots within 20 sessions AFTER the decision date; forward returns start strictly after that window (M15 landmark)",
+  "coverage": "common-coverage universe from 2018-01-01: TPEx institutional data starts 2018 (verified), so earlier months would read missing as Confirm=0 (M19)",
+  "interpretation": "2015-2026 is contaminated for this hypothesis (H04 origin); a surviving effect may only be reported as 'not falsified'",
+  "trials_registered": 4,
+  "specifications": {
+    "primary_rev_yoy_gt_0": {
+      "breadth": {
+        "months": 99,
+        "median_revenue_plus_per_month": 453,
+        "median_confirmed_per_month": 94,
+        "min_confirmed_per_month": 38,
+        "distinct_stocks": 1626,
+        "overall_confirmed_share": 0.2073
+      },
+      "size_controlled": {
+        "months": 99,
+        "median_cross_section": 452,
+        "mean_confirmed_share": 0.207,
+        "delta_signal_pct": 0.1718,
+        "se_pct": 0.4026,
+        "t_stat": 0.427
+      },
+      "uncontrolled": {
+        "months": 99,
+        "median_cross_section": 452,
+        "mean_confirmed_share": 0.207,
+        "delta_signal_pct": 0.8943,
+        "se_pct": 0.7878,
+        "t_stat": 1.135
+      },
+      "two_by_two": {
+        "revenue_plus_confirm_plus": {
+          "mean_pct": 1.5923,
+          "t_stat": 2.026
+        },
+        "revenue_plus_confirm_minus": {
+          "mean_pct": 0.698,
+          "t_stat": 3.042
+        },
+        "revenue_plus_all": {
+          "mean_pct": 0.8652,
+          "t_stat": 3.46
+        },
+        "delta_portfolio_pct": 0.7271,
+        "delta_portfolio_t": 1.132
+      }
+    },
+    "robustness_rev_yoy_gt_20": {
+      "breadth": {
+        "months": 99,
+        "median_revenue_plus_per_month": 228,
+        "median_confirmed_per_month": 47,
+        "min_confirmed_per_month": 15,
+        "distinct_stocks": 1548,
+        "overall_confirmed_share": 0.1978
+      },
+      "size_controlled": {
+        "months": 99,
+        "median_cross_section": 228,
+        "mean_confirmed_share": 0.1963,
+        "delta_signal_pct": 0.2288,
+        "se_pct": 0.4677,
+        "t_stat": 0.489
+      },
+      "uncontrolled": {
+        "months": 99,
+        "median_cross_section": 228,
+        "mean_confirmed_share": 0.1963,
+        "delta_signal_pct": 1.1826,
+        "se_pct": 1.0124,
+        "t_stat": 1.168
+      },
+      "two_by_two": {
+        "revenue_plus_confirm_plus": {
+          "mean_pct": 2.3254,
+          "t_stat": 2.095
+        },
+        "revenue_plus_confirm_minus": {
+          "mean_pct": 1.1428,
+          "t_stat": 3.029
+        },
+        "revenue_plus_all": {
+          "mean_pct": 1.3763,
+          "t_stat": 3.099
+        },
+        "delta_portfolio_pct": 0.9491,
+        "delta_portfolio_t": 1.155
+      }
+    }
+  }
+}

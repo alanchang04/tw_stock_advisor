@@ -1,0 +1,149 @@
+{
+  "experiment": "invest_streak_definition_v1",
+  "run_date": "2026-08-11",
+  "registered": "research/EXPERIMENTS.md P3-11（2026-08-08，跑之前登記）",
+  "environment": {
+    "python": "3.12.9",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "pandas": "2.3.3",
+    "numpy": "2.5.1",
+    "scipy": "1.18.0",
+    "parquet_dir": "C:\\Users\\alanchang\\Desktop\\taiwan_stock_advisor\\data\\research",
+    "data": {
+      "price_rows": 4840274,
+      "price_stocks": 2140,
+      "price_days": 2812,
+      "price_first": "2015-01-05",
+      "price_last": "2026-07-31",
+      "median_stocks_per_day": 1716.0,
+      "dividend_events": 16919
+    },
+    "note": "回測數字只在這組環境下可複製；pandas 版本會改變選股結果，比對他人數字前先核對本區塊（見 requirements.txt 的鎖版註解）"
+  },
+  "spec": {
+    "tolerance_ratio": 0.1,
+    "size_floor_pct_of_volume": 0.05,
+    "source": "門檻取自 development/上市宇宙實測分布，非進口常數",
+    "universe_markets": [
+      "TWSE"
+    ]
+  },
+  "prior_expectation": "V1 看好（斷點證據強）、V2 不看好（單日規模與報酬 rho=-0.01）",
+  "development": {
+    "start": "2015-01-05",
+    "end": "2020-12-31",
+    "variants": {
+      "V0_baseline": {
+        "annual_return": 0.18360156048908371,
+        "sharpe": 1.133398054890488,
+        "mdd": -0.15150232543367936,
+        "calmar": 1.2118728868584654,
+        "trades": 225,
+        "win_rate": 0.4266666666666667,
+        "avg_hold_days": 43.54222222222222,
+        "net_pnl_after_removing_best_5": 247109.54116095405,
+        "max_year_profit_share": 0.22815973788504776,
+        "day3_mean": 0.004862212781455174,
+        "day5_mean": 0.006785338887747688,
+        "day10_mean": 0.02137027169861935,
+        "day20_mean": 0.024203078811296592,
+        "signal_days": 288
+      },
+      "V1_tolerance": {
+        "annual_return": 0.1806746624986173,
+        "sharpe": 1.1476956874626274,
+        "mdd": -0.21678889106879656,
+        "calmar": 0.8334129189363368,
+        "trades": 224,
+        "win_rate": 0.375,
+        "avg_hold_days": 43.754464285714285,
+        "net_pnl_after_removing_best_5": 161830.0108555801,
+        "max_year_profit_share": 0.2131089270293651,
+        "day3_mean": 0.0036103351325136764,
+        "day5_mean": 0.005534075526714749,
+        "day10_mean": 0.015459437963346416,
+        "day20_mean": 0.019832255390055765,
+        "signal_days": 288
+      },
+      "V2_size_floor": {
+        "annual_return": 0.15706381541005277,
+        "sharpe": 0.9980708364913121,
+        "mdd": -0.18585522415813435,
+        "calmar": 0.8450869009547749,
+        "trades": 219,
+        "win_rate": 0.410958904109589,
+        "avg_hold_days": 44.36073059360731,
+        "net_pnl_after_removing_best_5": 164827.1797101287,
+        "max_year_profit_share": 0.18396901895542628,
+        "day3_mean": 0.0056998274340546145,
+        "day5_mean": 0.007135555465677865,
+        "day10_mean": 0.018337699903882433,
+        "day20_mean": 0.025281484108013483,
+        "signal_days": 288
+      }
+    }
+  },
+  "treatment_check": {
+    "qualifying_stock_days": {
+      "V0_baseline": 189227,
+      "V1_tolerance": 450357,
+      "V2_size_floor": 83840
+    },
+    "v1_change_vs_v0": 1.3799827720145643,
+    "v2_change_vs_v0": -0.5569342641377817,
+    "v1_applied": true,
+    "v2_applied": true,
+    "passed": true
+  },
+  "assessment": {
+    "F0_baseline": {
+      "expected": {
+        "annual_return": 18.36,
+        "sharpe": 1.13,
+        "mdd": -15.15,
+        "trades": 225
+      },
+      "observed": {
+        "annual_return": 18.36,
+        "sharpe": 1.13,
+        "mdd": -15.15,
+        "trades": 225
+      },
+      "passed": true
+    },
+    "F0b_treatment_applied": {
+      "qualifying_stock_days": {
+        "V0_baseline": 189227,
+        "V1_tolerance": 450357,
+        "V2_size_floor": 83840
+      },
+      "v1_change_vs_v0": 1.3799827720145643,
+      "v2_change_vs_v0": -0.5569342641377817,
+      "v1_applied": true,
+      "v2_applied": true,
+      "passed": true
+    },
+    "per_variant": {
+      "V1_tolerance": {
+        "F1_beats_v0": false,
+        "F2_mdd_ok": false,
+        "F3_positive_without_best_5": true,
+        "F4_not_concentrated": true,
+        "passes_all": false,
+        "max_year_profit_share": 0.2131089270293651
+      },
+      "V2_size_floor": {
+        "F1_beats_v0": false,
+        "F2_mdd_ok": false,
+        "F3_positive_without_best_5": true,
+        "F4_not_concentrated": true,
+        "passes_all": false,
+        "max_year_profit_share": 0.18396901895542628
+      }
+    },
+    "passing": []
+  },
+  "validation_touched": false,
+  "holdout_touched": false,
+  "formal_defaults_changed": false
+}

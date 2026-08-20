@@ -1,0 +1,23 @@
+{
+  "threshold_absolute_return": 0.2,
+  "price_rows": 1917768,
+  "event_rows": 6275,
+  "large_jump_rows": 324,
+  "jump_classifications": {
+    "excluded_non_common_security": 2,
+    "matched_corporate_action": 138,
+    "new_listing_price_discovery": 2,
+    "official_reference_reset_unresolved_cause": 182
+  },
+  "matched_jump_pre_close_checks": 138,
+  "matched_jump_pre_close_mismatches": 0,
+  "official_reference_resets_unresolved_cause": 182,
+  "reference_resets_promoted_to_total_return_without_event": 0,
+  "matched_corporate_action_jumps_not_ledger_executable": 64,
+  "events_with_effective_trade_date": 6266,
+  "events_without_effective_trade_date": 9,
+  "events_shifted_to_later_trade_date": 93,
+  "event_pre_close_checks": 6266,
+  "event_pre_close_mismatches": 10,
+  "passed_no_unexplained_short_gap": true
+}

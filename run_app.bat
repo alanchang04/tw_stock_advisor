@@ -1,5 +1,9 @@
 @echo off
 chcp 65001 >nul
-cd /d "C:\Users\alanchang\Desktop\taiwan_stock_advisor"
+cd /d "%~dp0"
 set PYTHONIOENCODING=utf-8
-"C:\Users\alanchang\AppData\Local\Programs\Python\Python312\python.exe" -m streamlit run app.py --server.port 8501 --server.headless false
+if not exist ".venv\Scripts\python.exe" (
+    echo ERROR: .venv not found. Install dependencies first.
+    exit /b 1
+)
+".venv\Scripts\python.exe" -m streamlit run app.py --server.port 8501 --server.headless false

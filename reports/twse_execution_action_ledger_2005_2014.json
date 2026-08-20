@@ -1,0 +1,40 @@
+{
+  "source_rows": 6275,
+  "executable_rows": 5622,
+  "blocked_rows": 653,
+  "synthetic_units_labeled_as_actual_shares": 0,
+  "price_implied_factors_labeled_as_actual_shares": 0,
+  "mops_match_status_counts": {
+    "not_applicable": 3494,
+    "matched_unique": 2318,
+    "stock_not_found": 283,
+    "year_or_stock_terms_not_found": 148,
+    "declared_terms_no_match": 32
+  },
+  "subscription_match_status_counts": {
+    "not_applicable": 5987,
+    "matched_unique": 113,
+    "rate_price_or_allocation_not_found_before_event": 89,
+    "announcement_facts_not_found": 45,
+    "reference_equation_no_match": 18,
+    "free_share_or_cash_terms_missing": 13,
+    "reference_equation_ambiguous": 10
+  },
+  "subscription_settlement_status_counts": {
+    "not_applicable": 6162,
+    "settlement_dates_missing": 63,
+    "matched_payment_delivery_missing": 27,
+    "settlement_dates_ambiguous": 16,
+    "matched_delivery_payment_missing": 7
+  },
+  "status_reason_counts": {
+    "executable|none": 5622,
+    "blocked|official_free_share_terms_missing": 219,
+    "blocked|paid_subscription_terms_missing": 175,
+    "blocked|paid_subscription_settlement_timing_missing": 113,
+    "blocked|cash_stock_value_split_missing": 60,
+    "blocked|capital_reduction_actual_share_ratio_missing": 50,
+    "blocked|capital_refund_and_exchange_ratio_missing": 36
+  },
+  "promotion_ready": false
+}

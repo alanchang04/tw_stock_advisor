@@ -15,23 +15,30 @@ sqlalchemy==2.0.49
 ta>=0.9.0
 
 # 資料處理
-# 🔒 鎖死版本（2026-08-06 於研究分支實測，2026-08-16 併入 main）。
-# 同一份程式、同一份資料、同一個回測區間，只換 pandas 版本，dev 基準就從
-# 15.22%/237筆（2.2.3）變成 14.07%/242筆（3.0.5），年化差 1.15pp、MDD 差 3pp。
-# 策略取分數前 5 名，浮點/tie 的微小差異足以翻掉某天的第 5 名，之後整條組合
-# 軌跡分岔。**不鎖版本 = 線上選股結果可能在任何一天無預警改變。**
+# 🔒 鎖死版本（2026-08-06）。實測：同一份程式、同一份資料、同一個回測區間，
+# 只換 pandas 版本，dev 基準就從 15.22%/237筆（2.2.3）變成 14.07%/242筆（3.0.5），
+# 年化差 1.15pp、MDD 差 3pp。策略取分數前5名，浮點/tie 的微小差異足以翻掉某天的
+# 第5名，之後整條組合軌跡分岔。不鎖版本 = 線上選股結果可能在任何一天無預警改變。
 #
 # 鎖 2.3.3 的理由：這就是**線上實際在跑的版本**。workflow 先裝 requirements.txt
 # （會解到 pandas 3.x），再裝 FinMind，而 FinMind 要求 pandas<3，於是把 pandas
-# 降到 2.3.3。所以鎖 2.3.3 是凍結現狀，不是改變行為。
+# 降到 2.3.3。所以 2.3.3 是現狀，鎖它是凍結現狀而不是改變行為。
 # 改版前請先在 development 上重跑基準並比對差異，不要直接改數字。
 pandas==2.3.3
 numpy==2.5.1
+scipy==1.18.0
 
 # 爬蟲
 requests==2.32.3
 beautifulsoup4==4.12.3
-# lxml 5.3.0 無 cp314 wheel，改用 html.parser；若本機要用 lxml，在本機單獨安裝
+pypdf==6.15.0
+pymupdf==1.28.2
+# lxml 5.3.0 無 cp314 wheel，故不收；若本機要用 lxml，在本機單獨安裝。
+# 但 pandas.read_html 的預設 flavor 順序是 lxml → bs4，且 lxml 缺席時**直接拋
+# ImportError 而非退回 bs4**，所以只排除 lxml 會讓 read_html 完全不能用。
+# html5lib 是純 Python（無 wheel/ABI 問題，cp314 也裝得起來），
+# 補上它之後 flavor="bs4" 才成立——research/mops_dividend_distribution.py 已寫死該 flavor。
+html5lib==1.1
 
 # 群益投信ETF持股（Incapsula防機器人擋純requests，需真的開瀏覽器過JS挑戰）
 # CI/首次本機需另外執行一次：playwright install chromium（見 .github/workflows）

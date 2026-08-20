@@ -1,0 +1,871 @@
+{
+  "study": "method audit of existing conclusions (M1-M5, M9)",
+  "amendments": "docs/RESEARCH_METHOD_AMENDMENTS.md",
+  "note": "re-examination of existing event sets under corrected inference; no event definition, window, or filter was changed, so this adds no new trials to the cumulative n_trials count",
+  "windows": [
+    60,
+    120
+  ],
+  "bootstrap_draws": 400,
+  "new_trials": 0,
+  "multiple_testing_budget": {
+    "cells": 56,
+    "alpha": 0.05,
+    "significant_observed": 1,
+    "expected_false_positives": 2.8000000000000003,
+    "sidak_alpha": 0.0009155323297931339,
+    "bonferroni_alpha": 0.0008928571428571429,
+    "indistinguishable_from_noise": true
+  },
+  "results": [
+    {
+      "event_set": "H01_bollinger_b1",
+      "raw_events": 14417,
+      "raw_distinct_dates": 1809,
+      "benchmarks": {
+        "0050_total_return": {
+          "60": {
+            "events_raw": 14358,
+            "events_deduplicated": 8000,
+            "duplicate_share": 0.4428,
+            "car_mean_raw_pct": -2.2621,
+            "car_mean_deduplicated_pct": -2.7843,
+            "car_median_deduplicated_pct": -7.279,
+            "block_sensitivity": {
+              "5": 0.0,
+              "20": 0.0,
+              "40": 0.005,
+              "60": 0.01,
+              "120": 0.025
+            },
+            "p_range_across_blocks": 0.025,
+            "verdict_stable_across_blocks": true,
+            "stationary_bootstrap_p": 0.005,
+            "economic_threshold_pct": 2.185,
+            "exceeds_economic_threshold": false,
+            "p_vs_economic_threshold": 1.0,
+            "verdict": "rejected",
+            "tail_raw": {
+              "events": 14358,
+              "tail_events": 718,
+              "top_fraction": 0.05,
+              "tail_share_of_sum": -1.9458122387007188,
+              "distinct_stocks": 367,
+              "distinct_stock_ratio": 0.5111420612813371,
+              "largest_stock_share": 0.013927576601671309,
+              "stock_hhi": 0.004030850164104873,
+              "distinct_years": 11,
+              "top_year": 2020,
+              "top_year_share": 0.16573816155988857
+            },
+            "tail_deduplicated": {
+              "events": 8000,
+              "tail_events": 400,
+              "top_fraction": 0.05,
+              "tail_share_of_sum": -1.4962241834637167,
+              "distinct_stocks": 343,
+              "distinct_stock_ratio": 0.8575,
+              "largest_stock_share": 0.01,
+              "stock_hhi": 0.0033625,
+              "distinct_years": 11,
+              "top_year": 2020,
+              "top_year_share": 0.175
+            },
+            "leave_one_year_out": {
+              "by": "year",
+              "groups": 11,
+              "full_mean": -0.027843365417965595,
+              "most_influential_group": 2024,
+              "mean_without_it": -0.020145736532680675,
+              "worst_case_drop": -0.00769762888528492,
+              "flips_sign_groups": 0,
+              "conclusion_survives_any_single_removal": true
+            },
+            "leave_one_stock_out": {
+              "by": "stock_id",
+              "groups": 1602,
+              "full_mean": -0.027843365417965595,
+              "most_influential_group": "6111",
+              "mean_without_it": -0.02764967265656675,
+              "worst_case_drop": -0.00019369276139884553,
+              "flips_sign_groups": 0,
+              "conclusion_survives_any_single_removal": true
+            }
+          },
+          "120": {
+            "events_raw": 14154,
+            "events_deduplicated": 6667,
+            "duplicate_share": 0.529,
+            "car_mean_raw_pct": -2.8627,
+            "car_mean_deduplicated_pct": -4.4773,
+            "car_median_deduplicated_pct": -11.1806,
+            "block_sensitivity": {
+              "5": 0.0,
+              "20": 0.0,
+              "40": 0.03,
+              "60": 0.06,
+              "120": 0.12
+            },
+            "p_range_across_blocks": 0.12,
+            "verdict_stable_across_blocks": false,
+            "stationary_bootstrap_p": 0.055,
+            "economic_threshold_pct": 2.185,
+            "exceeds_economic_threshold": false,
+            "p_vs_economic_threshold": 0.9875,
+            "verdict": "rejected",
+            "tail_raw": {
+              "events": 14154,
+              "tail_events": 708,
+              "top_fraction": 0.05,
+              "tail_share_of_sum": -2.4541748368378524,
+              "distinct_stocks": 339,
+              "distinct_stock_ratio": 0.4788135593220339,
+              "largest_stock_share": 0.014124293785310734,
+              "stock_hhi": 0.00432506623256408,
+              "distinct_years": 11,
+              "top_year": 2020,
+              "top_year_share": 0.24152542372881355
+            },
+            "tail_deduplicated": {
+              "events": 6667,
+              "tail_events": 333,
+              "top_fraction": 0.05,
+              "tail_share_of_sum": -1.417904152798897,
+              "distinct_stocks": 298,
+              "distinct_stock_ratio": 0.8948948948948949,
+              "largest_stock_share": 0.009009009009009009,
+              "stock_hhi": 0.003652300949598246,
+              "distinct_years": 11,
+              "top_year": 2025,
+              "top_year_share": 0.2222222222222222
+            },
+            "leave_one_year_out": {
+              "by": "year",
+              "groups": 11,
+              "full_mean": -0.044772593540893045,
+              "most_influential_group": 2024,
+              "mean_without_it": -0.03513159962632164,
+              "worst_case_drop": -0.009640993914571405,
+              "flips_sign_groups": 0,
+              "conclusion_survives_any_single_removal": true
+            },
+            "leave_one_stock_out": {
+              "by": "stock_id",
+              "groups": 1596,
+              "full_mean": -0.044772593540893045,
+              "most_influential_group": "6541",
+              "mean_without_it": -0.04441174487816445,
+              "worst_case_drop": -0.0003608486627285981,
+              "flips_sign_groups": 0,
+              "conclusion_survives_any_single_removal": true
+            }
+          }
+        },
+        "equal_weight_universe": {
+          "60": {
+            "events_raw": 14358,
+            "events_deduplicated": 8000,
+            "duplicate_share": 0.4428,
+            "car_mean_raw_pct": 1.0661,
+            "car_mean_deduplicated_pct": 0.547,
+            "car_median_deduplicated_pct": -4.8949,
+            "block_sensitivity": {
+              "5": 0.14,
+              "20": 0.3,
+              "40": 0.3,
+              "60": 0.36,
+              "120": 0.38
+            },
+            "p_range_across_blocks": 0.24,
+            "verdict_stable_across_blocks": true,
+            "stationary_bootstrap_p": 0.335,
+            "economic_threshold_pct": 2.185,
+            "exceeds_economic_threshold": false,
+            "p_vs_economic_threshold": 0.99,
+            "verdict": "rejected",
+            "tail_raw": {
+              "events": 14358,
+              "tail_events": 718,
+              "top_fraction": 0.05,
+              "tail_share_of_sum": 4.276266167292264,
+              "distinct_stocks": 354,
+              "distinct_stock_ratio": 0.49303621169916434,
+              "largest_stock_share": 0.012534818941504178,
+              "stock_hhi": 0.0041472365981021254,
+              "distinct_years": 11,
+              "top_year": 2020,
+              "top_year_share": 0.16852367688022285
+            },
+            "tail_deduplicated": {
+              "events": 8000,
+              "tail_events": 400,
+              "top_fraction": 0.05,
+              "tail_share_of_sum": 7.914728429905681,
+              "distinct_stocks": 337,
+              "distinct_stock_ratio": 0.8425,
+              "largest_stock_share": 0.01,
+              "stock_hhi": 0.0034500000000000004,
+              "distinct_years": 11,
+              "top_year": 2020,
+              "top_year_share": 0.18
+            },
+            "leave_one_year_out": {
+              "by": "year",
+              "groups": 11,
+              "full_mean": 0.005469507445016096,
+              "most_influential_group": 2026,
+              "mean_without_it": 0.0016977663069170754,
+              "worst_case_drop": 0.003771741138099021,
+              "flips_sign_groups": 0,
+              "conclusion_survives_any_single_removal": true
+            },
+            "leave_one_stock_out": {
+              "by": "stock_id",
+              "groups": 1602,
+              "full_mean": 0.005469507445016096,
+              "most_influential_group": "6861",
+              "mean_without_it": 0.0049288314076970175,
+              "worst_case_drop": 0.0005406760373190787,
+              "flips_sign_groups": 0,
+              "conclusion_survives_any_single_removal": true
+            }
+          },
+          "120": {
+            "events_raw": 14184,
+            "events_deduplicated": 6677,
+            "duplicate_share": 0.5293,
+            "car_mean_raw_pct": 2.3271,
+            "car_mean_deduplicated_pct": 0.4383,
+            "car_median_deduplicated_pct": -7.9774,
+            "block_sensitivity": {
+              "5": 0.53,
+              "20": 0.6,
+              "40": 0.565,
+              "60": 0.59,
+              "120": 0.605
+            },
+            "p_range_across_blocks": 0.075,
+            "verdict_stable_across_blocks": true,
+            "stationary_bootstrap_p": 0.515,
+            "economic_threshold_pct": 2.185,
+            "exceeds_economic_threshold": false,
+            "p_vs_economic_threshold": 0.9825,
+            "verdict": "rejected",
+            "tail_raw": {
+              "events": 14184,
+              "tail_events": 709,
+              "top_fraction": 0.05,
+              "tail_share_of_sum": 3.1496158728754704,
+              "distinct_stocks": 321,
+              "distinct_stock_ratio": 0.4527503526093089,
+              "largest_stock_share": 0.014104372355430184,
+              "stock_hhi": 0.004545626351503239,
+              "distinct_years": 11,
+              "top_year": 2020,
+              "top_year_share": 0.24823695345557123
+            },
+            "tail_deduplicated": {
+              "events": 6677,
+              "tail_events": 334,
+              "top_fraction": 0.05,
+              "tail_share_of_sum": 14.998112286758857,
+              "distinct_stocks": 300,
+              "distinct_stock_ratio": 0.8982035928143712,
+              "largest_stock_share": 0.005988023952095809,
+              "stock_hhi": 0.0036035713005127474,
+              "distinct_years": 11,
+              "top_year": 2020,
+              "top_year_share": 0.20658682634730538
+            },
+            "leave_one_year_out": {
+              "by": "year",
+              "groups": 11,
+              "full_mean": 0.004382785367346853,
+              "most_influential_group": 2020,
+              "mean_without_it": -0.0011641776113803445,
+              "worst_case_drop": 0.005546962978727197,
+              "flips_sign_groups": 2,
+              "conclusion_survives_any_single_removal": false
+            },
+            "leave_one_stock_out": {
+              "by": "stock_id",
+              "groups": 1597,
+              "full_mean": 0.004382785367346853,
+              "most_influential_group": "6150",
+              "mean_without_it": 0.0031601158049972262,
+              "worst_case_drop": 0.0012226695623496265,
+              "flips_sign_groups": 0,
+              "conclusion_survives_any_single_removal": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "event_set": "H04b_rev_yoy_over_20",
+      "raw_events": 30522,
+      "raw_distinct_dates": 138,
+      "benchmarks": {
+        "0050_total_return": {
+          "60": {
+            "events_raw": 29011,
+            "events_deduplicated": 13853,
+            "duplicate_share": 0.5225,
+            "car_mean_raw_pct": 1.8828,
+            "car_mean_deduplicated_pct": 1.2212,
+            "car_median_deduplicated_pct": -4.261,
+            "block_sensitivity": {
+              "5": 0.33,
+              "20": 0.31,
+              "40": 0.525,
+              "60": 0.505,
+              "120": 0.52
+            },
+            "p_range_across_blocks": 0.215,
+            "verdict_stable_across_blocks": true,
+            "stationary_bootstrap_p": 0.395,
+            "economic_threshold_pct": 2.185,
+            "exceeds_economic_threshold": false,
+            "p_vs_economic_threshold": 0.7475,
+            "verdict": "rejected",
+            "tail_raw": {
+              "events": 29011,
+              "tail_events": 1451,
+              "top_fraction": 0.05,
+              "tail_share_of_sum": 2.6419625225041194,
+              "distinct_stocks": 649,
+              "distinct_stock_ratio": 0.4472777394900069,
+              "largest_stock_share": 0.006891798759476223,
+              "stock_hhi": 0.002230928929928313,
+              "distinct_years": 12,
+              "top_year": 2025,
+              "top_year_share": 0.4045485871812543
+            },
+            "tail_deduplicated": {
+              "events": 13853,
+              "tail_events": 693,
+              "top_fraction": 0.05,
+              "tail_share_of_sum": 3.9008421416780994,
+              "distinct_stocks": 507,
+              "distinct_stock_ratio": 0.7316017316017316,
+              "largest_stock_share": 0.005772005772005772,
+              "stock_hhi": 0.0023841798733573623,
+              "distinct_years": 12,
+              "top_year": 2025,
+              "top_year_share": 0.37373737373737376
+            },
+            "leave_one_year_out": {
+              "by": "year",
+              "groups": 12,
+              "full_mean": 0.012212069670993411,
+              "most_influential_group": 2025,
+              "mean_without_it": 0.0027540856851209555,
+              "worst_case_drop": 0.009457983985872456,
+              "flips_sign_groups": 0,
+              "conclusion_survives_any_single_removal": true
+            },
+            "leave_one_stock_out": {
+              "by": "stock_id",
+              "groups": 1576,
+              "full_mean": 0.012212069670993411,
+              "most_influential_group": "3081",
+              "mean_without_it": 0.011848777565475395,
+              "worst_case_drop": 0.00036329210551801563,
+              "flips_sign_groups": 0,
+              "conclusion_survives_any_single_removal": true
+            }
+          },
+          "120": {
+            "events_raw": 27779,
+            "events_deduplicated": 8983,
+            "duplicate_share": 0.6766,
+            "car_mean_raw_pct": 2.7762,
+            "car_mean_deduplicated_pct": 2.836,
+            "car_median_deduplicated_pct": -6.1508,
+            "block_sensitivity": {
+              "5": 0.245,
+              "20": 0.275,
+              "40": 0.365,
+              "60": 0.505,
+              "120": 0.635
+            },
+            "p_range_across_blocks": 0.39,
+            "verdict_stable_across_blocks": true,
+            "stationary_bootstrap_p": 0.455,
+            "economic_threshold_pct": 2.185,
+            "exceeds_economic_threshold": false,
+            "p_vs_economic_threshold": 0.46,
+            "verdict": "suggestive",
+            "tail_raw": {
+              "events": 27779,
+              "tail_events": 1389,
+              "top_fraction": 0.05,
+              "tail_share_of_sum": 2.655758048991502,
+              "distinct_stocks": 509,
+              "distinct_stock_ratio": 0.36645068394528435,
+              "largest_stock_share": 0.01079913606911447,
+              "stock_hhi": 0.0033104911002368193,
+              "distinct_years": 12,
+              "top_year": 2025,
+              "top_year_share": 0.44852411807055437
+            },
+            "tail_deduplicated": {
+              "events": 8983,
+              "tail_events": 449,
+              "top_fraction": 0.05,
+              "tail_share_of_sum": 2.4545198617181785,
+              "distinct_stocks": 368,
+              "distinct_stock_ratio": 0.8195991091314031,
+              "largest_stock_share": 0.008908685968819599,
+              "stock_hhi": 0.0031497859633632763,
+              "distinct_years": 12,
+              "top_year": 2025,
+              "top_year_share": 0.43429844097995546
+            },
+            "leave_one_year_out": {
+              "by": "year",
+              "groups": 12,
+              "full_mean": 0.028360028620985453,
+              "most_influential_group": 2025,
+              "mean_without_it": -0.011699276690394897,
+              "worst_case_drop": 0.04005930531138035,
+              "flips_sign_groups": 1,
+              "conclusion_survives_any_single_removal": false
+            },
+            "leave_one_stock_out": {
+              "by": "stock_id",
+              "groups": 1559,
+              "full_mean": 0.028360028620985453,
+              "most_influential_group": "3228",
+              "mean_without_it": 0.027384525947502545,
+              "worst_case_drop": 0.000975502673482908,
+              "flips_sign_groups": 0,
+              "conclusion_survives_any_single_removal": true
+            }
+          }
+        },
+        "equal_weight_universe": {
+          "60": {
+            "events_raw": 29231,
+            "events_deduplicated": 13915,
+            "duplicate_share": 0.524,
+            "car_mean_raw_pct": 1.0971,
+            "car_mean_deduplicated_pct": 0.6996,
+            "car_median_deduplicated_pct": -4.2706,
+            "block_sensitivity": {
+              "5": 0.065,
+              "20": 0.055,
+              "40": 0.065,
+              "60": 0.085,
+              "120": 0.065
+            },
+            "p_range_across_blocks": 0.03,
+            "verdict_stable_across_blocks": true,
+            "stationary_bootstrap_p": 0.085,
+            "economic_threshold_pct": 2.185,
+            "exceeds_economic_threshold": false,
+            "p_vs_economic_threshold": 1.0,
+            "verdict": "rejected",
+            "tail_raw": {
+              "events": 29231,
+              "tail_events": 1462,
+              "top_fraction": 0.05,
+              "tail_share_of_sum": 3.963268855178859,
+              "distinct_stocks": 574,
+              "distinct_stock_ratio": 0.39261285909712723,
+              "largest_stock_share": 0.006839945280437756,
+              "stock_hhi": 0.00261340180140392,
+              "distinct_years": 12,
+              "top_year": 2021,
+              "top_year_share": 0.1716826265389877
+            },
+            "tail_deduplicated": {
+              "events": 13915,
+              "tail_events": 696,
+              "top_fraction": 0.05,
+              "tail_share_of_sum": 5.974264805774662,
+              "distinct_stocks": 479,
+              "distinct_stock_ratio": 0.6882183908045977,
+              "largest_stock_share": 0.007183908045977011,
+              "stock_hhi": 0.0026340996168582372,
+              "distinct_years": 12,
+              "top_year": 2025,
+              "top_year_share": 0.15660919540229884
+            },
+            "leave_one_year_out": {
+              "by": "year",
+              "groups": 12,
+              "full_mean": 0.006996392355245272,
+              "most_influential_group": 2025,
+              "mean_without_it": 0.005222549076303863,
+              "worst_case_drop": 0.0017738432789414088,
+              "flips_sign_groups": 0,
+              "conclusion_survives_any_single_removal": true
+            },
+            "leave_one_stock_out": {
+              "by": "stock_id",
+              "groups": 1576,
+              "full_mean": 0.006996392355245272,
+              "most_influential_group": "6861",
+              "mean_without_it": 0.0066883962010215285,
+              "worst_case_drop": 0.00030799615422374364,
+              "flips_sign_groups": 0,
+              "conclusion_survives_any_single_removal": true
+            }
+          },
+          "120": {
+            "events_raw": 28259,
+            "events_deduplicated": 9043,
+            "duplicate_share": 0.68,
+            "car_mean_raw_pct": 0.6096,
+            "car_mean_deduplicated_pct": 0.6705,
+            "car_median_deduplicated_pct": -7.1333,
+            "block_sensitivity": {
+              "5": 0.16,
+              "20": 0.205,
+              "40": 0.255,
+              "60": 0.355,
+              "120": 0.26
+            },
+            "p_range_across_blocks": 0.195,
+            "verdict_stable_across_blocks": true,
+            "stationary_bootstrap_p": 0.325,
+            "economic_threshold_pct": 2.185,
+            "exceeds_economic_threshold": false,
+            "p_vs_economic_threshold": 0.985,
+            "verdict": "rejected",
+            "tail_raw": {
+              "events": 28259,
+              "tail_events": 1413,
+              "top_fraction": 0.05,
+              "tail_share_of_sum": 11.030379375281205,
+              "distinct_stocks": 458,
+              "distinct_stock_ratio": 0.32413305024769995,
+              "largest_stock_share": 0.010615711252653927,
+              "stock_hhi": 0.00359566836908717,
+              "distinct_years": 12,
+              "top_year": 2025,
+              "top_year_share": 0.251238499646143
+            },
+            "tail_deduplicated": {
+              "events": 9043,
+              "tail_events": 452,
+              "top_fraction": 0.05,
+              "tail_share_of_sum": 9.561508840735016,
+              "distinct_stocks": 352,
+              "distinct_stock_ratio": 0.7787610619469026,
+              "largest_stock_share": 0.008849557522123894,
+              "stock_hhi": 0.0033479520714229777,
+              "distinct_years": 12,
+              "top_year": 2025,
+              "top_year_share": 0.2323008849557522
+            },
+            "leave_one_year_out": {
+              "by": "year",
+              "groups": 12,
+              "full_mean": 0.006704508847874354,
+              "most_influential_group": 2025,
+              "mean_without_it": 0.0006668957812185798,
+              "worst_case_drop": 0.006037613066655774,
+              "flips_sign_groups": 0,
+              "conclusion_survives_any_single_removal": true
+            },
+            "leave_one_stock_out": {
+              "by": "stock_id",
+              "groups": 1561,
+              "full_mean": 0.006704508847874354,
+              "most_influential_group": "3228",
+              "mean_without_it": 0.0056764893358897716,
+              "worst_case_drop": 0.0010280195119845821,
+              "flips_sign_groups": 0,
+              "conclusion_survives_any_single_removal": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "event_set": "H05_invest_streak",
+      "raw_events": 58327,
+      "raw_distinct_dates": 2793,
+      "benchmarks": {
+        "0050_total_return": {
+          "60": {
+            "events_raw": 56361,
+            "events_deduplicated": 12770,
+            "duplicate_share": 0.7734,
+            "car_mean_raw_pct": 0.9776,
+            "car_mean_deduplicated_pct": 0.4646,
+            "car_median_deduplicated_pct": -3.7408,
+            "block_sensitivity": {
+              "5": 0.58,
+              "20": 0.775,
+              "40": 0.92,
+              "60": 0.99,
+              "120": 0.85
+            },
+            "p_range_across_blocks": 0.41,
+            "verdict_stable_across_blocks": true,
+            "stationary_bootstrap_p": 0.82,
+            "economic_threshold_pct": 2.185,
+            "exceeds_economic_threshold": false,
+            "p_vs_economic_threshold": 0.8375,
+            "verdict": "rejected",
+            "tail_raw": {
+              "events": 56361,
+              "tail_events": 2818,
+              "top_fraction": 0.05,
+              "tail_share_of_sum": 4.32870685506717,
+              "distinct_stocks": 527,
+              "distinct_stock_ratio": 0.18701206529453512,
+              "largest_stock_share": 0.01312987934705465,
+              "stock_hhi": 0.004014041337221281,
+              "distinct_years": 12,
+              "top_year": 2025,
+              "top_year_share": 0.5014194464158978
+            },
+            "tail_deduplicated": {
+              "events": 12770,
+              "tail_events": 638,
+              "top_fraction": 0.05,
+              "tail_share_of_sum": 9.062969676248485,
+              "distinct_stocks": 433,
+              "distinct_stock_ratio": 0.6786833855799373,
+              "largest_stock_share": 0.007836990595611285,
+              "stock_hhi": 0.0030316132899637386,
+              "distinct_years": 12,
+              "top_year": 2025,
+              "top_year_share": 0.5172413793103449
+            },
+            "leave_one_year_out": {
+              "by": "year",
+              "groups": 12,
+              "full_mean": 0.0046464131645871445,
+              "most_influential_group": 2025,
+              "mean_without_it": -0.00887070871395393,
+              "worst_case_drop": 0.013517121878541075,
+              "flips_sign_groups": 1,
+              "conclusion_survives_any_single_removal": false
+            },
+            "leave_one_stock_out": {
+              "by": "stock_id",
+              "groups": 1149,
+              "full_mean": 0.0046464131645871445,
+              "most_influential_group": "2345",
+              "mean_without_it": 0.004229348028427927,
+              "worst_case_drop": 0.0004170651361592179,
+              "flips_sign_groups": 0,
+              "conclusion_survives_any_single_removal": true
+            }
+          },
+          "120": {
+            "events_raw": 54915,
+            "events_deduplicated": 8005,
+            "duplicate_share": 0.8542,
+            "car_mean_raw_pct": 1.7118,
+            "car_mean_deduplicated_pct": 0.3599,
+            "car_median_deduplicated_pct": -6.3049,
+            "block_sensitivity": {
+              "5": 0.775,
+              "20": 0.98,
+              "40": 1.0,
+              "60": 1.0,
+              "120": 0.96
+            },
+            "p_range_across_blocks": 0.225,
+            "verdict_stable_across_blocks": true,
+            "stationary_bootstrap_p": 0.925,
+            "economic_threshold_pct": 2.185,
+            "exceeds_economic_threshold": false,
+            "p_vs_economic_threshold": 0.705,
+            "verdict": "rejected",
+            "tail_raw": {
+              "events": 54915,
+              "tail_events": 2746,
+              "top_fraction": 0.05,
+              "tail_share_of_sum": 3.7034946067756196,
+              "distinct_stocks": 379,
+              "distinct_stock_ratio": 0.13801893663510562,
+              "largest_stock_share": 0.02002913328477786,
+              "stock_hhi": 0.0064141499069824935,
+              "distinct_years": 12,
+              "top_year": 2025,
+              "top_year_share": 0.4959941733430444
+            },
+            "tail_deduplicated": {
+              "events": 8005,
+              "tail_events": 400,
+              "top_fraction": 0.05,
+              "tail_share_of_sum": 16.624831300135387,
+              "distinct_stocks": 291,
+              "distinct_stock_ratio": 0.7275,
+              "largest_stock_share": 0.01,
+              "stock_hhi": 0.004237500000000002,
+              "distinct_years": 12,
+              "top_year": 2025,
+              "top_year_share": 0.445
+            },
+            "leave_one_year_out": {
+              "by": "year",
+              "groups": 12,
+              "full_mean": 0.0035985519859851605,
+              "most_influential_group": 2025,
+              "mean_without_it": -0.021639546010703694,
+              "worst_case_drop": 0.025238097996688854,
+              "flips_sign_groups": 2,
+              "conclusion_survives_any_single_removal": false
+            },
+            "leave_one_stock_out": {
+              "by": "stock_id",
+              "groups": 1140,
+              "full_mean": 0.0035985519859851605,
+              "most_influential_group": "2337",
+              "mean_without_it": 0.002863081695298192,
+              "worst_case_drop": 0.0007354702906869686,
+              "flips_sign_groups": 0,
+              "conclusion_survives_any_single_removal": true
+            }
+          }
+        },
+        "equal_weight_universe": {
+          "60": {
+            "events_raw": 56605,
+            "events_deduplicated": 12781,
+            "duplicate_share": 0.7742,
+            "car_mean_raw_pct": 0.9039,
+            "car_mean_deduplicated_pct": 0.3971,
+            "car_median_deduplicated_pct": -3.4252,
+            "block_sensitivity": {
+              "5": 0.08,
+              "20": 0.175,
+              "40": 0.225,
+              "60": 0.29,
+              "120": 0.285
+            },
+            "p_range_across_blocks": 0.21,
+            "verdict_stable_across_blocks": true,
+            "stationary_bootstrap_p": 0.285,
+            "economic_threshold_pct": 2.185,
+            "exceeds_economic_threshold": false,
+            "p_vs_economic_threshold": 1.0,
+            "verdict": "rejected",
+            "tail_raw": {
+              "events": 56605,
+              "tail_events": 2830,
+              "top_fraction": 0.05,
+              "tail_share_of_sum": 3.9445566574933997,
+              "distinct_stocks": 424,
+              "distinct_stock_ratio": 0.14982332155477032,
+              "largest_stock_share": 0.01625441696113074,
+              "stock_hhi": 0.005504376381275829,
+              "distinct_years": 12,
+              "top_year": 2025,
+              "top_year_share": 0.17985865724381625
+            },
+            "tail_deduplicated": {
+              "events": 12781,
+              "tail_events": 639,
+              "top_fraction": 0.05,
+              "tail_share_of_sum": 8.816991318725545,
+              "distinct_stocks": 353,
+              "distinct_stock_ratio": 0.5524256651017214,
+              "largest_stock_share": 0.010954616588419406,
+              "stock_hhi": 0.004082572289938553,
+              "distinct_years": 12,
+              "top_year": 2025,
+              "top_year_share": 0.14710485133020346
+            },
+            "leave_one_year_out": {
+              "by": "year",
+              "groups": 12,
+              "full_mean": 0.00397106775717619,
+              "most_influential_group": 2026,
+              "mean_without_it": 0.001490463950328092,
+              "worst_case_drop": 0.0024806038068480975,
+              "flips_sign_groups": 0,
+              "conclusion_survives_any_single_removal": true
+            },
+            "leave_one_stock_out": {
+              "by": "stock_id",
+              "groups": 1149,
+              "full_mean": 0.00397106775717619,
+              "most_influential_group": "3661",
+              "mean_without_it": 0.003566439647001079,
+              "worst_case_drop": 0.000404628110175111,
+              "flips_sign_groups": 0,
+              "conclusion_survives_any_single_removal": true
+            }
+          },
+          "120": {
+            "events_raw": 55171,
+            "events_deduplicated": 8014,
+            "duplicate_share": 0.8547,
+            "car_mean_raw_pct": 1.1295,
+            "car_mean_deduplicated_pct": 0.148,
+            "car_median_deduplicated_pct": -6.2128,
+            "block_sensitivity": {
+              "5": 0.725,
+              "20": 0.77,
+              "40": 0.885,
+              "60": 0.865,
+              "120": 0.87
+            },
+            "p_range_across_blocks": 0.16,
+            "verdict_stable_across_blocks": true,
+            "stationary_bootstrap_p": 0.865,
+            "economic_threshold_pct": 2.185,
+            "exceeds_economic_threshold": false,
+            "p_vs_economic_threshold": 0.9925,
+            "verdict": "rejected",
+            "tail_raw": {
+              "events": 55171,
+              "tail_events": 2759,
+              "top_fraction": 0.05,
+              "tail_share_of_sum": 5.183812619717773,
+              "distinct_stocks": 352,
+              "distinct_stock_ratio": 0.12758245741210583,
+              "largest_stock_share": 0.021747009786154403,
+              "stock_hhi": 0.00748822825190641,
+              "distinct_years": 12,
+              "top_year": 2025,
+              "top_year_share": 0.3098948894527003
+            },
+            "tail_deduplicated": {
+              "events": 8014,
+              "tail_events": 401,
+              "top_fraction": 0.05,
+              "tail_share_of_sum": 37.9193715481493,
+              "distinct_stocks": 279,
+              "distinct_stock_ratio": 0.6957605985037406,
+              "largest_stock_share": 0.012468827930174564,
+              "stock_hhi": 0.004608180297386211,
+              "distinct_years": 12,
+              "top_year": 2025,
+              "top_year_share": 0.24438902743142144
+            },
+            "leave_one_year_out": {
+              "by": "year",
+              "groups": 12,
+              "full_mean": 0.0014798209503626013,
+              "most_influential_group": 2025,
+              "mean_without_it": -0.004434757115699843,
+              "worst_case_drop": 0.005914578066062444,
+              "flips_sign_groups": 1,
+              "conclusion_survives_any_single_removal": false
+            },
+            "leave_one_stock_out": {
+              "by": "stock_id",
+              "groups": 1141,
+              "full_mean": 0.0014798209503626013,
+              "most_influential_group": "8046",
+              "mean_without_it": 0.0007718080538171461,
+              "worst_case_drop": 0.0007080128965454552,
+              "flips_sign_groups": 0,
+              "conclusion_survives_any_single_removal": true
+            }
+          }
+        }
+      }
+    }
+  ]
+}

@@ -38,6 +38,9 @@ class Broker:
     def submit_entries(self, picks: list[dict], on_date: date) -> list[dict]:
         raise NotImplementedError
 
+    def submit_reentries(self, candidates, on_date: date) -> list[dict]:
+        return []
+
     def disconnect(self):
         pass
 
@@ -57,6 +60,10 @@ class PaperBroker(Broker):
     def submit_entries(self, picks: list[dict], on_date: date) -> list[dict]:
         from agent.portfolio import queue_entries
         return queue_entries(picks, on_date)
+
+    def submit_reentries(self, candidates, on_date: date) -> list[dict]:
+        from agent.portfolio import queue_reentries
+        return queue_reentries(candidates, on_date)
 
 
 class ShioajiBroker(Broker):

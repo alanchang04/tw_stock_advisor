@@ -24,6 +24,7 @@ def get_engine():
             DBConfig.url(),
             pool_size=5,
             max_overflow=10,
+            connect_args={"connect_timeout": 5},
             pool_pre_ping=True,      # 自動重連
             echo=False,
         )

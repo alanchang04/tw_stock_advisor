@@ -1,0 +1,388 @@
+{
+  "study": "H11b — revenue signal replicated on the information-availability clock",
+  "track": "discovery / development (M22) — NOT an out-of-sample confirmation",
+  "only_change_vs_h11": "decision/execution moved from the month end of the disclosure month to the open of the first session strictly after the statutory deadline (M23)",
+  "unchanged_vs_h11": [
+    "revenue definition",
+    "universe",
+    "liquidity screen",
+    "size control",
+    "benchmark",
+    "horizons",
+    "newey_west_lags",
+    "transaction cost"
+  ],
+  "execution_rule": "research.information_clock:earliest_executable_session",
+  "entry_price": "adjusted open of the execution session",
+  "newey_west_lags": 6,
+  "horizons_months": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6
+  ],
+  "grid_points": 138,
+  "grid_first": "2015-02-11",
+  "grid_last": "2026-07-13",
+  "prior_expectation": "phenomenon expected to hold (~+0.84%/month early window); economic significance expected to remain BELOW the 1.0% safety threshold. A large overshoot should be treated as an implementation bug first.",
+  "results": [
+    {
+      "signal": "rev_yoy_positive",
+      "specification": "raw",
+      "controls": [],
+      "observations": 98344,
+      "treated_observations": 60080,
+      "grid_points": 137,
+      "path": [
+        {
+          "horizon_months": 1,
+          "periods": 136,
+          "mean_pct": 1.7231,
+          "se_pct": 0.1779,
+          "t_stat": 9.684,
+          "p_value": 0.0
+        },
+        {
+          "horizon_months": 2,
+          "periods": 135,
+          "mean_pct": 0.7151,
+          "se_pct": 0.1786,
+          "t_stat": 4.003,
+          "p_value": 0.0001
+        },
+        {
+          "horizon_months": 3,
+          "periods": 134,
+          "mean_pct": 0.5854,
+          "se_pct": 0.1489,
+          "t_stat": 3.932,
+          "p_value": 0.0001
+        },
+        {
+          "horizon_months": 4,
+          "periods": 133,
+          "mean_pct": 0.3073,
+          "se_pct": 0.1442,
+          "t_stat": 2.13,
+          "p_value": 0.0332
+        },
+        {
+          "horizon_months": 5,
+          "periods": 132,
+          "mean_pct": 0.2733,
+          "se_pct": 0.1571,
+          "t_stat": 1.74,
+          "p_value": 0.0819
+        },
+        {
+          "horizon_months": 6,
+          "periods": 131,
+          "mean_pct": 0.1084,
+          "se_pct": 0.144,
+          "t_stat": 0.753,
+          "p_value": 0.4514
+        }
+      ],
+      "cumulative_6m": {
+        "periods": 131,
+        "mean_pct": 3.4579,
+        "se_pct": 0.6184,
+        "t_stat": 5.591,
+        "p_value": 0.0
+      }
+    },
+    {
+      "signal": "rev_yoy_positive",
+      "specification": "size_controlled",
+      "controls": [
+        "log_size"
+      ],
+      "observations": 98344,
+      "treated_observations": 60080,
+      "grid_points": 137,
+      "path": [
+        {
+          "horizon_months": 1,
+          "periods": 136,
+          "mean_pct": 1.6786,
+          "se_pct": 0.1483,
+          "t_stat": 11.318,
+          "p_value": 0.0
+        },
+        {
+          "horizon_months": 2,
+          "periods": 135,
+          "mean_pct": 0.6609,
+          "se_pct": 0.1446,
+          "t_stat": 4.571,
+          "p_value": 0.0
+        },
+        {
+          "horizon_months": 3,
+          "periods": 134,
+          "mean_pct": 0.5293,
+          "se_pct": 0.1202,
+          "t_stat": 4.405,
+          "p_value": 0.0
+        },
+        {
+          "horizon_months": 4,
+          "periods": 133,
+          "mean_pct": 0.258,
+          "se_pct": 0.1199,
+          "t_stat": 2.152,
+          "p_value": 0.0314
+        },
+        {
+          "horizon_months": 5,
+          "periods": 132,
+          "mean_pct": 0.2244,
+          "se_pct": 0.131,
+          "t_stat": 1.713,
+          "p_value": 0.0867
+        },
+        {
+          "horizon_months": 6,
+          "periods": 131,
+          "mean_pct": 0.0681,
+          "se_pct": 0.1219,
+          "t_stat": 0.559,
+          "p_value": 0.5763
+        }
+      ],
+      "cumulative_6m": {
+        "periods": 131,
+        "mean_pct": 3.2507,
+        "se_pct": 0.475,
+        "t_stat": 6.843,
+        "p_value": 0.0
+      },
+      "deployable": {
+        "horizons": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "path": [
+          {
+            "horizon_months": 1,
+            "mean_pct": 0.6758,
+            "t_stat": 9.135,
+            "treated_fraction": 0.6063
+          },
+          {
+            "horizon_months": 2,
+            "mean_pct": 0.28,
+            "t_stat": 4.057,
+            "treated_fraction": 0.605
+          },
+          {
+            "horizon_months": 3,
+            "mean_pct": 0.2374,
+            "t_stat": 4.072,
+            "treated_fraction": 0.6039
+          },
+          {
+            "horizon_months": 4,
+            "mean_pct": 0.122,
+            "t_stat": 2.21,
+            "treated_fraction": 0.603
+          }
+        ],
+        "gross_pct": 1.3152,
+        "round_trip_cost_pct": 1.185,
+        "net_pct": 0.1302,
+        "economic_threshold_pct": 2.185,
+        "clears_threshold": false
+      },
+      "leave_one_year_out": {
+        "years": 12,
+        "survives": true,
+        "flips_sign_groups": 0,
+        "most_influential_year": 2021,
+        "mean_without_it_pct": -1.6064
+      }
+    },
+    {
+      "signal": "rev_yoy_over_20",
+      "specification": "raw",
+      "controls": [],
+      "observations": 98344,
+      "treated_observations": 30418,
+      "grid_points": 137,
+      "path": [
+        {
+          "horizon_months": 1,
+          "periods": 136,
+          "mean_pct": 1.7033,
+          "se_pct": 0.208,
+          "t_stat": 8.189,
+          "p_value": 0.0
+        },
+        {
+          "horizon_months": 2,
+          "periods": 135,
+          "mean_pct": 0.6826,
+          "se_pct": 0.1817,
+          "t_stat": 3.757,
+          "p_value": 0.0002
+        },
+        {
+          "horizon_months": 3,
+          "periods": 134,
+          "mean_pct": 0.5568,
+          "se_pct": 0.1736,
+          "t_stat": 3.208,
+          "p_value": 0.0013
+        },
+        {
+          "horizon_months": 4,
+          "periods": 133,
+          "mean_pct": 0.2572,
+          "se_pct": 0.1672,
+          "t_stat": 1.538,
+          "p_value": 0.1239
+        },
+        {
+          "horizon_months": 5,
+          "periods": 132,
+          "mean_pct": 0.0494,
+          "se_pct": 0.1395,
+          "t_stat": 0.354,
+          "p_value": 0.7232
+        },
+        {
+          "horizon_months": 6,
+          "periods": 131,
+          "mean_pct": -0.0965,
+          "se_pct": 0.1379,
+          "t_stat": -0.7,
+          "p_value": 0.4841
+        }
+      ],
+      "cumulative_6m": {
+        "periods": 131,
+        "mean_pct": 3.0949,
+        "se_pct": 0.7278,
+        "t_stat": 4.253,
+        "p_value": 0.0
+      }
+    },
+    {
+      "signal": "rev_yoy_over_20",
+      "specification": "size_controlled",
+      "controls": [
+        "log_size"
+      ],
+      "observations": 98344,
+      "treated_observations": 30418,
+      "grid_points": 137,
+      "path": [
+        {
+          "horizon_months": 1,
+          "periods": 136,
+          "mean_pct": 1.6505,
+          "se_pct": 0.1792,
+          "t_stat": 9.212,
+          "p_value": 0.0
+        },
+        {
+          "horizon_months": 2,
+          "periods": 135,
+          "mean_pct": 0.6256,
+          "se_pct": 0.1545,
+          "t_stat": 4.048,
+          "p_value": 0.0001
+        },
+        {
+          "horizon_months": 3,
+          "periods": 134,
+          "mean_pct": 0.5089,
+          "se_pct": 0.1454,
+          "t_stat": 3.501,
+          "p_value": 0.0005
+        },
+        {
+          "horizon_months": 4,
+          "periods": 133,
+          "mean_pct": 0.2115,
+          "se_pct": 0.1472,
+          "t_stat": 1.437,
+          "p_value": 0.1507
+        },
+        {
+          "horizon_months": 5,
+          "periods": 132,
+          "mean_pct": -0.0079,
+          "se_pct": 0.1166,
+          "t_stat": -0.067,
+          "p_value": 0.9463
+        },
+        {
+          "horizon_months": 6,
+          "periods": 131,
+          "mean_pct": -0.1414,
+          "se_pct": 0.1345,
+          "t_stat": -1.051,
+          "p_value": 0.2933
+        }
+      ],
+      "cumulative_6m": {
+        "periods": 131,
+        "mean_pct": 2.8778,
+        "se_pct": 0.581,
+        "t_stat": 4.953,
+        "p_value": 0.0
+      },
+      "deployable": {
+        "horizons": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "path": [
+          {
+            "horizon_months": 1,
+            "mean_pct": 1.1883,
+            "t_stat": 8.154,
+            "treated_fraction": 0.3019
+          },
+          {
+            "horizon_months": 2,
+            "mean_pct": 0.4637,
+            "t_stat": 3.689,
+            "treated_fraction": 0.3007
+          },
+          {
+            "horizon_months": 3,
+            "mean_pct": 0.4161,
+            "t_stat": 3.43,
+            "treated_fraction": 0.2998
+          },
+          {
+            "horizon_months": 4,
+            "mean_pct": 0.1864,
+            "t_stat": 1.636,
+            "treated_fraction": 0.2991
+          }
+        ],
+        "gross_pct": 2.2546,
+        "round_trip_cost_pct": 1.185,
+        "net_pct": 1.0696,
+        "economic_threshold_pct": 2.185,
+        "clears_threshold": true
+      },
+      "leave_one_year_out": {
+        "years": 12,
+        "survives": true,
+        "flips_sign_groups": 0,
+        "most_influential_year": 2021,
+        "mean_without_it_pct": -1.6064
+      }
+    }
+  ]
+}

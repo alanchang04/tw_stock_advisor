@@ -1,0 +1,715 @@
+{
+  "study": "monthly Fama-MacBeth response path (M7)",
+  "amendments": "docs/RESEARCH_METHOD_AMENDMENTS.md",
+  "design": "cross-sectional regression each month on a single-month forward excess return; horizons are non-overlapping by construction, so the 120-day overlap problem does not arise",
+  "benchmark_note": "the per-period intercept absorbs any return component common to all stocks, so the factor coefficient is identical under a 0050 or an equal-weight benchmark; benchmark choice matters for portfolio-level claims only, which run_method_audit.py reports under both",
+  "newey_west_lags": 6,
+  "horizons_months": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6
+  ],
+  "new_trials": 0,
+  "results": [
+    {
+      "signal": "rev_yoy_over_20",
+      "specification": "raw",
+      "controls": [],
+      "observations": 99161,
+      "treated_observations": 31329,
+      "months": 138,
+      "path": [
+        {
+          "horizon_months": 1,
+          "months": 137,
+          "mean_pct": 0.8982,
+          "se_pct": 0.1682,
+          "t_stat": 5.341,
+          "p_value": 0.0
+        },
+        {
+          "horizon_months": 2,
+          "months": 136,
+          "mean_pct": 0.7314,
+          "se_pct": 0.1831,
+          "t_stat": 3.994,
+          "p_value": 0.0001
+        },
+        {
+          "horizon_months": 3,
+          "months": 135,
+          "mean_pct": 0.4717,
+          "se_pct": 0.1718,
+          "t_stat": 2.745,
+          "p_value": 0.006
+        },
+        {
+          "horizon_months": 4,
+          "months": 134,
+          "mean_pct": 0.2162,
+          "se_pct": 0.1611,
+          "t_stat": 1.342,
+          "p_value": 0.1797
+        },
+        {
+          "horizon_months": 5,
+          "months": 133,
+          "mean_pct": -0.1777,
+          "se_pct": 0.1288,
+          "t_stat": -1.38,
+          "p_value": 0.1676
+        },
+        {
+          "horizon_months": 6,
+          "months": 132,
+          "mean_pct": -0.1698,
+          "se_pct": 0.1371,
+          "t_stat": -1.239,
+          "p_value": 0.2155
+        }
+      ],
+      "cumulative_6m": {
+        "months": 132,
+        "months_dropped": 5,
+        "mean_pct": 2.0178,
+        "se_pct": 0.7018,
+        "t_stat": 2.875,
+        "p_value": 0.004
+      },
+      "deployable_long_only_4m": {
+        "horizons": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "path": [
+          {
+            "horizon_months": 1,
+            "mean_pct": 0.6258,
+            "t_stat": 5.245,
+            "treated_fraction": 0.3087
+          },
+          {
+            "horizon_months": 2,
+            "mean_pct": 0.5222,
+            "t_stat": 4.031,
+            "treated_fraction": 0.3075
+          },
+          {
+            "horizon_months": 3,
+            "mean_pct": 0.3446,
+            "t_stat": 2.921,
+            "treated_fraction": 0.3066
+          },
+          {
+            "horizon_months": 4,
+            "mean_pct": 0.1525,
+            "t_stat": 1.355,
+            "treated_fraction": 0.3058
+          }
+        ],
+        "gross_pct": 1.6451,
+        "round_trip_cost_pct": 1.185,
+        "net_pct": 0.4601,
+        "economic_threshold_pct": 2.185,
+        "clears_threshold": false
+      },
+      "leave_one_year_out": {
+        "by": "year",
+        "groups": 12,
+        "full_mean": 0.020178010753921352,
+        "most_influential_group": 2025,
+        "mean_without_it": 0.01524394970922005,
+        "worst_case_drop": 0.004934061044701302,
+        "flips_sign_groups": 0,
+        "conclusion_survives_any_single_removal": true
+      }
+    },
+    {
+      "signal": "rev_yoy_over_20",
+      "specification": "size_controlled",
+      "controls": [
+        "log_size"
+      ],
+      "observations": 99161,
+      "treated_observations": 31329,
+      "months": 138,
+      "path": [
+        {
+          "horizon_months": 1,
+          "months": 137,
+          "mean_pct": 0.8239,
+          "se_pct": 0.1435,
+          "t_stat": 5.742,
+          "p_value": 0.0
+        },
+        {
+          "horizon_months": 2,
+          "months": 136,
+          "mean_pct": 0.6865,
+          "se_pct": 0.1551,
+          "t_stat": 4.425,
+          "p_value": 0.0
+        },
+        {
+          "horizon_months": 3,
+          "months": 135,
+          "mean_pct": 0.4363,
+          "se_pct": 0.1479,
+          "t_stat": 2.951,
+          "p_value": 0.0032
+        },
+        {
+          "horizon_months": 4,
+          "months": 134,
+          "mean_pct": 0.1729,
+          "se_pct": 0.1404,
+          "t_stat": 1.232,
+          "p_value": 0.218
+        },
+        {
+          "horizon_months": 5,
+          "months": 133,
+          "mean_pct": -0.2227,
+          "se_pct": 0.1218,
+          "t_stat": -1.829,
+          "p_value": 0.0674
+        },
+        {
+          "horizon_months": 6,
+          "months": 132,
+          "mean_pct": -0.2025,
+          "se_pct": 0.1384,
+          "t_stat": -1.464,
+          "p_value": 0.1433
+        }
+      ],
+      "cumulative_6m": {
+        "months": 132,
+        "months_dropped": 5,
+        "mean_pct": 1.7715,
+        "se_pct": 0.584,
+        "t_stat": 3.033,
+        "p_value": 0.0024
+      },
+      "deployable_long_only_4m": {
+        "horizons": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "path": [
+          {
+            "horizon_months": 1,
+            "mean_pct": 0.6258,
+            "t_stat": 5.245,
+            "treated_fraction": 0.3087
+          },
+          {
+            "horizon_months": 2,
+            "mean_pct": 0.5222,
+            "t_stat": 4.031,
+            "treated_fraction": 0.3075
+          },
+          {
+            "horizon_months": 3,
+            "mean_pct": 0.3446,
+            "t_stat": 2.921,
+            "treated_fraction": 0.3066
+          },
+          {
+            "horizon_months": 4,
+            "mean_pct": 0.1525,
+            "t_stat": 1.355,
+            "treated_fraction": 0.3058
+          }
+        ],
+        "gross_pct": 1.6451,
+        "round_trip_cost_pct": 1.185,
+        "net_pct": 0.4601,
+        "economic_threshold_pct": 2.185,
+        "clears_threshold": false
+      },
+      "leave_one_year_out": {
+        "by": "year",
+        "groups": 12,
+        "full_mean": 0.0177146450662651,
+        "most_influential_group": 2017,
+        "mean_without_it": 0.01508994642091644,
+        "worst_case_drop": 0.002624698645348658,
+        "flips_sign_groups": 0,
+        "conclusion_survives_any_single_removal": true
+      }
+    },
+    {
+      "signal": "rev_yoy_positive",
+      "specification": "raw",
+      "controls": [],
+      "observations": 99161,
+      "treated_observations": 61351,
+      "months": 138,
+      "path": [
+        {
+          "horizon_months": 1,
+          "months": 137,
+          "mean_pct": 0.9968,
+          "se_pct": 0.1684,
+          "t_stat": 5.919,
+          "p_value": 0.0
+        },
+        {
+          "horizon_months": 2,
+          "months": 136,
+          "mean_pct": 0.8167,
+          "se_pct": 0.1551,
+          "t_stat": 5.267,
+          "p_value": 0.0
+        },
+        {
+          "horizon_months": 3,
+          "months": 135,
+          "mean_pct": 0.5249,
+          "se_pct": 0.1744,
+          "t_stat": 3.01,
+          "p_value": 0.0026
+        },
+        {
+          "horizon_months": 4,
+          "months": 134,
+          "mean_pct": 0.323,
+          "se_pct": 0.156,
+          "t_stat": 2.07,
+          "p_value": 0.0384
+        },
+        {
+          "horizon_months": 5,
+          "months": 133,
+          "mean_pct": 0.0954,
+          "se_pct": 0.1363,
+          "t_stat": 0.7,
+          "p_value": 0.484
+        },
+        {
+          "horizon_months": 6,
+          "months": 132,
+          "mean_pct": 0.0514,
+          "se_pct": 0.1421,
+          "t_stat": 0.362,
+          "p_value": 0.7176
+        }
+      ],
+      "cumulative_6m": {
+        "months": 132,
+        "months_dropped": 5,
+        "mean_pct": 2.6718,
+        "se_pct": 0.6365,
+        "t_stat": 4.198,
+        "p_value": 0.0
+      },
+      "deployable_long_only_4m": {
+        "horizons": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "path": [
+          {
+            "horizon_months": 1,
+            "mean_pct": 0.3966,
+            "t_stat": 5.638,
+            "treated_fraction": 0.6144
+          },
+          {
+            "horizon_months": 2,
+            "mean_pct": 0.3185,
+            "t_stat": 5.1,
+            "treated_fraction": 0.6132
+          },
+          {
+            "horizon_months": 3,
+            "mean_pct": 0.2052,
+            "t_stat": 3.132,
+            "treated_fraction": 0.6121
+          },
+          {
+            "horizon_months": 4,
+            "mean_pct": 0.1232,
+            "t_stat": 1.961,
+            "treated_fraction": 0.6111
+          }
+        ],
+        "gross_pct": 1.0436,
+        "round_trip_cost_pct": 1.185,
+        "net_pct": -0.1414,
+        "economic_threshold_pct": 2.185,
+        "clears_threshold": false
+      },
+      "leave_one_year_out": {
+        "by": "year",
+        "groups": 12,
+        "full_mean": 0.026718314349340383,
+        "most_influential_group": 2025,
+        "mean_without_it": 0.02170645490786615,
+        "worst_case_drop": 0.005011859441474233,
+        "flips_sign_groups": 0,
+        "conclusion_survives_any_single_removal": true
+      }
+    },
+    {
+      "signal": "rev_yoy_positive",
+      "specification": "size_controlled",
+      "controls": [
+        "log_size"
+      ],
+      "observations": 99161,
+      "treated_observations": 61351,
+      "months": 138,
+      "path": [
+        {
+          "horizon_months": 1,
+          "months": 137,
+          "mean_pct": 0.9362,
+          "se_pct": 0.1365,
+          "t_stat": 6.857,
+          "p_value": 0.0
+        },
+        {
+          "horizon_months": 2,
+          "months": 136,
+          "mean_pct": 0.7761,
+          "se_pct": 0.1239,
+          "t_stat": 6.266,
+          "p_value": 0.0
+        },
+        {
+          "horizon_months": 3,
+          "months": 135,
+          "mean_pct": 0.4766,
+          "se_pct": 0.1422,
+          "t_stat": 3.352,
+          "p_value": 0.0008
+        },
+        {
+          "horizon_months": 4,
+          "months": 134,
+          "mean_pct": 0.2841,
+          "se_pct": 0.1304,
+          "t_stat": 2.179,
+          "p_value": 0.0293
+        },
+        {
+          "horizon_months": 5,
+          "months": 133,
+          "mean_pct": 0.0653,
+          "se_pct": 0.1131,
+          "t_stat": 0.578,
+          "p_value": 0.5634
+        },
+        {
+          "horizon_months": 6,
+          "months": 132,
+          "mean_pct": 0.0165,
+          "se_pct": 0.1225,
+          "t_stat": 0.135,
+          "p_value": 0.8928
+        }
+      ],
+      "cumulative_6m": {
+        "months": 132,
+        "months_dropped": 5,
+        "mean_pct": 2.4397,
+        "se_pct": 0.4805,
+        "t_stat": 5.078,
+        "p_value": 0.0
+      },
+      "deployable_long_only_4m": {
+        "horizons": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "path": [
+          {
+            "horizon_months": 1,
+            "mean_pct": 0.3966,
+            "t_stat": 5.638,
+            "treated_fraction": 0.6144
+          },
+          {
+            "horizon_months": 2,
+            "mean_pct": 0.3185,
+            "t_stat": 5.1,
+            "treated_fraction": 0.6132
+          },
+          {
+            "horizon_months": 3,
+            "mean_pct": 0.2052,
+            "t_stat": 3.132,
+            "treated_fraction": 0.6121
+          },
+          {
+            "horizon_months": 4,
+            "mean_pct": 0.1232,
+            "t_stat": 1.961,
+            "treated_fraction": 0.6111
+          }
+        ],
+        "gross_pct": 1.0436,
+        "round_trip_cost_pct": 1.185,
+        "net_pct": -0.1414,
+        "economic_threshold_pct": 2.185,
+        "clears_threshold": false
+      },
+      "leave_one_year_out": {
+        "by": "year",
+        "groups": 12,
+        "full_mean": 0.024396908206992557,
+        "most_influential_group": 2017,
+        "mean_without_it": 0.02161090851533527,
+        "worst_case_drop": 0.002785999691657288,
+        "flips_sign_groups": 0,
+        "conclusion_survives_any_single_removal": true
+      }
+    },
+    {
+      "signal": "invest_streak",
+      "specification": "raw",
+      "controls": [],
+      "observations": 99161,
+      "treated_observations": 27599,
+      "months": 138,
+      "path": [
+        {
+          "horizon_months": 1,
+          "months": 137,
+          "mean_pct": 0.6052,
+          "se_pct": 0.1953,
+          "t_stat": 3.098,
+          "p_value": 0.0019
+        },
+        {
+          "horizon_months": 2,
+          "months": 136,
+          "mean_pct": 0.524,
+          "se_pct": 0.2041,
+          "t_stat": 2.568,
+          "p_value": 0.0102
+        },
+        {
+          "horizon_months": 3,
+          "months": 135,
+          "mean_pct": 0.5671,
+          "se_pct": 0.212,
+          "t_stat": 2.675,
+          "p_value": 0.0075
+        },
+        {
+          "horizon_months": 4,
+          "months": 134,
+          "mean_pct": 0.3593,
+          "se_pct": 0.1769,
+          "t_stat": 2.031,
+          "p_value": 0.0423
+        },
+        {
+          "horizon_months": 5,
+          "months": 133,
+          "mean_pct": 0.2894,
+          "se_pct": 0.1643,
+          "t_stat": 1.762,
+          "p_value": 0.0781
+        },
+        {
+          "horizon_months": 6,
+          "months": 132,
+          "mean_pct": 0.4417,
+          "se_pct": 0.1766,
+          "t_stat": 2.501,
+          "p_value": 0.0124
+        }
+      ],
+      "cumulative_6m": {
+        "months": 132,
+        "months_dropped": 5,
+        "mean_pct": 2.4968,
+        "se_pct": 0.8477,
+        "t_stat": 2.945,
+        "p_value": 0.0032
+      },
+      "deployable_long_only_4m": {
+        "horizons": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "path": [
+          {
+            "horizon_months": 1,
+            "mean_pct": 0.4429,
+            "t_stat": 3.128,
+            "treated_fraction": 0.2751
+          },
+          {
+            "horizon_months": 2,
+            "mean_pct": 0.3861,
+            "t_stat": 2.524,
+            "treated_fraction": 0.275
+          },
+          {
+            "horizon_months": 3,
+            "mean_pct": 0.4133,
+            "t_stat": 2.617,
+            "treated_fraction": 0.2748
+          },
+          {
+            "horizon_months": 4,
+            "mean_pct": 0.2606,
+            "t_stat": 1.976,
+            "treated_fraction": 0.2748
+          }
+        ],
+        "gross_pct": 1.5029,
+        "round_trip_cost_pct": 1.185,
+        "net_pct": 0.3179,
+        "economic_threshold_pct": 2.185,
+        "clears_threshold": false
+      },
+      "leave_one_year_out": {
+        "by": "year",
+        "groups": 12,
+        "full_mean": 0.02496849592135618,
+        "most_influential_group": 2025,
+        "mean_without_it": 0.015986566850184996,
+        "worst_case_drop": 0.008981929071171183,
+        "flips_sign_groups": 0,
+        "conclusion_survives_any_single_removal": true
+      }
+    },
+    {
+      "signal": "invest_streak",
+      "specification": "size_controlled",
+      "controls": [
+        "log_size"
+      ],
+      "observations": 99161,
+      "treated_observations": 27599,
+      "months": 138,
+      "path": [
+        {
+          "horizon_months": 1,
+          "months": 137,
+          "mean_pct": 0.4511,
+          "se_pct": 0.1789,
+          "t_stat": 2.521,
+          "p_value": 0.0117
+        },
+        {
+          "horizon_months": 2,
+          "months": 136,
+          "mean_pct": 0.3863,
+          "se_pct": 0.174,
+          "t_stat": 2.22,
+          "p_value": 0.0264
+        },
+        {
+          "horizon_months": 3,
+          "months": 135,
+          "mean_pct": 0.4431,
+          "se_pct": 0.1349,
+          "t_stat": 3.284,
+          "p_value": 0.001
+        },
+        {
+          "horizon_months": 4,
+          "months": 134,
+          "mean_pct": 0.243,
+          "se_pct": 0.1484,
+          "t_stat": 1.638,
+          "p_value": 0.1015
+        },
+        {
+          "horizon_months": 5,
+          "months": 133,
+          "mean_pct": 0.2151,
+          "se_pct": 0.1328,
+          "t_stat": 1.619,
+          "p_value": 0.1055
+        },
+        {
+          "horizon_months": 6,
+          "months": 132,
+          "mean_pct": 0.3752,
+          "se_pct": 0.1082,
+          "t_stat": 3.468,
+          "p_value": 0.0005
+        }
+      ],
+      "cumulative_6m": {
+        "months": 132,
+        "months_dropped": 5,
+        "mean_pct": 1.8113,
+        "se_pct": 0.5491,
+        "t_stat": 3.299,
+        "p_value": 0.001
+      },
+      "deployable_long_only_4m": {
+        "horizons": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "path": [
+          {
+            "horizon_months": 1,
+            "mean_pct": 0.4429,
+            "t_stat": 3.128,
+            "treated_fraction": 0.2751
+          },
+          {
+            "horizon_months": 2,
+            "mean_pct": 0.3861,
+            "t_stat": 2.524,
+            "treated_fraction": 0.275
+          },
+          {
+            "horizon_months": 3,
+            "mean_pct": 0.4133,
+            "t_stat": 2.617,
+            "treated_fraction": 0.2748
+          },
+          {
+            "horizon_months": 4,
+            "mean_pct": 0.2606,
+            "t_stat": 1.976,
+            "treated_fraction": 0.2748
+          }
+        ],
+        "gross_pct": 1.5029,
+        "round_trip_cost_pct": 1.185,
+        "net_pct": 0.3179,
+        "economic_threshold_pct": 2.185,
+        "clears_threshold": false
+      },
+      "leave_one_year_out": {
+        "by": "year",
+        "groups": 12,
+        "full_mean": 0.01811310908070237,
+        "most_influential_group": 2016,
+        "mean_without_it": 0.015405553610175557,
+        "worst_case_drop": 0.002707555470526814,
+        "flips_sign_groups": 0,
+        "conclusion_survives_any_single_removal": true
+      }
+    }
+  ],
+  "forward_returns_masked_by_future_eligibility": false
+}
