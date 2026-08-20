@@ -57,16 +57,30 @@ if st.session_state.auth_user is None:
 USER = st.session_state.auth_user   # {user_id, username, display_name, role}
 
 st.sidebar.title("📈 台股顧問")
-_pages = ["📊 首頁", "📋 每日排行", "📓 選股日誌", "📦 持倉追蹤", "🔖 追蹤清單", "🔎 個股分析",
-          "🎯 練習軌", "🔥 族群輪動", "🏦 法人動向", "📉 個股走勢", "🔄 歷史績效", "📰 市場情報",
-          "🧠 聰明資金", "🔍 決策軌跡", "⚖️ 策略比較", "🔬 研究進度"]
+# ④ 側邊欄分組（2026-08-20，依外部審閱建議）：原本 17 個入口平鋪，
+# 第一次打開看不出主要工作流。改為依用途分五組。
+#
+# **選項字串刻意一個字都沒改**——它是整份 app.py 的 `page == "..."` 比對鍵，
+# 也是 nav_goto 跨頁跳轉與 tests/test_app_pages_render.py 的識別碼，改了會同時
+# 動到三處。Streamlit 的 radio 不支援分組標題，但支援 captions，因此改用
+# 「依組別重新排序 + 每項標注組別」達成分群，行為完全不變。
+_PAGE_GROUPS = [
+    ("總覽", ["📊 首頁"]),
+    ("交易", ["📋 每日排行", "📦 持倉追蹤", "🔖 追蹤清單", "🔎 個股分析", "📓 選股日誌"]),
+    ("市場", ["🔥 族群輪動", "🏦 法人動向", "📉 個股走勢", "📰 市場情報", "🧠 聰明資金"]),
+    ("研究", ["🔄 歷史績效", "⚖️ 策略比較", "🔬 研究進度", "🔍 決策軌跡"]),
+    ("練習", ["🎯 練習軌"]),
+]
 if USER["role"] == "admin":
-    _pages.append("👤 帳號管理")
+    _PAGE_GROUPS.append(("管理", ["👤 帳號管理"]))
+
+_pages = [p for _, items in _PAGE_GROUPS for p in items]
+_page_captions = [g for g, items in _PAGE_GROUPS for _ in items]
 # 跨頁跳轉：清單頁的「📈 走勢」按鈕會設 nav_goto，這裡在 radio 建立「之前」套用，
 # 避免「widget 建立後不可改 session_state」的 Streamlit 限制（見清單頁的按鈕）。
 if st.session_state.get("nav_goto") in _pages:
     st.session_state["nav"] = st.session_state.pop("nav_goto")
-page = st.sidebar.radio("導覽", _pages, key="nav")
+page = st.sidebar.radio("導覽", _pages, captions=_page_captions, key="nav")
 
 _c1, _c2 = st.sidebar.columns([3, 1])
 _c1.caption(f"👤 {USER['display_name']}（{USER['role']}）")
