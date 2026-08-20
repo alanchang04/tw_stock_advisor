@@ -62,16 +62,27 @@ def main() -> None:
     capital = args.capital
     max_open = int(STRATEGY["max_open_positions"])
 
+    # ensure_paper_account() 內部會自己開一個 session。若在下面的 with 區塊裡呼叫，
+    # 外層交易會在等待期間閒置，Neon 的 idle-in-transaction timeout 會直接砍掉連線
+    # （2026-08-20 實測踩過）。所以先在任何交易之外把帳戶準備好。
+    if args.commit:
+        ensure_paper_account()
+
     with get_session() as session:
         session.execute(text(
             "ALTER TABLE positions ADD COLUMN IF NOT EXISTS shares_source VARCHAR(20)"))
 
         account_id = None
         if args.commit:
-            ensure_paper_account()
             row = session.execute(text(
                 "SELECT id FROM paper_accounts ORDER BY id LIMIT 1")).fetchone()
             account_id = int(row[0]) if row else None
+
+        # 使用者 2026-08-18 選定：三筆早於帳戶成立日的部位照掛（選項 a），
+        # 但必須在輸出裡看得出來——這個事實不能只存在於對話紀錄。
+        _acct = session.execute(text(
+            "SELECT started_at FROM paper_accounts ORDER BY id LIMIT 1")).fetchone()
+        started = _acct[0].date() if _acct and _acct[0] else None
 
         targets = session.execute(SELECT_TARGETS).fetchall()
         if not targets:
@@ -93,8 +104,11 @@ def main() -> None:
             cost = shares * price * (1 + FEE_RATE)
             cash -= cost
             total += cost
+            early = "  <- 早於帳戶成立日" if (
+                started and entry_date and entry_date < started) else ""
             print(f"{stock_id:>6} {str(entry_date):>12} {price:>11,.2f} "
-                  f"{shares:>9} {cost:>10,.0f} {cost / capital:>7.1%} {cash:>11,.0f}")
+                  f"{shares:>9} {cost:>10,.0f} {cost / capital:>7.1%} "
+                  f"{cash:>11,.0f}{early}")
 
             if args.commit and shares > 0:
                 session.execute(text("""
