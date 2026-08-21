@@ -10,6 +10,7 @@ from agent.strategy import FEE_RATE, STRATEGY
 from database.connection import get_session
 
 SWING_ACCOUNT_KEY = "swing"
+RECONSTRUCTED_CASH_MARKER = "reconstructed_cash_debit_v1"
 
 
 def live_entry_share_count(price: float, cash: float, nav: float, max_open: int,

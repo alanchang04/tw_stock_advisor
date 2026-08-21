@@ -14,6 +14,7 @@
   3. 依進場日順序遞減現金——`entry_share_count` 的 `slot_budget` 取
      `min(cash, nav/max_open)`，所以順序會影響結果，必須照實際進場順序重放。
   4. 一律寫入 `shares_source='reconstructed'`。
+  5. 寫入股數時在同一交易扣除帳戶現金並留下 adjustment 稽核流水。
 
 為什麼是 nav/max_open 而不是 capital/pick_top_n
 -----------------------------------------------
@@ -39,8 +40,11 @@ from sqlalchemy import text
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from agent.paper_account import ensure_paper_account  # noqa: E402
+from agent.paper_account import (RECONSTRUCTED_CASH_MARKER, SWING_ACCOUNT_KEY,
+                                 ensure_paper_account, marked_nav, record_cash,
+                                 update_account)  # noqa: E402
 from agent.strategy import FEE_RATE, STRATEGY, entry_share_count  # noqa: E402
+from config.settings import tw_today  # noqa: E402
 from database.connection import get_session  # noqa: E402
 
 SELECT_TARGETS = text("""
@@ -73,24 +77,39 @@ def main() -> None:
             "ALTER TABLE positions ADD COLUMN IF NOT EXISTS shares_source VARCHAR(20)"))
 
         account_id = None
+        account_cash = None
         if args.commit:
             row = session.execute(text(
-                "SELECT id FROM paper_accounts ORDER BY id LIMIT 1")).fetchone()
-            account_id = int(row[0]) if row else None
+                """SELECT id, initial_capital, cash, started_at
+                   FROM paper_accounts WHERE strategy_key=:key FOR UPDATE"""),
+                {"key": SWING_ACCOUNT_KEY}).fetchone()
+            if row is None:
+                raise RuntimeError("找不到 swing paper account")
+            account_id = int(row[0])
+            account_initial = float(row[1])
+            account_cash = float(row[2])
+            if abs(account_initial - capital) > 0.01:
+                raise RuntimeError(
+                    f"--capital {capital:,.2f} 與帳戶本金 {account_initial:,.2f} 不一致；拒絕寫入")
 
         # 使用者 2026-08-18 選定：三筆早於帳戶成立日的部位照掛（選項 a），
         # 但必須在輸出裡看得出來——這個事實不能只存在於對話紀錄。
-        _acct = session.execute(text(
-            "SELECT started_at FROM paper_accounts ORDER BY id LIMIT 1")).fetchone()
+        _acct = session.execute(text("""
+            SELECT started_at FROM paper_accounts WHERE strategy_key=:key
+        """), {"key": SWING_ACCOUNT_KEY}).fetchone()
         started = _acct[0].date() if _acct and _acct[0] else None
 
-        targets = session.execute(SELECT_TARGETS).fetchall()
+        targets_query = text(
+            str(SELECT_TARGETS) + ("\nFOR UPDATE" if args.commit else "")
+        )
+        targets = session.execute(targets_query).fetchall()
         if not targets:
             print("沒有需要補算的部位（source='ai' 且 shares IS NULL）。")
             return
 
         cash = capital
         total = 0.0
+        committed_ids = []
         print(f"資金 {capital:,.0f}　槽位上限 nav/max_open = {1 / max_open:.0%}"
               f"　風險 {STRATEGY['risk_per_trade']:.0%} / 停損 {STRATEGY['stop_loss']:.0%}")
         print(f"{'股號':>6} {'進場日':>12} {'進場價':>11} {'推算股數':>9} "
@@ -119,6 +138,23 @@ def main() -> None:
                      WHERE id = :i AND shares IS NULL
                 """), {"s": int(shares), "c": round(cost, 2),
                        "acct": account_id, "i": pid})
+                committed_ids.append(int(pid))
+
+        # 股數、成本、現金與稽核流水必須在同一個 DB transaction 裡完成。
+        # 舊版只更新 positions，沒有扣 paper_accounts.cash，讓 UI 把同一筆本金
+        # 同時計為現金與持股。任何一步失敗都由 get_session() 整批回滾。
+        if args.commit and total > 0:
+            corrected_cash = float(account_cash) - total
+            if corrected_cash < -0.01:
+                raise RuntimeError(
+                    f"補算成本 {total:,.2f} 大於帳戶現金 {account_cash:,.2f}；拒絕寫入")
+            corrected_cash = max(0.0, corrected_cash)
+            note = (f"{RECONSTRUCTED_CASH_MARKER}; backfill positions="
+                    + ",".join(str(pid) for pid in committed_ids))
+            record_cash(session, account_id, None, tw_today(), "adjustment",
+                        -total, corrected_cash, note)
+            corrected_nav = marked_nav(session, corrected_cash, account_id)
+            update_account(session, account_id, corrected_cash, corrected_nav)
 
         print("-" * 74)
         print(f"{'合計':>6} {'':>12} {'':>11} {'':>9} {total:>10,.0f} "
@@ -126,7 +162,7 @@ def main() -> None:
         print()
         if args.commit:
             print(f"[OK] 已寫入 {len(targets)} 列，shares_source='reconstructed'"
-                  f"，paper_account_id={account_id}")
+                  f"，paper_account_id={account_id}；帳戶現金已同步扣除 {total:,.0f}")
         else:
             print("[dry-run] ：未寫入任何資料。確認無誤後加 --commit。")
 
