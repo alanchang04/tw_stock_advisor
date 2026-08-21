@@ -30,6 +30,21 @@ def test_always_marks_reconstructed():
     assert "shares_source = 'reconstructed'" in CODE
 
 
+def test_commit_deducts_reconstructed_cost_from_account_cash():
+    """補股數與成本時，必須在同一交易同步扣現金，不能製造雙份本金。"""
+    assert "record_cash(" in CODE
+    assert "update_account(" in CODE
+    assert "RECONSTRUCTED_CASH_MARKER" in CODE
+    assert "corrected_cash = float(account_cash) - total" in CODE
+
+
+def test_commit_locks_the_named_swing_account():
+    assert "strategy_key=:key FOR UPDATE" in CODE
+    assert '("\\nFOR UPDATE" if args.commit else "")' in CODE
+    assert "SWING_ACCOUNT_KEY" in CODE
+    assert "ORDER BY id LIMIT 1" not in CODE
+
+
 def test_update_is_idempotent():
     """重跑不得覆蓋已補過的列。"""
     update = CODE[CODE.index("UPDATE positions"):]
